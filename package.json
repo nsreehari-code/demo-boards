@@ -1,0 +1,21 @@
+{
+  "name": "demo-boards",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "setup": "npm run copy-example-board",
+    "start": "npm run start-server",
+    "copy-example-board": "node scripts/copy-example-board.cjs",
+    "start-server": "node scripts/start-server.cjs default-board"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "http-server": "^14.1.1",
+    "yaml-flow": "^5.1.0"
+  }
+}
