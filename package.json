@@ -9,13 +9,16 @@
     "setup": "npm run copy-example-board",
     "start": "npm run start-server",
     "copy-example-board": "node scripts/copy-example-board.cjs",
-    "start-server": "node scripts/start-server.cjs default-board"
+    "start-server": "node scripts/start-server.cjs default-board",
+    "reset": "node scripts/start-server.cjs default-board --reset",
+    "clean": "rm -rf default-board && echo \"cleaned default-board\"",
+    "stop": "node -e \"const {execSync}=require('child_process');['7799','8000'].forEach(p=>{try{execSync('npx kill-port '+p,{stdio:'ignore'})}catch{}});console.log('stopped ports 7799 and 8000')\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "http-server": "^14.1.1",
-    "yaml-flow": "^5.1.0"
+    "yaml-flow": "^5.2.2"
   }
 }

@@ -37,7 +37,9 @@ console.log(`[start-server] board dir: ${boardDir}`);
 console.log('[start-server] backend:  http://127.0.0.1:7799');
 console.log('[start-server] frontend: http://127.0.0.1:8000/demo-shell-with-server.html');
 
-const backend = spawn(process.execPath, [demoServerPath], {
+const resetFlag = process.argv.includes('--reset');
+const backendArgs = resetFlag ? [demoServerPath, '--reset'] : [demoServerPath];
+const backend = spawn(process.execPath, backendArgs, {
   cwd: boardDir,
   env: sharedEnv,
   stdio: 'inherit',
