@@ -161,32 +161,6 @@ const COPILOT_PROMPT_CONTEXT = {
   ].join('\n'),
 };
 
-// ---------------------------------------------------------------------------
-// az rest helper — call Microsoft Graph API via Azure CLI (no app registration).
-// Mirrors zoltbot/runtime/az_graph_client.py  _az_rest() pattern.
-// ---------------------------------------------------------------------------
-function azRest(method, url, body) {
-  const az = process.platform === 'win32' ? 'az.cmd' : 'az';
-  const args = ['rest', '--method', method, '--url', url];
-
-  let tmpBody;
-  try {
-    if (body) {
-      tmpBody = path.join(os.tmpdir(), `az-body-${Date.now()}.json`);
-      fs.writeFileSync(tmpBody, JSON.stringify(body));
-      args.push('--body', `@${tmpBody}`);
-    }
-    const raw = execFileSync(az, args, {
-      encoding: 'utf-8',
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 60_000,
-    });
-    return raw.trim() ? JSON.parse(raw) : {};
-  } finally {
-    if (tmpBody) { try { fs.unlinkSync(tmpBody); } catch {} }
-  }
-}
-
 /**
  * Fetch a URL using the system curl binary (synchronous, no Node event-loop handles).
  * Throws if curl exits non-zero (e.g. HTTP 4xx/5xx with -f, or network error).
@@ -481,116 +455,68 @@ function runSourceFetchSubcommand(argv) {
     }
   } else if (sourceDef.teams) {
     // ---------------------------------------------------------------------------
-    // teams — Microsoft Graph API for Teams chats/channels via `az rest`.
+    // teams — Microsoft Graph API via Zoltbook Python CLI.
     // Uses the current `az login` session (no app registration needed).
+    // Shells out to: python scripts/zoltbook/cli.py <action> [flags]
     //
     // Supported actions:
     //   list-teams          — joined teams
     //   list-channels       — channels in a team
-    //   read-channel        — recent messages from a channel
-    //   post-message        — post to a channel
+    //   read-channel        — enriched messages from a channel
+    //   get-threads         — threads with AI detection + follow-up status
+    //   post-message        — post to a channel (with optional agent formatting)
     //   reply-to-message    — reply to a thread
-    //   search-messages     — search channel messages
+    //   search              — search messages (cache or Graph API)
+    //   set-reaction        — react to a message
+    //   remove-reaction     — remove a reaction
     //
     // {{key}} interpolation applied from _projections and optional args.
-    // Cacheable actions (read-channel, list-teams, list-channels, search-messages)
-    // honour cacheTimeout (seconds, default 300).
     // ---------------------------------------------------------------------------
     const cfg = typeof sourceDef.teams === 'object' ? sourceDef.teams : {};
     const action = cfg.action;
     if (!action) fail('teams: action is required', errFile);
 
     const ctx = { ...(sourceDef._projections || {}), ...(cfg.args || {}) };
-    const teamId    = interpolatePrompt(cfg.team_id    || '', ctx);
-    const channelId = interpolatePrompt(cfg.channel_id || '', ctx);
-    const cacheTimeoutSec = cfg.cacheTimeout != null ? Number(cfg.cacheTimeout) : 300;
+    const teamId      = interpolatePrompt(cfg.team_id      || '', ctx);
+    const channelId   = interpolatePrompt(cfg.channel_id   || '', ctx);
+    const teamName    = cfg.team_name    ? interpolatePrompt(cfg.team_name, ctx)    : '';
+    const channelName = cfg.channel_name ? interpolatePrompt(cfg.channel_name, ctx) : '';
 
-    const BASE = 'https://graph.microsoft.com';
+    // Build CLI args
+    const cliArgs = [action];
+    if (teamId)      { cliArgs.push('--team-id',      teamId); }
+    if (channelId)   { cliArgs.push('--channel-id',   channelId); }
+    if (teamName)    { cliArgs.push('--team-name',    teamName); }
+    if (channelName) { cliArgs.push('--channel-name', channelName); }
 
-    if (action === 'list-teams') {
-      const k = cacheKey('teams:list-teams');
-      const cached = readCache(k, cacheTimeoutSec * 1000);
-      if (cached) { resultValue = cached; }
-      else {
-        resultValue = azRest('GET', `${BASE}/v1.0/me/joinedTeams`).value || [];
-        writeCache(k, resultValue);
-      }
+    // Action-specific flags
+    if (cfg.top)            cliArgs.push('--top', String(cfg.top));
+    if (cfg.content)        cliArgs.push('--content',      interpolatePrompt(cfg.content, ctx));
+    if (cfg.content_type)   cliArgs.push('--content-type', cfg.content_type);
+    if (cfg.subject)        cliArgs.push('--subject',      interpolatePrompt(cfg.subject, ctx));
+    if (cfg.message_id)     cliArgs.push('--message-id',   interpolatePrompt(cfg.message_id, ctx));
+    if (cfg.query)          cliArgs.push('--query',        interpolatePrompt(cfg.query, ctx));
+    if (cfg.agent_name)     cliArgs.push('--agent-name',   interpolatePrompt(cfg.agent_name, ctx));
+    if (cfg.agent_icon)     cliArgs.push('--agent-icon',   cfg.agent_icon);
+    if (cfg.reaction_type)  cliArgs.push('--reaction-type', cfg.reaction_type);
+    if (cfg.unanswered_only) cliArgs.push('--unanswered-only');
+    if (cfg.refresh)        cliArgs.push('--refresh');
 
-    } else if (action === 'list-channels') {
-      if (!teamId) fail('teams/list-channels: team_id is required', errFile);
-      const k = cacheKey(`teams:list-channels:${teamId}`);
-      const cached = readCache(k, cacheTimeoutSec * 1000);
-      if (cached) { resultValue = cached; }
-      else {
-        resultValue = azRest('GET', `${BASE}/v1.0/teams/${teamId}/channels`).value || [];
-        writeCache(k, resultValue);
-      }
+    // Resolve python and CLI path (scripts/ lives alongside this executor, always use __dirname)
+    const python = process.platform === 'win32' ? 'python' : 'python3';
+    const cliPath = path.join(__dirname, 'scripts', 'zoltbook', 'cli.py');
 
-    } else if (action === 'read-channel') {
-      if (!teamId || !channelId) fail('teams/read-channel: team_id and channel_id are required', errFile);
-      const top   = cfg.top || 20;
-      const since = cfg.since ? interpolatePrompt(cfg.since, ctx) : null;
-      let url = `${BASE}/beta/teams/${teamId}/channels/${channelId}/messages?$top=${top}`;
-      if (since) {
-        const filter = encodeURIComponent(`createdDateTime gt ${since}`);
-        url += `&$filter=${filter}`;
-      }
-      const k = cacheKey(`teams:read-channel:${teamId}:${channelId}:${top}:${since || ''}`);
-      const cached = readCache(k, cacheTimeoutSec * 1000);
-      if (cached) { resultValue = cached; }
-      else {
-        resultValue = azRest('GET', url).value || [];
-        writeCache(k, resultValue);
-      }
-
-    } else if (action === 'post-message') {
-      if (!teamId || !channelId) fail('teams/post-message: team_id and channel_id are required', errFile);
-      const content     = interpolatePrompt(cfg.content || '', ctx);
-      const contentType = cfg.content_type || 'html';
-      const subject     = cfg.subject ? interpolatePrompt(cfg.subject, ctx) : undefined;
-      if (!content) fail('teams/post-message: content is required', errFile);
-      const body = { body: { contentType, content } };
-      if (subject) body.subject = subject;
-      resultValue = azRest('POST', `${BASE}/beta/teams/${teamId}/channels/${channelId}/messages`, body);
-
-    } else if (action === 'reply-to-message') {
-      if (!teamId || !channelId) fail('teams/reply-to-message: team_id and channel_id are required', errFile);
-      const messageId   = interpolatePrompt(cfg.message_id || '', ctx);
-      if (!messageId) fail('teams/reply-to-message: message_id is required', errFile);
-      const content     = interpolatePrompt(cfg.content || '', ctx);
-      const contentType = cfg.content_type || 'html';
-      if (!content) fail('teams/reply-to-message: content is required', errFile);
-      const body = { body: { contentType, content } };
-      resultValue = azRest('POST', `${BASE}/beta/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies`, body);
-
-    } else if (action === 'search-messages') {
-      const query = interpolatePrompt(cfg.query || '', ctx);
-      if (!query) fail('teams/search-messages: query is required', errFile);
-      const top = cfg.top || 25;
-      const k = cacheKey(`teams:search:${query}:${teamId}:${channelId}:${top}`);
-      const cached = readCache(k, cacheTimeoutSec * 1000);
-      if (cached) { resultValue = cached; }
-      else {
-        const searchBody = {
-          requests: [{
-            entityTypes: ['chatMessage'],
-            query: { queryString: query },
-            size: top,
-          }],
-        };
-        const raw = azRest('POST', `${BASE}/v1.0/search/query`, searchBody);
-        const hits = [];
-        for (const resp of (raw.value || [])) {
-          for (const container of (resp.hitsContainers || [])) {
-            hits.push(...(container.hits || []));
-          }
-        }
-        resultValue = hits;
-        writeCache(k, resultValue);
-      }
-
-    } else {
-      fail(`teams: unknown action "${action}". Supported: list-teams, list-channels, read-channel, post-message, reply-to-message, search-messages`, errFile);
+    try {
+      const raw = execFileSync(python, [cliPath, ...cliArgs], {
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 120_000,
+        cwd: __dirname,
+      });
+      resultValue = raw.trim() ? JSON.parse(raw) : [];
+    } catch (err) {
+      const msg = err.stderr ? err.stderr.trim() : (err.message || String(err));
+      fail(`teams/${action}: ${msg}`, errFile);
     }
 
   } else if (sourceDef.mock) {
@@ -605,6 +531,7 @@ function runSourceFetchSubcommand(argv) {
 
   // Write result to --out as JSON payload, same contract as current mock mode.
   try {
+    if (resultValue === undefined) resultValue = null;
     fs.writeFileSync(outFile, JSON.stringify(resultValue, null, 2));
   } catch (err) {
     fail(`Cannot write output file: ${String(err && err.message || err)}`, errFile);
@@ -799,28 +726,33 @@ const CAPABILITIES = {
       urlListNote: 'Declare `"projections": { "url_list": "<JSONata producing string[]>" }` on the source def. Example: `requires.holdings.ticker.(\'https://api.example.com/\' & $ & \'?q=1\')`',
     },
     teams: {
-      description: 'Microsoft Graph API for Teams chats/channels via `az rest` (Azure CLI). Supports reading channel messages, posting, replying, listing teams/channels, and searching messages.',
+      description: 'Microsoft Graph API for Teams via Zoltbook Python CLI. Provides enriched messages with AI detection, thread views, reactions, and agent-formatted posting. Shells out to scripts/zoltbook/cli.py.',
       inputSchema: {
         teams: {
           type: 'object', required: true,
           properties: {
-            action:       { type: 'string', required: true,  description: 'One of: list-teams, list-channels, read-channel, post-message, reply-to-message, search-messages.' },
-            team_id:      { type: 'string', required: false, description: 'Team ID (supports {{key}} interpolation). Required for all actions except list-teams and search-messages.' },
-            channel_id:   { type: 'string', required: false, description: 'Channel ID (supports {{key}} interpolation). Required for read-channel, post-message, reply-to-message.' },
-            top:          { type: 'number', required: false, description: 'Max messages to return (default: 20 for read-channel, 25 for search).' },
-            since:        { type: 'string', required: false, description: 'ISO 8601 timestamp for read-channel — only messages after this time.' },
-            content:      { type: 'string', required: false, description: 'Message content for post-message/reply-to-message (supports {{key}} interpolation).' },
-            content_type: { type: 'string', required: false, description: '"html" (default) or "text".' },
-            subject:      { type: 'string', required: false, description: 'Thread subject for post-message.' },
-            message_id:   { type: 'string', required: false, description: 'Parent message ID for reply-to-message.' },
-            query:        { type: 'string', required: false, description: 'Search query for search-messages.' },
-            args:         { type: 'object', required: false, description: 'Extra interpolation args.' },
-            cacheTimeout: { type: 'number', required: false, description: 'Cache TTL in seconds for read actions (default: 300).' },
+            action:          { type: 'string', required: true,  description: 'One of: list-teams, list-channels, read-channel, get-threads, post-message, reply-to-message, search, set-reaction, remove-reaction.' },
+            team_id:         { type: 'string', required: false, description: 'Team ID (supports {{key}} interpolation).' },
+            channel_id:      { type: 'string', required: false, description: 'Channel ID (supports {{key}} interpolation).' },
+            team_name:       { type: 'string', required: false, description: 'Team display name (used for cache directories).' },
+            channel_name:    { type: 'string', required: false, description: 'Channel display name (used for cache directories).' },
+            top:             { type: 'number', required: false, description: 'Max messages/threads to return (default: 20).' },
+            content:         { type: 'string', required: false, description: 'Message content for post/reply (supports {{key}} interpolation).' },
+            content_type:    { type: 'string', required: false, description: '"html" (default) or "text".' },
+            subject:         { type: 'string', required: false, description: 'Thread subject for post-message.' },
+            message_id:      { type: 'string', required: false, description: 'Message ID for reply-to-message, set-reaction, remove-reaction.' },
+            query:           { type: 'string', required: false, description: 'Search query for search action.' },
+            agent_name:      { type: 'string', required: false, description: 'Agent name — if set, post/reply use Zoltbook agent formatting with AI markers.' },
+            agent_icon:      { type: 'string', required: false, description: 'Agent icon emoji (default: 🤖).' },
+            reaction_type:   { type: 'string', required: false, description: 'Reaction type: like, heart, laugh, surprised, sad, angry.' },
+            unanswered_only: { type: 'boolean', required: false, description: 'For get-threads: only threads without AI replies.' },
+            refresh:         { type: 'boolean', required: false, description: 'For search: use Graph API instead of local cache.' },
+            args:            { type: 'object', required: false, description: 'Extra interpolation args.' },
           },
         },
       },
-      outputShape: 'Array of message/team/channel objects from Graph API, or a single message object for post/reply.',
-      note: 'Requires Azure CLI logged in (`az login`). Uses `az rest` — no app registration needed.',
+      outputShape: 'Enriched message/thread objects from Zoltbook (with sender, sender_type, is_ai_message, content_text, attachments, urls, etc.).',
+      note: 'Requires Azure CLI logged in (`az login`) and Python 3. Uses Zoltbook (scripts/zoltbook/) for enrichment, caching, AI detection.',
     },
   },
   extraSchema: {

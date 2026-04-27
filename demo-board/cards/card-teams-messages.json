@@ -1,0 +1,79 @@
+{
+  "id": "card-teams-messages",
+  "meta": {
+    "title": "Teams Channel Messages",
+    "tags": ["teams", "graph"],
+    "desc": "Reads recent messages from a Teams channel via Zoltbook (enriched with AI detection)."
+  },
+  "requires": [],
+  "source_defs": [
+    {
+      "bindTo": "messages",
+      "outputFile": "card-teams-messages.json",
+      "projections": {
+        "team_id": "card_data.team_id",
+        "channel_id": "card_data.channel_id"
+      },
+      "teams": {
+        "action": "read-channel",
+        "team_id": "{{team_id}}",
+        "channel_id": "{{channel_id}}",
+        "top": 20
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "rows",
+      "expr": "fetched_sources.messages ? fetched_sources.messages.{ \"from\": sender, \"type\": sender_type, \"date\": $substringBefore(created_at, 'T'), \"time\": $substring($substringAfter(created_at, 'T'), 0, 5), \"message\": $length(content_text) > 120 ? $substring(content_text, 0, 120) & '...' : content_text } : []"
+    },
+    {
+      "bindTo": "status",
+      "expr": "$count(fetched_sources.messages) > 0 ? $string($count(fetched_sources.messages)) & ' messages' : 'No messages found in this channel'"
+    }
+  ],
+  "provides": [
+    { "bindTo": "teams-messages", "ref": "fetched_sources.messages" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "form",
+        "label": "Channel",
+        "data": {
+          "writeTo": "card_data",
+          "fields": {
+            "type": "object",
+            "properties": {
+              "team_id":    { "type": "string", "title": "Team ID" },
+              "channel_id": { "type": "string", "title": "Channel ID" }
+            },
+            "required": ["team_id", "channel_id"]
+          }
+        }
+      },
+      {
+        "kind": "text",
+        "data": { "bind": "computed_values.status" }
+      },
+      {
+        "kind": "table",
+        "label": "Recent Messages",
+        "data": {
+          "bind": "computed_values.rows",
+          "columns": ["from", "type", "date", "time", "message"],
+          "maxRows": 5
+        }
+      }
+    ],
+    "layout": {
+      "board": { "col": 6, "order": 11 },
+      "canvas": { "x": 500, "y": 450, "w": 560, "h": 380 }
+    },
+    "features": { "refresh": true }
+  },
+  "card_data": {
+    "team_id": "c1d30cbf-82fc-41c3-b233-916282bdfcc7",
+    "channel_id": "19:IX5rrGuiGUPV-2SR5IgNGUi7FX4k_tFurGetzZR6FOU1@thread.tacv2"
+  }
+}
