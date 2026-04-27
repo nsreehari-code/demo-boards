@@ -1,0 +1,11 @@
+{
+  "port": 7799,
+  "setupDir": "./.demo-setup",
+  "cardsDir": "./cards",
+  "taskExecutorPath": "./demo-task-executor.js",
+  "chatHandlerPath": "./demo-chat-handler.js",
+  "chatSessionsDir": "",
+  "gandalfCardsDir": "./gandalf-cards",
+  "gandalfTaskExecutorPath": "./demo-task-executor.js",
+  "gandalfChatHandlerPath": "./demo-chat-handler.js"
+}
