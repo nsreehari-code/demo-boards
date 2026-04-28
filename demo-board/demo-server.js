@@ -49,24 +49,13 @@ function resolveFromConfig(configValue) {
 
 const serverConfig = loadServerConfig();
 const configuredCliJs = resolveFromConfig(serverConfig.boardLiveCardsCliJs) || _pkgCliJs;
-const configuredSetupDir = resolveFromConfig(serverConfig.setupDir);
-const configuredCardsDir = resolveFromConfig(serverConfig.cardsDir);
-const configuredTaskExecutorPath = resolveFromConfig(serverConfig.taskExecutorPath);
-const configuredStepMachineCliPath = resolveFromConfig(serverConfig.stepMachineCliPath) || _pkgStepMachineCli;
-const configuredChatHandlerPath = resolveFromConfig(serverConfig.chatHandlerPath);
-const configuredGandalfCardsDir = resolveFromConfig(serverConfig.gandalfCardsDir);
-const configuredGandalfTaskExecutorPath = resolveFromConfig(serverConfig.gandalfTaskExecutorPath);
-const configuredGandalfChatHandlerPath = resolveFromConfig(serverConfig.gandalfChatHandlerPath);
 
 if (!process.env.BOARD_LIVE_CARDS_CLI_JS && configuredCliJs) {
   process.env.BOARD_LIVE_CARDS_CLI_JS = configuredCliJs;
 }
-if (!process.env.DEMO_STEP_MACHINE_CLI_PATH && configuredStepMachineCliPath) {
-  process.env.DEMO_STEP_MACHINE_CLI_PATH = configuredStepMachineCliPath;
-}
-if (!process.env.DEMO_CHAT_HANDLER_PATH && configuredChatHandlerPath) {
-  process.env.DEMO_CHAT_HANDLER_PATH = configuredChatHandlerPath;
-}
+
+const sharedCliJs = process.env.BOARD_LIVE_CARDS_CLI_JS || configuredCliJs;
+const sharedStepMachineCli = process.env.DEMO_STEP_MACHINE_CLI_PATH || _pkgStepMachineCli;
 
 const PORT = Number(process.env.DEMO_SERVER_PORT || serverConfig.port || 7799);
 
@@ -76,21 +65,46 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS',
 };
 
-const runtime = createMultiBoardServerRuntime({
-  apiBasePath: '/api/boards',
-  serverUrl: `http://127.0.0.1:${PORT}`,
-  setupDir: process.env.DEMO_SETUP_DIR || configuredSetupDir || null,
-  defaultCardsDir: process.env.DEMO_CARDS_DIR || configuredCardsDir || null,
-  defaultTaskExecutorPath: process.env.DEMO_TASK_EXECUTOR_PATH || configuredTaskExecutorPath || null,
-  defaultStepMachineCliPath: process.env.DEMO_STEP_MACHINE_CLI_PATH || configuredStepMachineCliPath,
-  defaultChatHandlerPath: process.env.DEMO_CHAT_HANDLER_PATH || configuredChatHandlerPath || null,
-  defaultGandalfCardsDir: process.env.DEMO_GANDALF_CARDS_DIR || configuredGandalfCardsDir || null,
-  defaultGandalfTaskExecutorPath: process.env.DEMO_GANDALF_TASK_EXECUTOR_PATH || configuredGandalfTaskExecutorPath || null,
-  defaultGandalfChatHandlerPath: process.env.DEMO_GANDALF_CHAT_HANDLER_PATH || configuredGandalfChatHandlerPath || null,
-  boardLiveCardsCliJs: process.env.BOARD_LIVE_CARDS_CLI_JS || configuredCliJs,
-});
+// Build per-board runtimes from config
+const boardEntries = serverConfig.boards ? Object.entries(serverConfig.boards) : [];
+const boardRuntimes = boardEntries.map(([key, cfg]) => {
+  const setupDir = resolveFromConfig(cfg.setupDir);
+  const cardsDir = resolveFromConfig(cfg.cardsDir);
+  const taskExec = resolveFromConfig(cfg.taskExecutorPath);
+  const chatHandler = resolveFromConfig(cfg.chatHandlerPath);
+  const stepMachineCli = resolveFromConfig(cfg.stepMachineCliPath) || sharedStepMachineCli;
+  const gandalfCards = resolveFromConfig(cfg.gandalfCardsDir);
+  const gandalfTaskExec = resolveFromConfig(cfg.gandalfTaskExecutorPath);
+  const gandalfChatHandler = resolveFromConfig(cfg.gandalfChatHandlerPath);
 
-const dispatch = createRuntimeRequestDispatcher(runtime);
+  if (chatHandler && !process.env.DEMO_CHAT_HANDLER_PATH) {
+    process.env.DEMO_CHAT_HANDLER_PATH = chatHandler;
+  }
+  if (stepMachineCli && !process.env.DEMO_STEP_MACHINE_CLI_PATH) {
+    process.env.DEMO_STEP_MACHINE_CLI_PATH = stepMachineCli;
+  }
+
+  const runtime = createMultiBoardServerRuntime({
+    apiBasePath: `/api/${key}`,
+    serverUrl: `http://127.0.0.1:${PORT}`,
+    setupDir: setupDir || null,
+    defaultCardsDir: cardsDir || null,
+    defaultTaskExecutorPath: taskExec || null,
+    defaultStepMachineCliPath: stepMachineCli,
+    defaultChatHandlerPath: chatHandler || null,
+    defaultGandalfCardsDir: gandalfCards || null,
+    defaultGandalfTaskExecutorPath: gandalfTaskExec || null,
+    defaultGandalfChatHandlerPath: gandalfChatHandler || null,
+    boardLiveCardsCliJs: sharedCliJs,
+  });
+
+  return {
+    key,
+    label: cfg.label || key,
+    runtime,
+    dispatch: createRuntimeRequestDispatcher(runtime),
+  };
+});
 
 function jsonReply(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -171,30 +185,41 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // GET /api/config — available boards for the UI selector
+  if (method === 'GET' && pathname === '/api/config') {
+    const boards = boardRuntimes.map(({ key, label }) => ({ key, label }));
+    return jsonReply(res, 200, boards);
+  }
+
   // Route: POST /api/workiq/ask — proxy to WorkIQ (M365 Copilot) from server TTY
   if (method === 'POST' && pathname === '/api/workiq/ask') {
     void handleWorkiqAsk(req, res);
     return;
   }
 
-  // All /api/boards routes are handled by the reusable runtime
-  void dispatch(req, res);
+  // Route to matching board runtime by URL prefix
+  for (const { key, dispatch } of boardRuntimes) {
+    if (pathname.startsWith(`/api/${key}/`)) {
+      void dispatch(req, res);
+      return;
+    }
+  }
+
+  jsonReply(res, 404, { error: 'Not found' });
 });
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[demo-server] listening on http://127.0.0.1:${PORT}`);
-  console.log(`[demo-server] setup dir: ${runtime.setupDir}`);
-  console.log(`[demo-server] boards config: ${path.join(runtime.setupDir, 'boards-config.json')}`);
+  for (const { key, label, runtime } of boardRuntimes) {
+    console.log(`[demo-server] board "${key}" (${label}): ${runtime.setupDir}`);
+  }
   console.log('[demo-server] endpoints:');
-  console.log(`  GET  ${runtime.apiBasePath}                          <- list boards`);
-  console.log(`  POST ${runtime.apiBasePath}  {id, label?}            <- register board`);
-  console.log(`  GET  ${runtime.apiBasePath}/:boardId/bootstrap`);
-  console.log(`  GET  ${runtime.apiBasePath}/:boardId/sse`);
-  console.log(`  GET  ${runtime.apiBasePath}/:boardId/board-status`);
-  console.log(`  PATCH ${runtime.apiBasePath}/:boardId/cards/:id`);
-  console.log(`  POST ${runtime.apiBasePath}/:boardId/cards/:id/actions`);
-  console.log(`  POST ${runtime.apiBasePath}/:boardId/cards/:id/files`);
-  console.log(`  GET  ${runtime.apiBasePath}/:boardId/cards/:id/files/:idx`);
-  console.log(`  GET  ${runtime.apiBasePath}/:boardId/cards/:id/chats`);
-  console.log(`  POST /api/workiq/ask  {query}              <- WorkIQ (M365 Copilot) proxy`);
+  console.log('  GET  /api/config                                <- available boards');
+  for (const { key } of boardRuntimes) {
+    console.log(`  GET  /api/${key}/:boardId/bootstrap`);
+    console.log(`  GET  /api/${key}/:boardId/sse`);
+    console.log(`  PATCH /api/${key}/:boardId/cards/:id`);
+    console.log(`  POST /api/${key}/:boardId/cards/:id/actions`);
+  }
+  console.log('  POST /api/workiq/ask  {query}                    <- WorkIQ proxy');
 });

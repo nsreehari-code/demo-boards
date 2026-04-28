@@ -1,11 +1,25 @@
 {
   "port": 7799,
-  "setupDir": "./live",
-  "cardsDir": "./live/cards",
-  "taskExecutorPath": "./demo-task-executor.js",
-  "chatHandlerPath": "./demo-chat-handler.js",
-  "chatSessionsDir": "",
-  "gandalfCardsDir": "./live/gandalf-cards",
-  "gandalfTaskExecutorPath": "./demo-task-executor.js",
-  "gandalfChatHandlerPath": "./demo-chat-handler.js"
+  "boards": {
+    "live": {
+      "label": "Live",
+      "setupDir": "./live",
+      "cardsDir": "./live/cards",
+      "taskExecutorPath": "./demo-task-executor.js",
+      "chatHandlerPath": "./demo-chat-handler.js",
+      "gandalfCardsDir": "./live/gandalf-cards",
+      "gandalfTaskExecutorPath": "./demo-task-executor.js",
+      "gandalfChatHandlerPath": "./demo-chat-handler.js"
+    },
+    "cpm": {
+      "label": "CPM",
+      "setupDir": "./cpm",
+      "cardsDir": "./cpm/cards",
+      "taskExecutorPath": "./demo-task-executor.js",
+      "chatHandlerPath": "./demo-chat-handler.js",
+      "gandalfCardsDir": "./cpm/gandalf-cards",
+      "gandalfTaskExecutorPath": "./demo-task-executor.js",
+      "gandalfChatHandlerPath": "./demo-chat-handler.js"
+    }
+  }
 }

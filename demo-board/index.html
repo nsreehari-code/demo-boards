@@ -41,6 +41,7 @@
       <h1 class="h5 mb-0" id="boardTitle">Live Boards</h1>
     </div>
     <div class="d-flex align-items-center gap-2">
+      <select id="boardKeySelect" class="form-select form-select-sm" style="width: auto;"></select>
       <button class="btn btn-sm btn-outline-primary" id="modeBoard">Board</button>
       <button class="btn btn-sm btn-outline-primary" id="modeCanvas">Canvas</button>
       <div class="form-check ms-2">
@@ -71,9 +72,12 @@
       let activeBoardId = 'default';
       let runtimeClient = null;
 
+      const _params = new URLSearchParams(window.location.search);
+      let boardKey = _params.get('l') || '';
+
       function boardPaths(boardId) {
         const b = encodeURIComponent(boardId || activeBoardId || 'default');
-        const base = `/api/boards/${b}`;
+        const base = `/api/${encodeURIComponent(boardKey)}/${b}`;
         return {
           initBoard: `${base}/init-board`,
           bootstrapCards: `${base}/bootstrap-cards`,
@@ -140,6 +144,36 @@
         canvas: { height: 'calc(100vh - 56px)', overflow: 'auto' },
       });
 
+      // Populate board selector from server config
+      async function loadConfig() {
+        try {
+          var res = await fetchServer('/api/config');
+          var boards = await res.json();
+          if (!Array.isArray(boards) || !boards.length) return;
+          // Default to first board if ?l= not set
+          if (!boardKey) {
+            boardKey = boards[0].key;
+          }
+          var select = document.getElementById('boardKeySelect');
+          boards.forEach(function (b) {
+            var opt = document.createElement('option');
+            opt.value = b.key;
+            opt.textContent = b.label || b.key;
+            if (b.key === boardKey) opt.selected = true;
+            select.appendChild(opt);
+          });
+          select.addEventListener('change', function () {
+            var url = new URL(window.location);
+            url.searchParams.set('l', this.value);
+            window.location.href = url.toString();
+          });
+          var match = boards.find(function (b) { return b.key === boardKey; });
+          if (match) {
+            document.getElementById('boardTitle').textContent = match.label || match.key;
+          }
+        } catch (e) { /* selector stays empty if config unavailable */ }
+      }
+
       function resolveTaskExecutorPathParam() {
         const params = new URLSearchParams(window.location.search || '');
         const fromQuery = params.get('taskExecutorPath');
@@ -151,9 +185,6 @@
 
       async function bootstrap(boardId) {
         const bid = boardId || activeBoardId || 'default';
-
-        // Board title from registry label or fallback
-        document.getElementById('boardTitle').textContent = 'Live Boards';
 
         await runtimeClient.bootstrapBoard({
           boardId: bid,
@@ -180,7 +211,13 @@
         runtimeClient.setDevMode(this.checked);
       });
 
-      bootstrap(activeBoardId).catch(function (err) {
+      async function start() {
+        await loadConfig();
+        if (!boardKey) boardKey = 'live'; // ultimate fallback
+        await bootstrap(activeBoardId);
+      }
+
+      start().catch(function (err) {
         console.error(err);
         document.getElementById('boardRoot').innerHTML =
           `<div class="alert alert-danger">Failed to start server runtime demo: ${String(err && err.message || err)}</div>`;
