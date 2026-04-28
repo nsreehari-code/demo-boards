@@ -1,0 +1,6 @@
+*
+!.gitignore
+!cards/
+!cards/**
+!gandalf-cards/
+!gandalf-cards/**
