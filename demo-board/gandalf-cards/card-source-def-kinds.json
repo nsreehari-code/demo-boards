@@ -3,7 +3,8 @@
   "meta": {
     "title": "Available Source-Def Kinds",
     "tags": ["gandalf", "reference"],
-    "desc": "Reference card listing all source-def kinds supported by the task executor, with required fields and usage notes."
+    "desc": "Reference card listing all source-def kinds supported by the task executor, with required fields and usage notes.",
+    "_gandalfCard": true
   },
   "view": {
     "elements": [

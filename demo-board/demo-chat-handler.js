@@ -141,6 +141,28 @@ function runWrapper(prompt, sessionDir, workingDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Upsert changed cards after chat handler completes
+// ---------------------------------------------------------------------------
+function upsertCardsIfChanged() {
+  const cliJs = process.env.BOARD_LIVE_CARDS_CLI_JS;
+  if (!cliJs || !fs.existsSync(cliJs)) return;
+  const rg = boardRuntimeDirAbs;
+  const glob = path.join(cardsDirAbs, '*.json');
+  try {
+    const result = spawnSync(process.execPath, [cliJs, 'upsert-card', '--rg', rg, '--card-glob', glob], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30000,
+    });
+    if (result.status !== 0) {
+      const err = (result.stderr || '').toString().trim();
+      if (err) console.error('[demo-chat-handler] upsert-card: ' + err);
+    }
+  } catch (err) {
+    console.error('[demo-chat-handler] upsert-card failed: ' + (err?.message ?? err));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 const serialMatch    = String(lastChatFile).match(/^(\d+)/);
@@ -153,9 +175,10 @@ const sessionDir = path.join(os.tmpdir(), 'demo-chat-handler-sessions', boardId 
 const workingDir = chatDirAbs;
 const prompt     = buildPrompt(cardId, boardId, history, responseFileRel);
 
+console.log('[demo-chat-handler] cardId=' + cardId);
 try {
   runWrapper(prompt, sessionDir, workingDir);
-  console.log('[demo-chat-handler] cardId="' + cardId + '" copilot invoked, response expected at ' + responseFileRel);
+  upsertCardsIfChanged();
 } catch (err) {
   console.error('[demo-chat-handler] wrapper failed: ' + (err?.message ?? err));
 } finally {

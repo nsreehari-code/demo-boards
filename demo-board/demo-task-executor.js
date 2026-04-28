@@ -114,10 +114,7 @@ function doFetchApi(url, method, headers, cacheTimeoutSec, errFile) {
   const ttlMs = cacheTimeoutSec != null ? cacheTimeoutSec * 1000 : CACHE_TTL_MS;
   const k = cacheKey(`url:${method}:${url}`);
   const cached = readCache(k, ttlMs);
-  if (cached) {
-    console.warn(`[demo-task-executor] url: cache hit for ${url}`);
-    return cached;
-  }
+  if (cached) return cached;
   const data = curlFetchJson(url, method, headers);
   writeCache(k, data);
   return data;
