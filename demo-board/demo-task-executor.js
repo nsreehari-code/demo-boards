@@ -37,8 +37,10 @@
  *
  * Supported source kinds (based on custom fields in --in):
  *   - { mock: "key" }              → look up key in MOCK_DB (hardcoded below)
- *   - { copilot: { prompt_template, args? } }  → call Copilot CLI with interpolated prompt
- *   - { prompt_template: "..." }   → shorthand copilot call (top-level template)
+ *   - { copilot: { prompt_template, args?, result_shape? } }
+ *       → call Copilot CLI with interpolated prompt. Executor auto-sandboxes:
+ *         cwd = card runtime dir, --add-dir for cards/runtime/runtime-out,
+ *         -s --no-ask-user --allow-all-tools.
  *   - { workiq: { query_template, args? } }   → call WorkIQ (M365 Copilot) with interpolated query
  *   - { "url": { url, method?, headers?, args?, cacheTimeout? }, tickersFrom? }
  *       → single URL fetch via curl with {{key}} interpolation from _projections
@@ -183,8 +185,8 @@ function curlFetchJson(url, method, headers) {
 
 function resolveCopilotPrompt(sourceDef) {
   const cfg = sourceDef?.copilot && typeof sourceDef.copilot === 'object' ? sourceDef.copilot : {};
-  const template = cfg.prompt_template ?? sourceDef.prompt_template;
-  const args = cfg.args ?? cfg.prompt_args ?? sourceDef.prompt_args ?? sourceDef.args ?? {};
+  const template = cfg.prompt_template;
+  const args = cfg.args ?? {};
   
   // Merge _projections into template interpolation context.
   // _projections contains the named data projections declared in source_defs[].projections,
@@ -205,28 +207,29 @@ function resolveCopilotPrompt(sourceDef) {
  *
  * The wrapper handles:
  *   - Session management (--resume UUID for multi-turn continuity)
- *   - Noise/footer stripping (via copilot_wrapper_helper.ps1)
- *   - JSON mode extraction with optional result_shape key matching
- *   - Agentic retry: if the first response isn't valid JSON, the wrapper calls
- *     copilot again in the same session with a correction prompt, then re-extracts.
+ *   - Copilot sandbox: -s --no-ask-user --allow-all-tools --add-dir=...
+ *   - Noise/footer stripping, JSON extraction with optional result_shape key matching
+ *   - Agentic retry: if the first response isn't valid JSON, the wrapper retries
+ *     with a correction prompt in the same session, then falls back to shape skeleton.
  *
  * @param {string} prompt         - interpolated prompt string
  * @param {object} sourceDef      - source definition (may contain copilot.result_shape)
  * @param {string} wrapperOutFile - path the wrapper writes its JSON output to
  * @param {string} sessionDir     - persistent dir for session UUID (enables --resume)
- * @param {string} cwd            - working directory for copilot (boardSetupRoot)
+ * @param {string} cwd            - working directory for copilot (card runtime dir)
+ * @param {string[]} addDirs      - directories to expose via --add-dir
  * @returns {unknown} parsed JSON result value
  */
-function runCopilotViaWrapper(prompt, sourceDef, wrapperOutFile, sessionDir, cwd) {
-  const wrapperPath = path.join(__dirname, 'scripts', 'copilot_wrapper.bat');
+function runCopilotViaWrapper(prompt, sourceDef, wrapperOutFile, sessionDir, cwd, addDirs) {
+  const wrapperPath = path.join(__dirname, 'scripts', 'copilot', 'wrapper.py');
+  const python = process.platform === 'win32' ? 'python' : 'python3';
 
   const promptFile = wrapperOutFile + '.prompt.txt';
   fs.writeFileSync(promptFile, prompt, 'utf-8');
 
   // Optional result_shape_file: top-level keys the response JSON must contain.
-  // Sourced from sourceDef.copilot.result_shape or sourceDef.result_shape.
   let shapeFile = '';
-  const shape = sourceDef?.copilot?.result_shape ?? sourceDef?.result_shape;
+  const shape = sourceDef?.copilot?.result_shape;
   if (shape && typeof shape === 'object') {
     shapeFile = wrapperOutFile + '.shape.json';
     fs.writeFileSync(shapeFile, JSON.stringify(shape), 'utf-8');
@@ -234,22 +237,28 @@ function runCopilotViaWrapper(prompt, sourceDef, wrapperOutFile, sessionDir, cwd
 
   fs.mkdirSync(sessionDir, { recursive: true });
 
+  const pyArgs = [
+    wrapperPath,
+    '--output-file', wrapperOutFile,
+    '--session-dir', sessionDir,
+    '--cwd', cwd || process.cwd(),
+    '--prompt-file', promptFile,
+    '--result-type', 'json',
+    '--agent-name', sourceDef.bindTo || 'executor',
+  ];
+  for (const d of (addDirs || [])) {
+    pyArgs.push('--add-dir', d);
+  }
+  if (shapeFile) {
+    pyArgs.push('--result-shape-file', shapeFile);
+  }
+
   try {
-    execFileSync('cmd.exe', [
-      '/d', '/c',
-      wrapperPath,
-      wrapperOutFile,                    // OUTPUT_FILE
-      sessionDir,                        // SESSION_DIR
-      cwd || process.cwd(),             // WORKING_DIR
-      '@' + promptFile,                 // REQUEST_OR_FILE (@ prefix = file path)
-      'json',                           // RESULT_TYPE — wrapper extracts JSON + retries
-      sourceDef.bindTo || 'executor',   // AGENT_NAME (for log file naming)
-      '',                               // MODEL (empty = wrapper default)
-      shapeFile,                        // RESULT_SHAPE_FILE (empty = accept any JSON)
-    ], {
+    execFileSync(python, pyArgs, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 10 * 1024 * 1024,
+      timeout: 600_000,  // 10 min — copilot can be slow with retries
     });
   } finally {
     try { fs.unlinkSync(promptFile); } catch {}
@@ -364,68 +373,39 @@ function runSourceFetchSubcommand(argv) {
     }
     resultValue = results;
 
-  } else if (sourceDef.copilot || sourceDef.prompt_template) {
+  } else if (sourceDef.copilot) {
     const prompt = resolveCopilotPrompt(sourceDef);
     if (!prompt) {
-      fail('Source definition missing copilot.prompt_template (or prompt_template)', errFile);
+      fail('copilot.prompt_template is required', errFile);
     }
 
-    // Use boardSetupRoot (from --extra) as copilot working directory
-    const copilotCwd = extra.boardSetupRoot || undefined;
-
-    // On Windows, delegate entirely to copilot_wrapper.bat which handles:
-    //   - session management (--resume UUID for multi-turn continuity)
-    //   - noise/footer stripping, JSON extraction, agentic retry on bad shape
-    // On non-Windows, fall back to a basic direct invocation (no retry).
-    const wrapperPath = path.join(__dirname, 'scripts', 'copilot_wrapper.bat');
-    const useWrapper = process.platform === 'win32' && fs.existsSync(wrapperPath);
-
-    if (useWrapper) {
-      // Session dir is stable across refreshes so --resume continues the conversation.
-      const sessionDir = path.join(
-        extra.boardSetupRoot || os.tmpdir(),
-        'copilot-sessions',
-        String(sourceDef.bindTo || 'default').replace(/[^a-zA-Z0-9_-]/g, '_'),
-      );
-      const wrapperOutFile = outFile + '.wrapper-out.json';
-      try {
-        resultValue = runCopilotViaWrapper(prompt, sourceDef, wrapperOutFile, sessionDir, copilotCwd);
-      } catch (err) {
-        fail(`copilot invocation failed: ${String(err && err.message || err)}`, errFile);
-      } finally {
-        try { fs.unlinkSync(wrapperOutFile); } catch {}
-      }
-    } else {
-      // Non-Windows fallback: call copilot directly via cmd.exe and do basic JSON extraction.
-      let rawOutput = '';
-      try {
-        rawOutput = execFileSync('cmd.exe', ['/d', '/c', 'copilot --allow-all'], {
-          input: String(prompt),
-          encoding: 'utf-8',
-          stdio: ['pipe', 'pipe', 'pipe'],
-          maxBuffer: 10 * 1024 * 1024,
-          ...(copilotCwd ? { cwd: copilotCwd } : {}),
-        });
-      } catch (err) {
-        fail(`copilot invocation failed: ${String(err && err.message || err)}`, errFile);
-      }
-      // Basic JSON extraction: find first { or [ in output
-      const firstBrace = rawOutput.indexOf('{');
-      const firstBracket = rawOutput.indexOf('[');
-      const jsonStart = (firstBrace === -1) ? firstBracket
-        : (firstBracket === -1) ? firstBrace
-        : Math.min(firstBrace, firstBracket);
-      if (jsonStart !== -1) {
-        try {
-          const parsed = JSON.parse(rawOutput.slice(jsonStart));
-          resultValue = (parsed && typeof parsed === 'object') ? parsed : rawOutput;
-        } catch {
-          resultValue = rawOutput;
-        }
-      } else {
-        resultValue = rawOutput;
-      }
+    // Copilot sandbox: cwd = card's surface dir; --add-dir for cards, runtime, runtime-out.
+    // This restricts Copilot to card data, runtime status, and card definitions only.
+    const copilotCwd = extra.cardsDir
+      ? path.resolve(extra.boardSetupRoot, extra.cardsDir)
+      : (sourceDef.cwd || extra.boardSetupRoot || undefined);
+    const addDirs = [];
+    if (extra.boardSetupRoot) {
+      if (extra.boardRuntimeDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.boardRuntimeDir));
+      if (extra.runtimeStatusDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.runtimeStatusDir));
+      if (extra.cardsDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.cardsDir));
     }
+
+    // Session dir is stable across refreshes so --resume continues the conversation.
+    const sessionDir = path.join(
+      extra.boardSetupRoot || os.tmpdir(),
+      'copilot-sessions',
+      String(sourceDef.bindTo || 'default').replace(/[^a-zA-Z0-9_-]/g, '_'),
+    );
+    const wrapperOutFile = outFile + '.wrapper-out.json';
+    try {
+      resultValue = runCopilotViaWrapper(prompt, sourceDef, wrapperOutFile, sessionDir, copilotCwd, addDirs);
+    } catch (err) {
+      fail(`copilot invocation failed: ${String(err && err.message || err)}`, errFile);
+    } finally {
+      try { fs.unlinkSync(wrapperOutFile); } catch {}
+    }
+
   } else if (sourceDef.workiq) {
     const cfg = typeof sourceDef.workiq === 'object' ? sourceDef.workiq : {};
     if (!cfg.query_template || typeof cfg.query_template !== 'string') {
@@ -526,7 +506,7 @@ function runSourceFetchSubcommand(argv) {
       fail(`Key "${sourceDef.mock}" not found in MOCK_DB`, errFile);
     }
   } else {
-    fail('Source definition has no recognised kind (url, url-list, copilot, workiq, teams, mock)', errFile);
+    fail('No recognised source kind (url, url-list, copilot, workiq, teams, mock)', errFile);
   }
 
   // Write result to --out as JSON payload, same contract as current mock mode.
@@ -570,12 +550,11 @@ function validateSourceDefSubcommand(argv) {
   const hasUrl   = !!sourceDef['url'];
   const hasUrlList  = !!sourceDef['url-list'];
   const hasCopilot    = !!sourceDef.copilot;
-  const hasPromptTemplate = typeof sourceDef.prompt_template === 'string';
   const hasWorkiq     = !!sourceDef.workiq;
   const hasTeams      = !!sourceDef.teams;
   const hasMock       = sourceDef.mock !== undefined;
 
-  const kindCount = [hasUrl, hasUrlList, hasCopilot || hasPromptTemplate, hasWorkiq, hasTeams, hasMock].filter(Boolean).length;
+  const kindCount = [hasUrl, hasUrlList, hasCopilot, hasWorkiq, hasTeams, hasMock].filter(Boolean).length;
 
   if (kindCount === 0) {
     errors.push('No recognised source kind (url, url-list, copilot, workiq, teams, mock). Add one of these fields.');
@@ -583,7 +562,7 @@ function validateSourceDefSubcommand(argv) {
     const kinds = [];
     if (hasUrl)  kinds.push('url');
     if (hasUrlList) kinds.push('url-list');
-    if (hasCopilot || hasPromptTemplate) kinds.push('copilot');
+    if (hasCopilot) kinds.push('copilot');
     if (hasWorkiq)    kinds.push('workiq');
     if (hasTeams)     kinds.push('teams');
     if (hasMock)      kinds.push('mock');
@@ -609,8 +588,8 @@ function validateSourceDefSubcommand(argv) {
     if (typeof sourceDef.copilot !== 'object') {
       errors.push('copilot must be an object.');
     } else {
-      if (!sourceDef.copilot.prompt_template && !hasPromptTemplate) {
-        errors.push('copilot.prompt_template is required (or use top-level prompt_template).');
+      if (!sourceDef.copilot.prompt_template) {
+        errors.push('copilot.prompt_template is required.');
       }
     }
   }
@@ -665,19 +644,20 @@ const CAPABILITIES = {
       },
     },
     copilot: {
-      description: 'Invoke GitHub Copilot CLI with an interpolated prompt template.',
+      description: 'Invoke GitHub Copilot CLI with an interpolated prompt template. Executor automatically sandboxes: cwd = card runtime dir, --add-dir for cards/runtime/runtime-out dirs, -s --no-ask-user --allow-all-tools.',
       inputSchema: {
         copilot: {
-          type: 'object', required: false,
-          description: 'Object with prompt_template (string) and optional args (object).',
+          type: 'object', required: true,
+          description: 'Object with prompt_template (string), optional args (object), and optional result_shape (object).',
           properties: {
             prompt_template: { type: 'string', required: true, description: 'Prompt with {{key}} placeholders.' },
-            args:            { type: 'object', required: false, description: 'Extra interpolation args (highest precedence).' },
+            args:            { type: 'object', required: false, description: 'Extra interpolation args (merged with _projections).' },
+            result_shape:    { type: 'object', required: false, description: 'Expected top-level keys in the JSON response. Enables agentic retry if response shape is wrong.' },
           },
         },
-        prompt_template: { type: 'string', required: false, description: 'Shorthand — top-level prompt template (alternative to copilot.prompt_template).' },
       },
       outputShape: 'string | object — raw Copilot text, or parsed JSON if the response is valid JSON.',
+      note: 'Copilot sees only card data, runtime status, and card definitions. Board internals (graph, .task-executor) are excluded.',
     },
     workiq: {
       description: 'Query WorkIQ (Microsoft 365 Copilot) with an interpolated query template. Returns raw text response.',
