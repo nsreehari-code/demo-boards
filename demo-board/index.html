@@ -213,7 +213,6 @@
 
       async function start() {
         await loadConfig();
-        if (!boardKey) boardKey = 'live'; // ultimate fallback
         await bootstrap(activeBoardId);
       }
 
