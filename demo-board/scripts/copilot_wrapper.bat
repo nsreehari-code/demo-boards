@@ -2,13 +2,14 @@
 setlocal enabledelayedexpansion
 
 REM Copilot Wrapper - Manages session isolation for GitHub Copilot CLI
-REM Usage: copilot_wrapper.bat <output_file> <session_dir> <working_dir> <request_or_file> <result_type> [agent_name] [model] [result_shape_file]
+REM Usage: copilot_wrapper.bat <output_file> <session_dir> <working_dir> <request_or_file> <result_type> [agent_name] [add_dirs] [result_shape_file]
 REM
 REM If request_or_file starts with @, it's treated as a file path containing the prompt.
 REM Otherwise, it's treated as the prompt string directly.
 REM result_type: "raw" to return plain text, "json" to extract JSON (passed to clean_copilot_output.ps1)
 REM agent_name: name of the agent for log files (optional)
-REM model: passed to copilot with --model flag (optional)
+REM add_dirs: semicolon-separated list of directories for --add-dir (optional)
+REM result_shape_file: JSON file with expected result shape (optional)
 
 SET "OUTPUT_FILE=%~1"
 SET "SESSION_DIR=%~2"
@@ -16,7 +17,7 @@ SET "WORKING_DIR=%~3"
 SET "REQUEST_OR_FILE=%~4"
 SET "RESULT_TYPE=%~5"
 SET "AGENT_NAME=%~6"
-SET "MODEL=%~7"
+SET "ADD_DIRS=%~7"
 SET "RESULT_SHAPE_FILE=%~8"
 
 if not defined RESULT_TYPE SET "RESULT_TYPE=raw"
@@ -88,15 +89,20 @@ if exist "%SESSION_DIR%\workspace.yaml" (
 
 cd /d "%WORKING_DIR%"
 
-SET "MODEL_FLAG="
-if defined MODEL (
-    SET "MODEL_FLAG=--model !MODEL!"
+REM Build --add-dir flags from semicolon-separated ADD_DIRS
+SET "ADD_DIR_FLAGS="
+if defined ADD_DIRS (
+    for %%d in ("!ADD_DIRS:;=" "!") do (
+        SET "ADD_DIR_FLAGS=!ADD_DIR_FLAGS! --add-dir=%%~d"
+    )
 )
 
+SET "COPILOT_FLAGS=-s --no-ask-user --allow-all-tools!ADD_DIR_FLAGS!"
+
 if defined PROMPT_FILE (
-    type "!PROMPT_FILE!" | call copilot --allow-all --resume !SESSION_UUID! !MODEL_FLAG! > "%OUTPUT_FILE%" 2>&1
+    type "!PROMPT_FILE!" | call copilot !COPILOT_FLAGS! --resume !SESSION_UUID! > "%OUTPUT_FILE%" 2>&1
 ) else (
-    call copilot -p "%REQUEST%" --allow-all --resume !SESSION_UUID! !MODEL_FLAG! > "%OUTPUT_FILE%" 2>&1
+    call copilot -p "%REQUEST%" !COPILOT_FLAGS! --resume !SESSION_UUID! > "%OUTPUT_FILE%" 2>&1
 )
 
 SET "LOG_DIR=%COPILOT_BASE%\copilot-logs"
@@ -136,7 +142,7 @@ if "!PS1_EXIT!"=="2" (
         echo Please respond with ONLY the JSON object — no markdown, no explanation, no preamble.
         echo Start your response with { and end with }.
     ) > "!RETRY_PROMPT_FILE!"
-    type "!RETRY_PROMPT_FILE!" | call copilot --allow-all --resume !SESSION_UUID! !MODEL_FLAG! > "%OUTPUT_FILE%" 2>&1
+    type "!RETRY_PROMPT_FILE!" | call copilot !COPILOT_FLAGS! --resume !SESSION_UUID! > "%OUTPUT_FILE%" 2>&1
     del "!RETRY_PROMPT_FILE!" 2>nul
     REM Re-run PS1 with -IsRetry so it writes skeleton on second failure rather than exit 2
     powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0copilot_wrapper_helper.ps1" "%OUTPUT_FILE%" "!RESULT_TYPE!" "!RESULT_SHAPE_FILE!" "-IsRetry"
