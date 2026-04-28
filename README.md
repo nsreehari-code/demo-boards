@@ -15,42 +15,54 @@ Local demo runner for yaml-flow board examples.
 npm install
 ```
 
-2. Copy the example board into `default-board` (idempotent; skips if already present):
-
-```bash
-npm run setup
-```
-
-3. Start both servers (backend + static frontend server):
+2. Start the backend server:
 
 ```bash
 npm start
 ```
 
+3. In a separate terminal, serve the frontend:
+
+```bash
+npm run serve
+```
+
 4. Open in browser:
 
-- http://127.0.0.1:8000/demo-shell-with-server.html
-
-## What `npm start` Runs
-
-`npm start` runs `npm run start-server`, which starts:
-
-- Backend demo server at `http://127.0.0.1:7799`
-- Static file server at `http://127.0.0.1:8000`
-
-The script also wires these environment variables automatically:
-
-- `BOARD_LIVE_CARDS_CLI_JS` -> local `yaml-flow` CLI path
-- `DEMO_STEP_MACHINE_CLI_PATH` -> local `yaml-flow` step-machine CLI path
+- http://127.0.0.1:8000/
 
 ## Scripts
 
-- `npm run setup` -> copy `yaml-flow` example board into `default-board`
-- `npm run copy-example-board` -> same as setup
-- `npm run start-server` -> run backend + frontend servers
-- `npm start` -> alias for `npm run start-server`
+| Script | What it does |
+|---|---|
+| `npm start` | Start backend API server at `http://127.0.0.1:7799` |
+| `npm run dev` | Start backend directly (no env-var wiring) |
+| `npm run serve` | Serve `demo-board/` as static files at `http://127.0.0.1:8000` |
+| `npm run clean` | Wipe runtime state in `demo-board/live/` (preserves cards) |
+| `npm run stop` | Kill backend server on port 7799 |
+
+## Directory structure
+
+```
+demo-board/
+  live/
+    cards/            <- source cards (git-tracked)
+    gandalf-cards/    <- source gandalf cards (git-tracked)
+    board-default/    <- runtime state (gitignored)
+  demo-server.js
+  demo-server-config.json
+  demo-task-executor.js
+  demo-chat-handler.js
+  index.html
+```
+
+## Environment variables (auto-set by `npm start`)
+
+- `BOARD_LIVE_CARDS_CLI_JS` → local `yaml-flow` CLI path
+- `DEMO_STEP_MACHINE_CLI_PATH` → local `yaml-flow` step-machine CLI path
 
 ## Notes
 
-- `default-board/` is gitignored.
-- If `default-board` already exists, copy is skipped by design.
+- Cards live in `demo-board/live/cards/` and are the single source of truth — no tmp-copy step.
+- `demo-board/live/board-default/` is gitignored (runtime state).
+- `npm run clean` preserves `live/cards/` and `live/gandalf-cards/`.

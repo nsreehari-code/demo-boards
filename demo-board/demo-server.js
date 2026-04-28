@@ -184,7 +184,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[demo-server] listening on http://127.0.0.1:${PORT}`);
   console.log(`[demo-server] setup dir: ${runtime.setupDir}`);
-  console.log(`[demo-server] boards config: ${runtime.setupDir}/boards-config.json`);
+  console.log(`[demo-server] boards config: ${path.join(runtime.setupDir, 'boards-config.json')}`);
   console.log('[demo-server] endpoints:');
   console.log(`  GET  ${runtime.apiBasePath}                          <- list boards`);
   console.log(`  POST ${runtime.apiBasePath}  {id, label?}            <- register board`);

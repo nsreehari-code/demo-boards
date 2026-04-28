@@ -2,7 +2,10 @@
   "id": "card-teams-messages",
   "meta": {
     "title": "Teams Channel Messages",
-    "tags": ["teams", "graph"],
+    "tags": [
+      "teams",
+      "graph"
+    ],
     "desc": "Reads recent messages from a Teams channel via Zoltbook (enriched with AI detection)."
   },
   "requires": [],
@@ -33,7 +36,10 @@
     }
   ],
   "provides": [
-    { "bindTo": "teams-messages", "ref": "fetched_sources.messages" }
+    {
+      "bindTo": "teams-messages",
+      "ref": "fetched_sources.messages"
+    }
   ],
   "view": {
     "elements": [
@@ -45,32 +51,59 @@
           "fields": {
             "type": "object",
             "properties": {
-              "team_id":    { "type": "string", "title": "Team ID" },
-              "channel_id": { "type": "string", "title": "Channel ID" }
+              "team_id": {
+                "type": "string",
+                "title": "Team ID"
+              },
+              "channel_id": {
+                "type": "string",
+                "title": "Channel ID"
+              }
             },
-            "required": ["team_id", "channel_id"]
+            "required": [
+              "team_id",
+              "channel_id"
+            ]
           }
         }
       },
       {
         "kind": "text",
-        "data": { "bind": "computed_values.status" }
+        "data": {
+          "bind": "computed_values.status"
+        }
       },
       {
         "kind": "table",
         "label": "Recent Messages",
         "data": {
           "bind": "computed_values.rows",
-          "columns": ["from", "type", "date", "time", "message"],
+          "columns": [
+            "from",
+            "type",
+            "date",
+            "time",
+            "message"
+          ],
           "maxRows": 5
         }
       }
     ],
     "layout": {
-      "board": { "col": 6, "order": 11 },
-      "canvas": { "x": 500, "y": 450, "w": 560, "h": 380 }
+      "board": {
+        "col": 6,
+        "order": 11
+      },
+      "canvas": {
+        "x": 500,
+        "y": 450,
+        "w": 560,
+        "h": 380
+      }
     },
-    "features": { "refresh": true }
+    "features": {
+      "refresh": true
+    }
   },
   "card_data": {
     "team_id": "c1d30cbf-82fc-41c3-b233-916282bdfcc7",

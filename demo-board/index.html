@@ -75,7 +75,6 @@
         const b = encodeURIComponent(boardId || activeBoardId || 'default');
         const base = `/api/boards/${b}`;
         return {
-          demoSetup: `${base}/demo-setup`,
           initBoard: `${base}/init-board`,
           bootstrapCards: `${base}/bootstrap-cards`,
           bootstrap: `${base}/bootstrap`,
@@ -160,7 +159,7 @@
           boardId: bid,
           taskExecutorPath: resolveTaskExecutorPathParam(),
           rootElement: document.getElementById('boardRoot'),
-          runDemoSetup: true,
+          runDemoSetup: false,
           mode: currentMode,
         });
 

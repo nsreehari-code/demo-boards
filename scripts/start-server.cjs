@@ -5,7 +5,9 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const workspaceDir = process.cwd();
-const boardDirArg = process.argv[2] || 'default-board';
+const args = process.argv.slice(2);
+const modeFlag = args.find(a => a === '--all' || a === '--backend') || '--backend';
+const boardDirArg = args.find(a => !a.startsWith('--')) || 'default-board';
 const boardDir = path.resolve(workspaceDir, boardDirArg);
 const demoServerPath = path.join(boardDir, 'demo-server.js');
 
@@ -16,7 +18,6 @@ if (!fs.existsSync(demoServerPath)) {
 
 const boardLiveCardsCliJs = path.resolve(workspaceDir, 'node_modules', 'yaml-flow', 'board-live-cards-cli.js');
 const stepMachineCliPath = path.resolve(workspaceDir, 'node_modules', 'yaml-flow', 'step-machine-cli.js');
-const httpServerBin = require.resolve('http-server/bin/http-server');
 
 if (!fs.existsSync(boardLiveCardsCliJs)) {
   console.error(`[start-server] Missing ${boardLiveCardsCliJs}. Run \"npm install\" first.`);
@@ -35,7 +36,9 @@ const sharedEnv = {
 
 console.log(`[start-server] board dir: ${boardDir}`);
 console.log('[start-server] backend:  http://127.0.0.1:7799');
-console.log('[start-server] frontend: http://127.0.0.1:8000/demo-shell-with-server.html');
+if (modeFlag === '--all') {
+  console.log('[start-server] frontend: http://127.0.0.1:8000');
+}
 
 const backend = spawn(process.execPath, [demoServerPath], {
   cwd: boardDir,
@@ -43,11 +46,14 @@ const backend = spawn(process.execPath, [demoServerPath], {
   stdio: 'inherit',
 });
 
-const frontend = spawn(process.execPath, [httpServerBin, boardDir, '-p', '8000', '-c-1'], {
-  cwd: workspaceDir,
-  env: sharedEnv,
-  stdio: 'inherit',
-});
+let frontend = null;
+if (modeFlag === '--all') {
+  frontend = spawn('npx', ['http-server', boardDir, '-p', '8000', '-c-1'], {
+    cwd: workspaceDir,
+    stdio: 'inherit',
+    shell: true,
+  });
+}
 
 let shuttingDown = false;
 
@@ -56,11 +62,11 @@ function shutdown(signal) {
   shuttingDown = true;
 
   if (!backend.killed) backend.kill('SIGTERM');
-  if (!frontend.killed) frontend.kill('SIGTERM');
+  if (frontend && !frontend.killed) frontend.kill('SIGTERM');
 
   setTimeout(() => {
     if (!backend.killed) backend.kill('SIGKILL');
-    if (!frontend.killed) frontend.kill('SIGKILL');
+    if (frontend && !frontend.killed) frontend.kill('SIGKILL');
     process.exit(0);
   }, 1200);
 
@@ -76,12 +82,14 @@ backend.on('exit', (code) => {
   }
 });
 
-frontend.on('exit', (code) => {
-  if (!shuttingDown) {
-    console.error(`[start-server] frontend exited with code ${code ?? 0}`);
-    shutdown();
-  }
-});
+if (frontend) {
+  frontend.on('exit', (code) => {
+    if (!shuttingDown) {
+      console.error(`[start-server] frontend exited with code ${code ?? 0}`);
+      shutdown();
+    }
+  });
+}
 
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
