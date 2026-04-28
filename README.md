@@ -15,19 +15,13 @@ Local demo runner for yaml-flow board examples.
 npm install
 ```
 
-2. Start the backend server:
+2. Start backend + frontend together:
 
 ```bash
 npm start
 ```
 
-3. In a separate terminal, serve the frontend:
-
-```bash
-npm run serve
-```
-
-4. Open in browser:
+3. Open in browser:
 
 - http://127.0.0.1:8000/
 
@@ -35,25 +29,30 @@ npm run serve
 
 | Script | What it does |
 |---|---|
-| `npm start` | Start backend API server at `http://127.0.0.1:7799` |
-| `npm run dev` | Start backend directly (no env-var wiring) |
-| `npm run serve` | Serve `demo-board/` as static files at `http://127.0.0.1:8000` |
+| `npm start` | Start backend (port 7799) + frontend (port 8000) together |
+| `npm run backend` | Start backend API server only at `http://127.0.0.1:7799` |
+| `npm run frontend` | Serve `demo-board/` as static files at `http://127.0.0.1:8000` |
 | `npm run clean` | Wipe runtime state in `demo-board/live/` (preserves cards) |
-| `npm run stop` | Kill backend server on port 7799 |
+| `npm run stop` | Kill processes on ports 7799 and 8000 |
 
 ## Directory structure
 
 ```
-demo-board/
-  live/
-    cards/            <- source cards (git-tracked)
-    gandalf-cards/    <- source gandalf cards (git-tracked)
-    board-default/    <- runtime state (gitignored)
-  demo-server.js
-  demo-server-config.json
-  demo-task-executor.js
-  demo-chat-handler.js
-  index.html
+demo-boards/
+  default-board/          <- template board (used by copy-example-board)
+  demo-board/             <- active demo board
+    live/
+      cards/              <- source cards (git-tracked)
+      gandalf-cards/      <- source gandalf cards (git-tracked)
+      board-default/      <- runtime state (gitignored)
+    demo-server.js
+    demo-server-config.json
+    demo-task-executor.js
+    demo-chat-handler.js
+    index.html
+  scripts/
+    start-server.cjs      <- starts backend/frontend with env-var wiring
+    copy-example-board.cjs <- copies default-board to create a new board
 ```
 
 ## Environment variables (auto-set by `npm start`)
