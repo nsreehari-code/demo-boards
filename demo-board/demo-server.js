@@ -69,7 +69,6 @@ if (!process.env.DEMO_CHAT_HANDLER_PATH && configuredChatHandlerPath) {
 }
 
 const PORT = Number(process.env.DEMO_SERVER_PORT || serverConfig.port || 7799);
-const RESET_ON_START = process.argv.includes('--reset');
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -91,50 +90,12 @@ const runtime = createMultiBoardServerRuntime({
   boardLiveCardsCliJs: process.env.BOARD_LIVE_CARDS_CLI_JS || configuredCliJs,
 });
 
-function resetRuntime() {
-  const setupDir = runtime.setupDir;
-  if (fs.existsSync(setupDir)) {
-    fs.rmSync(setupDir, { recursive: true, force: true });
-    console.log(`[demo-server] reset: wiped ${setupDir}`);
-  }
-  const chatSessionsDir = serverConfig.chatSessionsDir
-    ? path.resolve(__dirname, serverConfig.chatSessionsDir)
-    : path.join(os.tmpdir(), 'demo-chat-handler-sessions');
-  if (fs.existsSync(chatSessionsDir)) {
-    fs.rmSync(chatSessionsDir, { recursive: true, force: true });
-    console.log(`[demo-server] reset: wiped ${chatSessionsDir}`);
-  }
-}
-
-if (RESET_ON_START) {
-  resetRuntime();
-}
-
 const dispatch = createRuntimeRequestDispatcher(runtime);
-
-// Board-id segment regex: /api/boards/:boardId/...
-const BOARD_SEG_RE = /^\/api\/boards\/([^/]+)\/(.+)$/;
 
 function jsonReply(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' });
   res.end(body);
-}
-
-async function handleDemoSetup(req, res, boardId) {
-  try {
-    const { service, boardRoot } = runtime.requireBoardService(boardId);
-    let setupPerformed = false;
-
-    if (!service.isDemoSetupDone()) {
-      service.ensureDemoSetup();
-      setupPerformed = true;
-    }
-
-    jsonReply(res, 200, { ok: true, setupPerformed });
-  } catch (err) {
-    jsonReply(res, err.statusCode || 500, { error: String((err && err.message) || err) });
-  }
 }
 
 async function handleWorkiqAsk(req, res) {
@@ -216,14 +177,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Route: demo-setup is handled here in demo-server (host concern)
-  const boardSegMatch = pathname.match(BOARD_SEG_RE);
-  if (boardSegMatch && boardSegMatch[2] === 'demo-setup') {
-    void handleDemoSetup(req, res, boardSegMatch[1]);
-    return;
-  }
-
-  // All other /api/boards routes are handled by the reusable runtime
+  // All /api/boards routes are handled by the reusable runtime
   void dispatch(req, res);
 });
 
@@ -234,7 +188,6 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log('[demo-server] endpoints:');
   console.log(`  GET  ${runtime.apiBasePath}                          <- list boards`);
   console.log(`  POST ${runtime.apiBasePath}  {id, label?}            <- register board`);
-  console.log(`  GET  ${runtime.apiBasePath}/:boardId/demo-setup`);
   console.log(`  GET  ${runtime.apiBasePath}/:boardId/bootstrap`);
   console.log(`  GET  ${runtime.apiBasePath}/:boardId/sse`);
   console.log(`  GET  ${runtime.apiBasePath}/:boardId/board-status`);
