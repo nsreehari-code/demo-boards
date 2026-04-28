@@ -13,7 +13,7 @@
  *   lastChatFile    — filename of the just-written user message, e.g. '001_user.txt'
  *   serverUrl       — base URL of hosting server (e.g. http://127.0.0.1:7799), optional
  *
- * Invokes copilot_wrapper.bat with a prompt built from conversation history.
+ * Invokes scripts/copilot/wrapper.py with a prompt built from conversation history.
  * Session dir is per-card: os.tmpdir()/demo-chat-handler-sessions/<boardId>_<cardId>
  */
 
@@ -104,10 +104,11 @@ function buildPrompt(cId, bId, history, responseFileRel) {
 }
 
 // ---------------------------------------------------------------------------
-// Invoke copilot_wrapper.bat
+// Invoke copilot wrapper (Python)
 // ---------------------------------------------------------------------------
 function runWrapper(prompt, sessionDir, workingDir) {
-  const wrapperPath = path.join(__dirname, 'scripts', 'copilot_wrapper.bat');
+  const wrapperPath = path.join(__dirname, 'scripts', 'copilot', 'wrapper.py');
+  const python      = process.platform === 'win32' ? 'python' : 'python3';
   const tmpBase     = os.tmpdir();
   const ts          = Date.now();
   const outFile     = path.join(tmpBase, 'dch-out-' + cardId + '-' + ts + '.txt');
@@ -116,17 +117,22 @@ function runWrapper(prompt, sessionDir, workingDir) {
   fs.mkdirSync(sessionDir, { recursive: true });
   fs.writeFileSync(promptFile, prompt, 'utf-8');
 
-  try {
-    spawnSync('cmd.exe', [
-      '/c', wrapperPath,
-      outFile,
-      sessionDir,
-      workingDir,
-      '@' + promptFile,
-      'raw',
-      'demo-chat',
-    ], { stdio: 'inherit', timeout: 120000 });
+  const pyArgs = [
+    wrapperPath,
+    '--output-file', outFile,
+    '--session-dir', sessionDir,
+    '--cwd', workingDir,
+    '--prompt-file', promptFile,
+    '--result-type', 'raw',
+    '--agent-name', 'demo-chat',
+    '--add-dir', boardRuntimeDirAbs,
+    '--add-dir', runtimeStatusDirAbs,
+    '--add-dir', cardsDirAbs,
+    '--add-dir', chatDirAbs,
+  ];
 
+  try {
+    spawnSync(python, pyArgs, { stdio: 'inherit', timeout: 300000 });
     return fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf-8').trim() : '';
   } finally {
     try { fs.unlinkSync(promptFile); } catch {}
@@ -144,7 +150,7 @@ const responseFileRel = path.relative(boardSetupRoot, path.join(chatDir, nextNam
 
 const history    = readHistory(chatDirAbs);
 const sessionDir = path.join(os.tmpdir(), 'demo-chat-handler-sessions', boardId + '_' + cardId);
-const workingDir = boardSetupRoot;
+const workingDir = chatDirAbs;
 const prompt     = buildPrompt(cardId, boardId, history, responseFileRel);
 
 try {
