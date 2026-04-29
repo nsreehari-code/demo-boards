@@ -297,18 +297,21 @@ def run_copilot(session_uuid: str, prompt: str | None, prompt_file: Path | None,
         # Stdin pipe mode (no -p flag, pipe input)
         result = subprocess.run(
             args, input=input_text, capture_output=True, text=True,
+            encoding='utf-8', errors='replace',
             cwd=cwd, timeout=300,
         )
     elif prompt_file:
         # Prompt file → pipe via stdin
         result = subprocess.run(
             args, input=input_text, capture_output=True, text=True,
+            encoding='utf-8', errors='replace',
             cwd=cwd, timeout=300,
         )
     else:
         # -p mode
         result = subprocess.run(
             args, capture_output=True, text=True,
+            encoding='utf-8', errors='replace',
             cwd=cwd, timeout=300,
         )
 

@@ -156,12 +156,12 @@ const tapcConfig = [
   ['T', 'LDAPclear',       0.65, 'LDAP cleartext bind — credential exposure'],
   ['T', 'ADFS',            0.55, 'ADFS authentication — moderate federation risk'],
   // A — Anomaly (weight 0.2)
-  ['A', 'volume_spike',    0.80, 'Volume exceeds 3σ above 30-day baseline'],
+  ['A', 'volume_spike',    0.80, 'Volume exceeds 3-sigma above 30-day baseline'],
   ['A', 'new_ip',          0.70, 'IP address never seen for this entity in 30 days'],
   ['A', 'geo_impossible',  0.90, 'Geographically impossible travel between auth events'],
   ['A', 'off_hours',       0.50, 'Activity outside normal working hours pattern'],
   ['A', 'spray_structure', 0.85, 'Password spray: high fail + many users + legacy proto'],
-  ['A', 'cross_plane',     0.15, 'Bonus: entity appears in ≥2 attack planes'],
+  ['A', 'cross_plane',     0.15, 'Bonus: entity appears in >=2 attack planes'],
   // P — Progression (weight 0.3)
   ['P', 'credential',      0.10, 'P1: Initial credential access attempt'],
   ['P', 'token_exchange',  0.15, 'P2: Token exchange / elevation'],
@@ -169,7 +169,7 @@ const tapcConfig = [
   ['P', 'persistence',     0.30, 'P4: Persistence mechanisms (inbox rules, app consent)'],
   ['P', 'lateral_movement',0.20, 'P5: Lateral movement to other accounts/systems'],
   // C — Context (weight 0.1)
-  ['C', 'admin_privilege',  1.50, 'Admin account multiplier (1.5×)'],
+  ['C', 'admin_privilege',  1.50, 'Admin account multiplier (1.5x)'],
   ['C', 'sso_misconfigured',0.70, 'SSO misconfiguration detected in tenant'],
   ['C', 'prior_alerts',     0.60, 'Entity has existing (potentially unrelated) alerts'],
   // Negative evidence
@@ -190,7 +190,7 @@ const insertAgent = db.prepare(`
 `);
 
 const agentData = [
-  ['BEACON',      'TAPC Observable Scanner',     'Claude Opus 4.6',  10, 'complete', '2026-04-27', 'Sweeps all 7 attack planes with TAPC T-signal scoring. Generates anomaly candidates and promotes findings ≥ 0.35 PreGraphTA.'],
+  ['BEACON',      'TAPC Observable Scanner',     'Claude Opus 4.6',  10, 'complete', '2026-04-27', 'Sweeps all 7 attack planes with TAPC T-signal scoring. Generates anomaly candidates and promotes findings >= 0.35 PreGraphTA.'],
   ['WEAVER',      'Graph Pattern Operator',      'Claude Opus 4.6',   8, 'complete', '2026-04-27', 'Builds observable graphs from promoted candidates. Detects temporal attack motifs and cross-tenant campaign infrastructure.'],
   ['CRUCIBLE',    'Stress-Test Validator',        'Claude Opus 4.6',   5, 'complete', '2026-04-27', 'Assumes every finding is FP. Applies 7-check validation framework. Generates Admiralty/NATO confidence codes.'],
   ['RUBBER DUCK', 'Independent Critique Agent',   'Claude Sonnet 4.6', 0, 'complete', '2026-04-27', 'Provides adversarial feedback. Catches overclaims, logic errors, FP blind spots. Separate model for independent reasoning.'],
@@ -207,12 +207,12 @@ const insertCandidate = db.prepare(`
 
 const c3 = '2026-04-27';
 const candidates = [
-  // Promoted candidates (PreGraphTA ≥ 0.35)
-  ['UserPII_a7f3e2d1',  'OrgPII_contoso',  'Identity Auth',    0.62, 0.90, 0.50, 0.25, 0.70, 0.68, 1, c3, 'WS-Trust mixed auth from new IP, volume 4.2σ above baseline, off-hours'],
+  // Promoted candidates (PreGraphTA >= 0.35)
+  ['UserPII_a7f3e2d1',  'OrgPII_contoso',  'Identity Auth',    0.62, 0.90, 0.50, 0.25, 0.70, 0.68, 1, c3, 'WS-Trust mixed auth from new IP, volume 4.2-sigma above baseline, off-hours'],
   ['UserPII_b8c4f901',  'OrgPII_fabrikam',  'Identity Auth',    0.54, 0.85, 0.40, 0.15, 0.60, 0.57, 1, c3, 'Device code flow from residential IP, no MFA challenge, first-time protocol use'],
   ['UserPII_c9d5e012',  'OrgPII_contoso',  'Cloud / SaaS',     0.48, 0.85, 0.30, 0.30, 0.80, 0.62, 1, c3, 'New-InboxRule forwarding to external domain 2h after legacy auth'],
   ['UserPII_a7f3e2d1',  'OrgPII_contoso',  'Cloud / SaaS',     0.44, 0.70, 0.35, 0.25, 0.70, 0.55, 1, c3, 'OAuth consent grant for unknown app post-WSTrust auth (cross-plane)'],
-  ['UserPII_d1e6f123',  'OrgPII_woodgrove', 'Identity Auth',    0.42, 0.75, 0.30, 0.10, 0.50, 0.47, 1, c3, 'Legacy SMTP AUTH from IP seen in only this org, 3.1σ spike'],
+  ['UserPII_d1e6f123',  'OrgPII_woodgrove', 'Identity Auth',    0.42, 0.75, 0.30, 0.10, 0.50, 0.47, 1, c3, 'Legacy SMTP AUTH from IP seen in only this org, 3.1-sigma spike'],
   ['UserPII_e2f7a234',  'OrgPII_contoso',  'Detection Gaps',   0.40, 0.80, 0.20, null,  null,  null, 1, c3, 'Admin account with 47 identity events, ZERO existing alerts'],
   ['UserPII_f3a8b345',  'OrgPII_fabrikam',  'Identity Recon',   0.38, 0.65, 0.30, null,  null,  null, 1, c3, 'LDAP enumeration of all global admin group members'],
   ['UserPII_a4b9c456',  'OrgPII_woodgrove', 'Endpoint',         0.36, 0.70, 0.20, null,  null,  null, 1, c3, 'Suspicious PowerShell execution post-auth from flagged IP'],
@@ -316,7 +316,7 @@ const toolsData = [
   ['optimus', 'beacon_status',               'BEACON',   'status',   'Current BEACON agent state'],
   ['optimus', 'weaver_build_graph',          'WEAVER',   'graph',    'Kusto make-graph: user→IP→action edges'],
   ['optimus', 'weaver_find_motifs',          'WEAVER',   'graph',    'Temporal attack motif detection'],
-  ['optimus', 'weaver_find_campaigns',       'WEAVER',   'graph',    'Cross-tenant campaign infrastructure (≥3 orgs)'],
+  ['optimus', 'weaver_find_campaigns',       'WEAVER',   'graph',    'Cross-tenant campaign infrastructure (>=3 orgs)'],
   ['optimus', 'weaver_cross_plane',          'WEAVER',   'graph',    'Identity→Cloud plane traversal detection'],
   ['optimus', 'weaver_blast_radius',         'WEAVER',   'graph',    'Compromised account blast radius assessment'],
   ['optimus', 'weaver_enrich_pc',            'WEAVER',   'enrich',   'P/C score enrichment from graph context'],
