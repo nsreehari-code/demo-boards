@@ -20,6 +20,16 @@
       "gandalfCardsDir": "./cpm/gandalf-cards",
       "gandalfTaskExecutorPath": "./demo-task-executor.js",
       "gandalfChatHandlerPath": "./demo-chat-handler.js"
+    },
+    "cpmV2": {
+      "label": "CPM V2",
+      "setupDir": "./cpmV2",
+      "cardsDir": "./cpmV2/cards",
+      "taskExecutorPath": "./demo-task-executor.js",
+      "chatHandlerPath": "./demo-chat-handler.js",
+      "gandalfCardsDir": "./cpmV2/gandalf-cards",
+      "gandalfTaskExecutorPath": "./demo-task-executor.js",
+      "gandalfChatHandlerPath": "./demo-chat-handler.js"
     }
   }
 }

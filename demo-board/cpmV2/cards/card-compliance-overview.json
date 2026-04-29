@@ -1,0 +1,46 @@
+{
+  "id": "card-compliance-overview",
+  "meta": {
+    "title": "Compliance Overview",
+    "tags": ["compliance", "overview", "copilot"],
+    "desc": "Executive summary for Compliance Administrators. Highlights top agents needing action, key compliance metrics, and overall posture — powered by Copilot."
+  },
+  "requires": ["agents", "eval_results", "eval_categories", "drift_summary", "critical_findings", "remediation"],
+  "source_defs": [
+    {
+      "bindTo": "overview",
+      "outputFile": "card-compliance-summary.json",
+      "projections": {
+        "agents": "requires.agents",
+        "eval_results": "requires.eval_results",
+        "eval_categories": "requires.eval_categories",
+        "drift_summary": "requires.drift_summary",
+        "critical_findings": "requires.critical_findings",
+        "remediation": "requires.remediation"
+      },
+      "copilot": {
+        "prompt_template": "You are a Compliance for AI dashboard summarizer for a Compliance Administrator. Produce an executive overview.\n\nAll agents in inventory:\n{{agents}}\n\nEvaluation categories (compliance framework):\n{{eval_categories}}\n\nEval results for high-priority agents:\n{{eval_results}}\n\nDrift summary:\n{{drift_summary}}\n\nCritical findings:\n{{critical_findings}}\n\nRemediation recommendations:\n{{remediation}}\n\nIMPORTANT OUTPUT RULES:\n- Return ONLY valid JSON. No markdown fences, no preamble.\n- Start with { and end with }.\n- No emojis. Values are Markdown strings with - bullet points. Max 60 words per section.\n\n{\n  \"headline\": \"<one sentence overall compliance posture>\",\n  \"key_metrics\": \"- **Total agents**: <N>\\n- **Under evaluation**: <N>\\n- **Eval pass rate**: <X%>\\n- **Agents with failures**: <N>\\n- **Unassessed agents**: <N>\",\n  \"top_actions\": \"- <#1 most urgent action for compliance admin, naming the agent>\\n- <#2>\\n- <#3>\",\n  \"regulation_exposure\": \"- <which EU AI Act articles have open failures and which agents>\"\n}"
+      }
+    }
+  ],
+  "compute": [
+    { "bindTo": "headline",            "expr": "fetched_sources.overview.headline" },
+    { "bindTo": "key_metrics",         "expr": "fetched_sources.overview.key_metrics" },
+    { "bindTo": "top_actions",         "expr": "fetched_sources.overview.top_actions" },
+    { "bindTo": "regulation_exposure", "expr": "fetched_sources.overview.regulation_exposure" }
+  ],
+  "view": {
+    "elements": [
+      { "kind": "markdown", "label": "Status",              "data": { "bind": "computed_values.headline" } },
+      { "kind": "markdown", "label": "Key Metrics",         "data": { "bind": "computed_values.key_metrics" } },
+      { "kind": "markdown", "label": "Top Actions",         "data": { "bind": "computed_values.top_actions" } },
+      { "kind": "markdown", "label": "Regulation Exposure", "data": { "bind": "computed_values.regulation_exposure" } }
+    ],
+    "layout": {
+      "board": { "col": 3, "order": 6 },
+      "canvas": { "x": 1290, "y": 540, "w": 420, "h": 420 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {}
+}

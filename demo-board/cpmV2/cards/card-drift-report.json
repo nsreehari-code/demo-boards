@@ -1,0 +1,48 @@
+{
+  "id": "card-drift-report",
+  "meta": {
+    "title": "Drift & Risk Report",
+    "tags": ["compliance", "drift", "copilot"],
+    "desc": "AI-generated analysis of compliance drift. Identifies which agents regressed, why, and recommended remediation — powered by Copilot."
+  },
+  "requires": ["eval_results", "immediate_agents", "eval_categories"],
+  "source_defs": [
+    {
+      "bindTo": "drift_analysis",
+      "outputFile": "card-drift-analysis.json",
+      "projections": {
+        "eval_results": "requires.eval_results",
+        "agents": "requires.immediate_agents",
+        "eval_categories": "requires.eval_categories"
+      },
+      "copilot": {
+        "prompt_template": "You are a compliance analyst for AI agent governance. Analyze the following evaluation results for high-priority AI agents.\n\nAgents:\n{{agents}}\n\nEvaluation Categories (the compliance framework):\n{{eval_categories}}\n\nEvaluation Results (per agent, per category — PASS/FAIL/PENDING):\n{{eval_results}}\n\nIMPORTANT OUTPUT RULES:\n- Return ONLY valid JSON. No markdown code fences, no preamble.\n- Start with { and end with }.\n- No emojis.\n- Each value is a Markdown string using - bullet points. Max 50 words per section.\n\n{\n  \"drift_summary\": \"- <how many agents have failures>\\n- <which eval categories have the most failures>\\n- <overall compliance posture: improving/degrading/stable>\",\n  \"critical_findings\": \"- <agent name>: <failed eval> — <specific risk in plain language, referencing EU AI Act article>\\n- (one bullet per failure)\",\n  \"remediation\": \"- <agent name>: <concrete next step for the compliance admin or agent owner>\\n- (one bullet per agent with failures)\",\n  \"evidence_gaps\": \"- <any PENDING evals and what they mean for compliance posture>\"\n}"
+      }
+    }
+  ],
+  "compute": [
+    { "bindTo": "drift_summary",     "expr": "fetched_sources.drift_analysis.drift_summary" },
+    { "bindTo": "critical_findings", "expr": "fetched_sources.drift_analysis.critical_findings" },
+    { "bindTo": "remediation",       "expr": "fetched_sources.drift_analysis.remediation" },
+    { "bindTo": "evidence_gaps",     "expr": "fetched_sources.drift_analysis.evidence_gaps" }
+  ],
+  "provides": [
+    { "bindTo": "drift_summary",     "ref": "computed_values.drift_summary" },
+    { "bindTo": "critical_findings", "ref": "computed_values.critical_findings" },
+    { "bindTo": "remediation",       "ref": "computed_values.remediation" }
+  ],
+  "view": {
+    "elements": [
+      { "kind": "markdown", "label": "Drift Summary",      "data": { "bind": "computed_values.drift_summary" } },
+      { "kind": "markdown", "label": "Critical Findings",  "data": { "bind": "computed_values.critical_findings" } },
+      { "kind": "markdown", "label": "Remediation",        "data": { "bind": "computed_values.remediation" } },
+      { "kind": "markdown", "label": "Evidence Gaps",      "data": { "bind": "computed_values.evidence_gaps" } }
+    ],
+    "layout": {
+      "board": { "col": 3, "order": 5 },
+      "canvas": { "x": 1290, "y": 50, "w": 420, "h": 460 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {}
+}

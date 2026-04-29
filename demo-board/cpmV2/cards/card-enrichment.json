@@ -1,0 +1,55 @@
+{
+  "id": "card-enrichment",
+  "meta": {
+    "title": "Agent Enrichment",
+    "tags": ["compliance", "enrichment", "v2"],
+    "desc": "V2: Admin-editable agent metadata enrichment. Compliance Admins can override priority, add risk notes, and flag agents for expedited review. Overrides propagate downstream through the DAG."
+  },
+  "requires": ["agents"],
+  "compute": [
+    {
+      "bindTo": "enriched",
+      "expr": "requires.agents.{ \"name\": name, \"platform\": platform, \"owner\": owner, \"priority\": $lookup($lookup(card_data, 'overrides'), name).priority ? $lookup($lookup(card_data, 'overrides'), name).priority : priority, \"risk_score\": risk_score, \"risk_notes\": $lookup($lookup(card_data, 'overrides'), name).risk_notes, \"expedited\": $lookup($lookup(card_data, 'overrides'), name).expedited ? true : false }"
+    }
+  ],
+  "provides": [
+    { "bindTo": "enriched_agents", "ref": "computed_values.enriched" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "text",
+        "label": "",
+        "style": "muted-italic",
+        "data": { "bind": "'Override agent priority, add risk notes, or flag for expedited review. Changes flow to all downstream cards.'" }
+      },
+      {
+        "kind": "editable-table",
+        "label": "Agent Overrides",
+        "data": {
+          "bind": "card_data.overrides_table",
+          "writeTo": "card_data.overrides_table",
+          "columns": ["agent_name", "priority", "risk_notes", "expedited"],
+          "schema": {
+            "properties": {
+              "priority": { "type": "string", "enum": ["Immediate", "Normal", "Monitor", "Unassessed"] },
+              "expedited": { "type": "string", "enum": ["yes", "no"] }
+            }
+          }
+        }
+      }
+    ],
+    "layout": {
+      "board": { "col": 6, "order": 3 },
+      "canvas": { "x": 1240, "y": 50, "w": 560, "h": 360 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {
+    "overrides": {},
+    "overrides_table": [
+      { "agent_name": "Legal Contract Reviewer", "priority": "Immediate", "risk_notes": "Credential leak detected — escalated", "expedited": "yes" },
+      { "agent_name": "HR Benefits Agent", "priority": "Immediate", "risk_notes": "Grounding issues need urgent fix", "expedited": "no" }
+    ]
+  }
+}

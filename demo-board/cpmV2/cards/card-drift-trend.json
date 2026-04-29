@@ -1,0 +1,90 @@
+{
+  "id": "card-drift-trend",
+  "meta": {
+    "title": "Eval Trend & Drift Monitor",
+    "tags": ["compliance", "monitoring", "v2"],
+    "desc": "V2: Historical eval pass-rate trends over time. Visualizes drift across eval runs with selectable chart/table view. Uses the ref+form selector pattern for adaptive display."
+  },
+  "source_defs": [
+    {
+      "bindTo": "trend_data",
+      "outputFile": "card-drift-trend-data.json",
+      "sqlite": {
+        "db": "compliance.db",
+        "query": "SELECT run_date, category, SUM(CASE WHEN result='PASS' THEN 1 ELSE 0 END) as passed, SUM(CASE WHEN result='FAIL' THEN 1 ELSE 0 END) as failed, SUM(CASE WHEN result='PENDING' THEN 1 ELSE 0 END) as pending, COUNT(*) as total, ROUND(SUM(CASE WHEN result='PASS' THEN 1.0 ELSE 0 END) / COUNT(*) * 100, 1) as pass_rate FROM eval_results GROUP BY run_date, category ORDER BY run_date, category"
+      }
+    },
+    {
+      "bindTo": "agent_trend",
+      "outputFile": "card-drift-trend-agents.json",
+      "sqlite": {
+        "db": "compliance.db",
+        "query": "SELECT run_date, agent_name as agent, SUM(CASE WHEN result='PASS' THEN 1 ELSE 0 END) as passed, SUM(CASE WHEN result='FAIL' THEN 1 ELSE 0 END) as failed, COUNT(*) as total, ROUND(SUM(CASE WHEN result='PASS' THEN 1.0 ELSE 0 END) / COUNT(*) * 100, 1) as pass_rate FROM eval_results GROUP BY run_date, agent_name ORDER BY run_date, agent_name"
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "latest_pass_rate",
+      "expr": "$round($average(fetched_sources.trend_data.pass_rate), 1) & '%'"
+    },
+    {
+      "bindTo": "trend_summary",
+      "expr": "'Overall pass rate: **' & computed_values.latest_pass_rate & '** across **' & $string($count($distinct(fetched_sources.trend_data.run_date))) & '** evaluation runs'"
+    }
+  ],
+  "provides": [
+    { "bindTo": "eval_trend", "ref": "fetched_sources.agent_trend" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Trend",
+        "data": { "bind": "computed_values.trend_summary" }
+      },
+      {
+        "kind": "form",
+        "label": "",
+        "data": {
+          "writeTo": "card_data.display_mode",
+          "fields": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "title": "Display as",
+                "enum": ["table", "chart"]
+              }
+            }
+          }
+        }
+      },
+      {
+        "kind": "ref",
+        "label": "Pass Rate by Category",
+        "data": {
+          "bind": "fetched_sources.trend_data",
+          "viewBind": "card_data.display_mode",
+          "fallbackKind": "table",
+          "columns": ["run_date", "category", "passed", "failed", "pass_rate"],
+          "chartType": "bar",
+          "chartOptions": { "indexAxis": "x" }
+        }
+      },
+      {
+        "kind": "table",
+        "label": "Per-Agent Pass Rate",
+        "data": { "bind": "fetched_sources.agent_trend", "columns": ["run_date", "agent", "passed", "failed", "pass_rate"], "sortable": true }
+      }
+    ],
+    "layout": {
+      "board": { "col": 6, "order": 9 },
+      "canvas": { "x": 1300, "y": 1020, "w": 560, "h": 500 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {
+    "display_mode": { "kind": "table" }
+  }
+}

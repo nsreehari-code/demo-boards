@@ -1,0 +1,80 @@
+{
+  "id": "card-agent-priority",
+  "meta": {
+    "title": "Agent Priority Distribution",
+    "tags": [
+      "compliance",
+      "priority"
+    ],
+    "desc": "Auto-buckets agents from inventory into Immediate / Normal / Monitor / Unassessed. Compliance Admins focus on Immediate first."
+  },
+  "requires": [
+    "agents"
+  ],
+  "compute": [
+    {
+      "bindTo": "immediate_agents",
+      "expr": "$filter(requires.agents, function($a) { $a.priority = 'Immediate' })"
+    },
+    {
+      "bindTo": "immediate_count",
+      "expr": "$count(computed_values.immediate_agents)"
+    },
+    {
+      "bindTo": "normal_count",
+      "expr": "$count($filter(requires.agents, function($a) { $a.priority = 'Normal' }))"
+    },
+    {
+      "bindTo": "monitor_count",
+      "expr": "$count($filter(requires.agents, function($a) { $a.priority = 'Monitor' }))"
+    },
+    {
+      "bindTo": "unassessed_count",
+      "expr": "$count($filter(requires.agents, function($a) { $a.priority = 'Unassessed' }))"
+    },
+    {
+      "bindTo": "summary",
+      "expr": "'**' & $string(computed_values.immediate_count) & '** Immediate  |  **' & $string(computed_values.normal_count) & '** Normal  |  **' & $string(computed_values.monitor_count) & '** Monitor  |  **' & $string(computed_values.unassessed_count) & '** Unassessed'"
+    }
+  ],
+  "provides": [
+    {
+      "bindTo": "immediate_agents",
+      "ref": "computed_values.immediate_agents"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Buckets",
+        "data": {
+          "bind": "computed_values.summary"
+        }
+      },
+      {
+        "kind": "table",
+        "label": "High-Priority Agents (Immediate)",
+        "data": {
+          "bind": "computed_values.immediate_agents"
+        }
+      }
+    ],
+    "layout": {
+      "board": {
+        "col": 4,
+        "order": 2
+      },
+      "canvas": {
+        "x": 700,
+        "y": 50,
+        "w": 500,
+        "h": 360
+      }
+    },
+    "features": {
+      "refresh": true
+    }
+  },
+  "card_data": {}
+}

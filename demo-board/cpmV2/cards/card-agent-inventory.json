@@ -1,0 +1,55 @@
+{
+  "id": "card-agent-inventory",
+  "meta": {
+    "title": "AI Agent Inventory",
+    "tags": [
+      "compliance",
+      "inventory"
+    ],
+    "desc": "Repository of AI agents under continuous compliance evaluation. Data sourced from SQLite (A365 inventory analog). Downstream cards consume this for priority bucketing and eval runs."
+  },
+  "provides": [
+    {
+      "bindTo": "agents",
+      "ref": "fetched_sources.agents"
+    }
+  ],
+  "source_defs": [
+    {
+      "bindTo": "agents",
+      "outputFile": "card-agent-inventory-data.json",
+      "sqlite": {
+        "db": "compliance.db",
+        "query": "SELECT name, platform, owner, priority, risk_score, last_eval, model_version FROM agents ORDER BY risk_score DESC"
+      }
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "table",
+        "label": "Agents",
+        "data": {
+          "bind": "fetched_sources.agents"
+        }
+      }
+    ],
+    "layout": {
+      "board": {
+        "col": 4,
+        "order": 1
+      },
+      "canvas": {
+        "x": 50,
+        "y": 50,
+        "w": 620,
+        "h": 400
+      }
+    },
+    "features": {
+      "refresh": true,
+      "chat": true
+    }
+  },
+  "card_data": {}
+}

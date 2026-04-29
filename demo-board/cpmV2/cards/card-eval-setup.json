@@ -1,0 +1,80 @@
+{
+  "id": "card-eval-setup",
+  "meta": {
+    "title": "Evaluation Setup",
+    "tags": ["compliance", "eval-setup", "v2"],
+    "desc": "V2: Configure which eval packs and regulation scopes apply. Admin selects packs (Baseline, EUAI, Custom) and jurisdiction. Selection propagates to downstream eval and drift cards."
+  },
+  "requires": ["eval_categories"],
+  "compute": [
+    {
+      "bindTo": "active_categories",
+      "expr": "card_data.selections.pack = 'all' ? requires.eval_categories : $filter(requires.eval_categories, function($c) { card_data.selections.pack = 'euai' ? $contains($c.regulation, 'Art') : card_data.selections.pack = 'baseline' ? true : true })"
+    },
+    {
+      "bindTo": "pack_summary",
+      "expr": "'**Active pack:** ' & card_data.selections.pack & '  |  **Jurisdiction:** ' & card_data.selections.jurisdiction & '  |  **' & $string($count(computed_values.active_categories)) & '** eval categories enabled'"
+    }
+  ],
+  "provides": [
+    { "bindTo": "eval_setup", "ref": "card_data.selections" },
+    { "bindTo": "active_eval_categories", "ref": "computed_values.active_categories" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "form",
+        "label": "Pack & Scope Configuration",
+        "data": {
+          "writeTo": "card_data.selections",
+          "fields": {
+            "type": "object",
+            "properties": {
+              "pack": {
+                "type": "string",
+                "title": "Evaluation Pack",
+                "enum": ["baseline", "euai", "custom", "all"],
+                "default": "all"
+              },
+              "jurisdiction": {
+                "type": "string",
+                "title": "Jurisdiction",
+                "enum": ["Global", "EU", "US", "UK", "APAC"],
+                "default": "Global"
+              },
+              "run_frequency": {
+                "type": "string",
+                "title": "Run Frequency",
+                "enum": ["daily", "weekly", "on-model-change", "manual"],
+                "default": "weekly"
+              }
+            },
+            "required": ["pack", "jurisdiction"]
+          }
+        }
+      },
+      {
+        "kind": "markdown",
+        "label": "Active Config",
+        "data": { "bind": "computed_values.pack_summary" }
+      },
+      {
+        "kind": "table",
+        "label": "Enabled Eval Categories",
+        "data": { "bind": "computed_values.active_categories", "columns": ["category", "mode", "regulation"], "maxRows": 10 }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 4 },
+      "canvas": { "x": 50, "y": 480, "w": 480, "h": 520 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {
+    "selections": {
+      "pack": "all",
+      "jurisdiction": "Global",
+      "run_frequency": "weekly"
+    }
+  }
+}

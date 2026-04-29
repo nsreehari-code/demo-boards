@@ -1,0 +1,42 @@
+{
+  "id": "card-eval-pack",
+  "meta": {
+    "title": "V1 Baseline Evaluation Pack",
+    "tags": ["compliance", "eval-pack", "reference"],
+    "desc": "Microsoft-curated baseline compliance evaluation pack. 9 evaluator categories mapped to EU AI Act articles. Only high-priority agents run these evals."
+  },
+  "provides": [
+    { "bindTo": "eval_categories", "ref": "fetched_sources.eval_categories" }
+  ],
+  "source_defs": [
+    {
+      "bindTo": "eval_categories",
+      "outputFile": "card-eval-pack-data.json",
+      "sqlite": {
+        "db": "compliance.db",
+        "query": "SELECT id as '#', category, evals, mode, regulation FROM eval_categories ORDER BY id"
+      }
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "narrative",
+        "data": { "bind": "card_data.pack_summary" }
+      },
+      {
+        "kind": "table",
+        "label": "Evaluators",
+        "data": { "bind": "fetched_sources.eval_categories" }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 3 },
+      "canvas": { "x": 50, "y": 480, "w": 620, "h": 520 }
+    },
+    "features": { "refresh": true }
+  },
+  "card_data": {
+    "pack_summary": "Default Compliance Evaluation Pack (V1 Baseline). Evals run on sampled production traces for high-priority agents. Target: 20 evaluators across 9 categories. Customer-authored evals default to LLM mode."
+  }
+}

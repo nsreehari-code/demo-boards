@@ -1,0 +1,69 @@
+{
+  "id": "card-remediation-workflow",
+  "meta": {
+    "title": "Owner Remediation Workflow",
+    "tags": ["compliance", "collaboration", "v2"],
+    "desc": "V2: Interactive remediation tracker for the Agent Owner persona. Todo checklist with status tracking, completion state publishes back to the DAG. Bridges Compliance Admin to Developer handoff."
+  },
+  "requires": ["eval_results", "immediate_agents"],
+  "compute": [
+    {
+      "bindTo": "failure_actions",
+      "expr": "$filter(requires.eval_results, function($r) { $r.result = 'FAIL' }).{ \"text\": agent & ' — ' & category & ': ' & details, \"done\": false, \"agent\": agent, \"category\": category }"
+    },
+    {
+      "bindTo": "completion_rate",
+      "expr": "$count(card_data.items) > 0 ? $round($count($filter(card_data.items, function($i) { $i.done })) / $count(card_data.items) * 100) : 0"
+    },
+    {
+      "bindTo": "status_summary",
+      "expr": "'**' & $string($count($filter(card_data.items, function($i) { $i.done }))) & '/' & $string($count(card_data.items)) & '** tasks completed (' & $string(computed_values.completion_rate) & '%)'"
+    }
+  ],
+  "provides": [
+    { "bindTo": "remediation_progress", "ref": "card_data.items" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Progress",
+        "data": { "bind": "computed_values.status_summary" }
+      },
+      {
+        "kind": "todo",
+        "label": "Remediation Checklist",
+        "data": {
+          "bind": "card_data.items",
+          "writeTo": "card_data.items",
+          "placeholder": "Add a remediation action..."
+        }
+      },
+      {
+        "kind": "actions",
+        "label": "Collaboration",
+        "data": {
+          "buttons": [
+            { "id": "assign-owners", "label": "Notify Owners", "style": "primary" },
+            { "id": "escalate", "label": "Escalate to Manager", "style": "danger" },
+            { "id": "export-report", "label": "Export Report", "style": "secondary" }
+          ]
+        }
+      }
+    ],
+    "layout": {
+      "board": { "col": 6, "order": 8 },
+      "canvas": { "x": 700, "y": 1020, "w": 560, "h": 480 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {
+    "items": [
+      { "text": "Legal Contract Reviewer — Security: Rotate exposed API keys and patch system prompt", "done": false },
+      { "text": "Legal Contract Reviewer — Regression & Drift: Schedule re-evaluation against baseline", "done": false },
+      { "text": "Legal Contract Reviewer — Determinism: Review prompt template for output stability", "done": true },
+      { "text": "HR Benefits Agent — Groundedness: Fix RAG pipeline citation gaps", "done": false },
+      { "text": "IT Helpdesk Copilot — Safety: Harden system prompt against social engineering", "done": false }
+    ]
+  }
+}
