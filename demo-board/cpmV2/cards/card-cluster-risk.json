@@ -1,0 +1,87 @@
+{
+  "id": "card-cluster-risk",
+  "meta": {
+    "title": "Agent Cluster Risk",
+    "tags": [
+      "compliance",
+      "clustering",
+      "risk"
+    ],
+    "desc": "Clusters agents from the AI Agent Inventory by owner + priority combination and assigns a risk ranking to each cluster."
+  },
+  "requires": [
+    "agents"
+  ],
+  "source_defs": [
+    {
+      "bindTo": "clusters",
+      "outputFile": "card-cluster-risk-data.json",
+      "projections": {
+        "agents": "requires.agents"
+      },
+      "copilot": {
+        "prompt_template": "You are a compliance-risk analyst. Given the AI agent inventory below, cluster the agents by each unique (owner, priority) combination. Then risk-rank every cluster.\n\nAgent inventory:\n{{agents}}\n\nRisk-ranking rules:\n- Immediate priority → base risk weight 4\n- Normal priority → base risk weight 3\n- Monitor priority → base risk weight 2\n- Unassessed priority → base risk weight 1 (unknown = risky)\n- Add +1 if the cluster has ≥ 3 agents (concentration risk)\n- Add +1 if any agent in the cluster has risk_score ≥ 75\n- Multiply Unassessed base weight by 2 (lack of assessment is high risk)\n\nIMPORTANT OUTPUT RULES:\n- Return ONLY valid JSON. No markdown fences, no preamble.\n- Start with { and end with }.\n\n{\n  \"clusters\": [\n    {\n      \"owner\": \"<owner name>\",\n      \"priority\": \"<priority level>\",\n      \"risk_rank\": <integer 1=highest risk>,\n      \"risk_label\": \"Critical | High | Medium | Low\",\n      \"risk_score\": <computed weight>,\n      \"agent_count\": <N>,\n      \"agents\": [\"<agent1>\", \"<agent2>\"],\n      \"max_agent_risk_score\": <highest risk_score among agents>,\n      \"rationale\": \"<1-line explanation of risk ranking>\"\n    }\n  ],\n  \"summary\": \"<1-line overall clustering summary>\"\n}"
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "cluster_table",
+      "expr": "$map(fetched_sources.clusters.clusters, function($c) { { 'Rank': $c.risk_rank, 'Risk': $c.risk_label, 'Owner': $c.owner, 'Priority': $c.priority, 'Agents': $c.agent_count, 'Score': $c.risk_score, 'Max Agent Risk': $c.max_agent_risk_score, 'Rationale': $c.rationale } })"
+    },
+    {
+      "bindTo": "summary",
+      "expr": "fetched_sources.clusters.summary"
+    },
+    {
+      "bindTo": "cluster_count",
+      "expr": "$string($count(fetched_sources.clusters.clusters))"
+    },
+    {
+      "bindTo": "headline",
+      "expr": "'**' & computed_values.cluster_count & '** owner × priority clusters identified. Ranked by composite risk score.'"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Overview",
+        "data": {
+          "bind": "computed_values.headline"
+        }
+      },
+      {
+        "kind": "markdown",
+        "label": "Summary",
+        "data": {
+          "bind": "computed_values.summary"
+        }
+      },
+      {
+        "kind": "table",
+        "label": "Cluster Risk Rankings",
+        "data": {
+          "bind": "computed_values.cluster_table"
+        }
+      }
+    ],
+    "layout": {
+      "board": {
+        "col": 4,
+        "order": 3
+      },
+      "canvas": {
+        "x": 700,
+        "y": 440,
+        "w": 560,
+        "h": 420
+      }
+    },
+    "features": {
+      "refresh": true,
+      "chat": true
+    }
+  },
+  "card_data": {}
+}

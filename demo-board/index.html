@@ -71,7 +71,25 @@
 
   <script>
     (function () {
-      const { buildLiveCardModelsFromArtifacts } = window.BoardLiveGraph || {};
+      // Guard: the runtime client's SSE handler calls buildLiveCardModelsFromArtifacts
+      // on every SSE message.  When the server poll hits an error it sends { error: "…" }
+      // which has no cardDefinitions → returns [] → syncBoardNodes removes all nodes →
+      // blank board.  Wrap the function so error/empty payloads return the last known
+      // good result instead of an empty array.
+      const _origBuild = window.BoardLiveGraph && window.BoardLiveGraph.buildLiveCardModelsFromArtifacts;
+      let _lastGoodNodes = null;
+      const buildLiveCardModelsFromArtifacts = function (payload) {
+        if (!payload || payload.error || !Array.isArray(payload.cardDefinitions) || payload.cardDefinitions.length === 0) {
+          console.warn('[sse-guard] skipping non-card payload:', payload && payload.error ? payload.error : '(no cardDefinitions)');
+          return _lastGoodNodes || [];
+        }
+        _lastGoodNodes = _origBuild(payload);
+        return _lastGoodNodes;
+      };
+      if (window.BoardLiveGraph) {
+        window.BoardLiveGraph.buildLiveCardModelsFromArtifacts = buildLiveCardModelsFromArtifacts;
+      }
+
       let currentMode = localStorage.getItem('demo-board-mode') || 'board';
       let devMode = localStorage.getItem('demo-board-devmode') === 'true';
       let bootstrapCompleted = false;
