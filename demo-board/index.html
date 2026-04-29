@@ -30,10 +30,10 @@
   </style>
   <script src="https://cdn.jsdelivr.net/npm/jsonata/jsonata.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.3.0/browser/card-compute.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.3.0/browser/live-cards.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.3.0/browser/board-livegraph-engine.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.3.0/browser/board-livecards-runtime-client.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.4.2/browser/card-compute.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.4.2/browser/live-cards.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.4.2/browser/board-livegraph-engine.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.4.2/browser/board-livecards-runtime-client.js"></script>
 </head>
 <body class="bg-light">
   <div id="topBar" class="d-flex flex-wrap align-items-center justify-content-between gap-2">
@@ -42,12 +42,17 @@
     </div>
     <div class="d-flex align-items-center gap-2">
       <select id="boardKeySelect" class="form-select form-select-sm" style="width: auto;"></select>
-      <button class="btn btn-sm btn-outline-primary" id="modeBoard">Board</button>
-      <button class="btn btn-sm btn-outline-primary" id="modeCanvas">Canvas</button>
-      <div class="form-check ms-2">
-        <input class="form-check-input" type="checkbox" id="devModeToggle" />
-        <label class="form-check-label" for="devModeToggle">Dev Mode</label>
+      <div class="btn-group btn-group-sm" role="group" aria-label="View mode">
+        <button class="btn btn-outline-primary active" id="modeBoard">Board</button>
+        <button class="btn btn-outline-primary" id="modeCanvas">Canvas</button>
       </div>
+      <button class="btn btn-sm btn-outline-secondary" id="devModeToggle">Dev Mode</button>
+      <button class="btn btn-sm btn-outline-secondary ms-1" id="refreshBtn" title="Refresh all boards (upsert + restart)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+          <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 1 1 .908-.418A6 6 0 1 1 8 2v1z"/>
+          <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966a.25.25 0 0 1 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+        </svg>
+      </button>
     </div>
   </div>
 
@@ -67,7 +72,8 @@
   <script>
     (function () {
       const { buildLiveCardModelsFromArtifacts } = window.BoardLiveGraph || {};
-      let currentMode = 'board';
+      let currentMode = localStorage.getItem('demo-board-mode') || 'board';
+      let devMode = localStorage.getItem('demo-board-devmode') === 'true';
       let bootstrapCompleted = false;
       let activeBoardId = 'default';
       let runtimeClient = null;
@@ -135,6 +141,22 @@
         throw new Error(`Unable to reach example-board demo server. Tried: ${failures.join(' | ')}. ${tip}`);
       }
 
+      // Apply persisted UI state to toolbar before bootstrap
+      function syncModeButtons(mode) {
+        var boardBtn = document.getElementById('modeBoard');
+        var canvasBtn = document.getElementById('modeCanvas');
+        boardBtn.classList.toggle('active', mode === 'board');
+        canvasBtn.classList.toggle('active', mode === 'canvas');
+      }
+      function syncDevModeButton(on) {
+        var btn = document.getElementById('devModeToggle');
+        btn.classList.toggle('active', on);
+        btn.classList.toggle('btn-outline-secondary', !on);
+        btn.classList.toggle('btn-secondary', on);
+      }
+      syncModeButtons(currentMode);
+      syncDevModeButton(devMode);
+
       runtimeClient = window.ReusableBoardRuntimeClient.createBoardRuntimeClient({
         fetchServer,
         boardPaths,
@@ -195,20 +217,47 @@
         });
 
         bootstrapCompleted = true;
+        if (devMode) runtimeClient.setDevMode(true);
       }
 
       document.getElementById('modeBoard').addEventListener('click', function () {
         currentMode = 'board';
+        localStorage.setItem('demo-board-mode', 'board');
+        syncModeButtons('board');
         runtimeClient.setMode('board');
       });
 
       document.getElementById('modeCanvas').addEventListener('click', function () {
         currentMode = 'canvas';
+        localStorage.setItem('demo-board-mode', 'canvas');
+        syncModeButtons('canvas');
         runtimeClient.setMode('canvas');
       });
 
-      document.getElementById('devModeToggle').addEventListener('change', function () {
-        runtimeClient.setDevMode(this.checked);
+      document.getElementById('devModeToggle').addEventListener('click', function () {
+        devMode = !devMode;
+        localStorage.setItem('demo-board-devmode', String(devMode));
+        syncDevModeButton(devMode);
+        runtimeClient.setDevMode(devMode);
+      });
+
+      document.getElementById('refreshBtn').addEventListener('click', async function () {
+        var btn = this;
+        btn.disabled = true;
+        btn.classList.replace('btn-outline-secondary', 'btn-warning');
+        try {
+          var res = await fetchServer('/api/refresh', { method: 'POST' });
+          var data = await res.json();
+          console.log('[refresh]', data);
+          btn.classList.replace('btn-warning', 'btn-success');
+          setTimeout(function () { btn.classList.replace('btn-success', 'btn-outline-secondary'); }, 2000);
+        } catch (err) {
+          console.error('[refresh] error:', err);
+          btn.classList.replace('btn-warning', 'btn-danger');
+          setTimeout(function () { btn.classList.replace('btn-danger', 'btn-outline-secondary'); }, 3000);
+        } finally {
+          btn.disabled = false;
+        }
       });
 
       async function start() {

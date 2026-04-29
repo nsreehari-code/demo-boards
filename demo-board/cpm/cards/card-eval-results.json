@@ -1,0 +1,52 @@
+{
+  "id": "card-eval-results",
+  "meta": {
+    "title": "Evaluation Results",
+    "tags": ["compliance", "eval", "evidence"],
+    "desc": "Latest eval run results for high-priority agents from SQLite. Shows pass/fail per evaluation category. This is the evidence plane — proving controls are operating effectively."
+  },
+  "provides": [
+    { "bindTo": "eval_results", "ref": "fetched_sources.results_pivot" }
+  ],
+  "source_defs": [
+    {
+      "bindTo": "results_pivot",
+      "outputFile": "card-eval-results-pivot.json",
+      "sqlite": {
+        "db": "compliance.db",
+        "query": "SELECT agent_name as agent, MAX(CASE WHEN category='Scope' THEN result END) as scope, MAX(CASE WHEN category='Adherence' THEN result END) as adherence, MAX(CASE WHEN category='Determinism' THEN result END) as determinism, MAX(CASE WHEN category='Groundedness' THEN result END) as groundedness, MAX(CASE WHEN category='Regression & Drift' THEN result END) as drift, MAX(CASE WHEN category='Safety / Red-Teaming' THEN result END) as safety, MAX(CASE WHEN category='Content Safety' THEN result END) as content_safety, MAX(CASE WHEN category='Security' THEN result END) as security, MAX(CASE WHEN category='RAG' THEN result END) as rag FROM eval_results er JOIN agents a ON er.agent_name = a.name WHERE a.priority = 'Immediate' GROUP BY agent_name ORDER BY agent_name"
+      }
+    },
+    {
+      "bindTo": "results_stats",
+      "outputFile": "card-eval-results-stats.json",
+      "sqlite": {
+        "db": "compliance.db",
+        "query": "SELECT MAX(run_date) as last_run, COUNT(*) as total, SUM(CASE WHEN result='PASS' THEN 1 ELSE 0 END) as passed, SUM(CASE WHEN result='FAIL' THEN 1 ELSE 0 END) as failed, SUM(CASE WHEN result='PENDING' THEN 1 ELSE 0 END) as pending FROM eval_results er JOIN agents a ON er.agent_name = a.name WHERE a.priority = 'Immediate'"
+      }
+    }
+  ],
+  "compute": [
+    { "bindTo": "run_summary", "expr": "'Last run: ' & fetched_sources.results_stats[0].last_run & ' — ' & $string(fetched_sources.results_stats[0].total) & ' eval runs. **' & $string(fetched_sources.results_stats[0].passed) & ' passed**, **' & $string(fetched_sources.results_stats[0].failed) & ' failed**, **' & $string(fetched_sources.results_stats[0].pending) & ' pending**.'" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Summary",
+        "data": { "bind": "computed_values.run_summary" }
+      },
+      {
+        "kind": "table",
+        "label": "Results by Agent × Category",
+        "data": { "bind": "fetched_sources.results_pivot" }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 4 },
+      "canvas": { "x": 700, "y": 440, "w": 560, "h": 520 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {}
+}

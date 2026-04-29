@@ -1,0 +1,49 @@
+{
+  "id": "card-owner-actions",
+  "meta": {
+    "title": "Remediation Tasks",
+    "tags": ["compliance", "remediation", "collaboration"],
+    "desc": "Open remediation tasks for agent owners. Tracks actions generated from eval failures — the collaboration bridge between Compliance Admins and Agent Owners."
+  },
+  "source_defs": [
+    {
+      "bindTo": "tasks",
+      "outputFile": "card-owner-actions-data.json",
+      "sqlite": {
+        "db": "compliance.db",
+        "query": "SELECT agent_name as agent, owner, category, action, status, created_date, regulation FROM remediation_tasks WHERE status != 'closed' ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END, created_date DESC"
+      }
+    },
+    {
+      "bindTo": "task_stats",
+      "outputFile": "card-owner-actions-stats.json",
+      "sqlite": {
+        "db": "compliance.db",
+        "query": "SELECT COUNT(*) as total, SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) as open_tasks, SUM(CASE WHEN status='in_progress' THEN 1 ELSE 0 END) as in_progress, COUNT(DISTINCT agent_name) as affected_agents, COUNT(DISTINCT owner) as owners_involved FROM remediation_tasks WHERE status != 'closed'"
+      }
+    }
+  ],
+  "compute": [
+    { "bindTo": "summary", "expr": "'**' & $string(fetched_sources.task_stats[0].total) & '** active tasks across **' & $string(fetched_sources.task_stats[0].affected_agents) & '** agents — **' & $string(fetched_sources.task_stats[0].open_tasks) & '** open, **' & $string(fetched_sources.task_stats[0].in_progress) & '** in progress. **' & $string(fetched_sources.task_stats[0].owners_involved) & '** owners involved.'" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Status",
+        "data": { "bind": "computed_values.summary" }
+      },
+      {
+        "kind": "table",
+        "label": "Active Remediation Tasks",
+        "data": { "bind": "fetched_sources.tasks" }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 7 },
+      "canvas": { "x": 50, "y": 1020, "w": 620, "h": 400 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {}
+}

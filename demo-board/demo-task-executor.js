@@ -496,6 +496,40 @@ function runSourceFetchSubcommand(argv) {
       fail(`teams/${action}: ${msg}`, errFile);
     }
 
+  } else if (sourceDef.sqlite) {
+    // ---------------------------------------------------------------------------
+    // sqlite — query a SQLite database via scripts/sqlite/query.cjs.
+    // db is a filename; query.cjs resolves it to scripts/sqlite/.retain/<name>.
+    // {{key}} interpolation applied to params from _projections.
+    // ---------------------------------------------------------------------------
+    const cfg = typeof sourceDef.sqlite === 'object' ? sourceDef.sqlite : {};
+    if (!cfg.db || !cfg.query) {
+      fail('sqlite: db and query are required', errFile);
+    }
+    const queryScript = path.join(__dirname, 'scripts', 'sqlite', 'query.cjs');
+    const cliArgs = ['--db', cfg.db, '--sql', cfg.query];
+    if (cfg.params) {
+      const resolvedParams = Array.isArray(cfg.params)
+        ? cfg.params.map(p => typeof p === 'string' ? interpolatePrompt(p, sourceDef._projections || {}) : p)
+        : [];
+      cliArgs.push('--params', JSON.stringify(resolvedParams));
+    }
+    if (cfg.mode === 'exec') {
+      cliArgs.push('--mode', 'exec');
+    }
+    try {
+      const raw = execFileSync(process.execPath, [queryScript, ...cliArgs], {
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 30_000,
+        cwd: __dirname,
+      });
+      resultValue = raw.trim() ? JSON.parse(raw) : [];
+    } catch (err) {
+      const msg = err.stderr ? err.stderr.trim() : (err.message || String(err));
+      fail(`sqlite query failed: ${msg}`, errFile);
+    }
+
   } else if (sourceDef.mock) {
     // MOCK_DB lookup — data hardcoded at the top of this file
     resultValue = MOCK_DB[sourceDef.mock];
@@ -503,7 +537,7 @@ function runSourceFetchSubcommand(argv) {
       fail(`Key "${sourceDef.mock}" not found in MOCK_DB`, errFile);
     }
   } else {
-    fail('No recognised source kind (url, url-list, copilot, workiq, teams, mock)', errFile);
+    fail('No recognised source kind (url, url-list, copilot, workiq, teams, sqlite, mock)', errFile);
   }
 
   // Write result to --out as JSON payload, same contract as current mock mode.
@@ -549,12 +583,13 @@ function validateSourceDefSubcommand(argv) {
   const hasCopilot    = !!sourceDef.copilot;
   const hasWorkiq     = !!sourceDef.workiq;
   const hasTeams      = !!sourceDef.teams;
+  const hasSqlite     = !!sourceDef.sqlite;
   const hasMock       = sourceDef.mock !== undefined;
 
-  const kindCount = [hasUrl, hasUrlList, hasCopilot, hasWorkiq, hasTeams, hasMock].filter(Boolean).length;
+  const kindCount = [hasUrl, hasUrlList, hasCopilot, hasWorkiq, hasTeams, hasSqlite, hasMock].filter(Boolean).length;
 
   if (kindCount === 0) {
-    errors.push('No recognised source kind (url, url-list, copilot, workiq, teams, mock). Add one of these fields.');
+    errors.push('No recognised source kind (url, url-list, copilot, workiq, teams, sqlite, mock). Add one of these fields.');
   } else if (kindCount > 1) {
     const kinds = [];
     if (hasUrl)  kinds.push('url');
@@ -562,6 +597,7 @@ function validateSourceDefSubcommand(argv) {
     if (hasCopilot) kinds.push('copilot');
     if (hasWorkiq)    kinds.push('workiq');
     if (hasTeams)     kinds.push('teams');
+    if (hasSqlite)    kinds.push('sqlite');
     if (hasMock)      kinds.push('mock');
     errors.push(`Multiple source kinds specified: [${kinds.join(', ')}]. Use exactly one.`);
   }
@@ -606,6 +642,19 @@ function validateSourceDefSubcommand(argv) {
       const validActions = ['list-teams', 'list-channels', 'read-channel', 'post-message', 'reply-to-message', 'search-messages'];
       if (!sourceDef.teams.action || !validActions.includes(sourceDef.teams.action)) {
         errors.push(`teams.action is required and must be one of: ${validActions.join(', ')}.`);
+      }
+    }
+  }
+
+  if (hasSqlite) {
+    if (typeof sourceDef.sqlite !== 'object') {
+      errors.push('sqlite must be an object.');
+    } else {
+      if (!sourceDef.sqlite.db || typeof sourceDef.sqlite.db !== 'string') {
+        errors.push('sqlite.db is required and must be a string path.');
+      }
+      if (!sourceDef.sqlite.query || typeof sourceDef.sqlite.query !== 'string') {
+        errors.push('sqlite.query is required and must be a SQL string.');
       }
     }
   }
@@ -701,6 +750,22 @@ const CAPABILITIES = {
       },
       outputShape: 'Array of raw JSON responses, one per URL in _projections.url_list.',
       urlListNote: 'Declare `"projections": { "url_list": "<JSONata producing string[]>" }` on the source def. Example: `requires.holdings.ticker.(\'https://api.example.com/\' & $ & \'?q=1\')`',
+    },
+    sqlite: {
+      description: 'Query a SQLite database. DB filename resolved relative to scripts/sqlite/.retain/. Supports SELECT (returns row array) and exec mode for INSERT/UPDATE/DELETE. Shells out to scripts/sqlite/query.cjs.',
+      inputSchema: {
+        sqlite: {
+          type: 'object', required: true,
+          properties: {
+            db:     { type: 'string', required: true,  description: 'DB filename, resolved relative to scripts/sqlite/.retain/ (e.g. "compliance.db").' },
+            query:  { type: 'string', required: true,  description: 'SQL query. Use ? placeholders for params.' },
+            params: { type: 'array',  required: false, description: 'Bind parameters. Strings support {{key}} interpolation from _projections.' },
+            mode:   { type: 'string', required: false, description: '"query" (default, returns rows) or "exec" (returns { changes, lastInsertRowid }).' },
+          },
+        },
+      },
+      outputShape: 'Array of row objects (query mode) or { changes, lastInsertRowid } (exec mode).',
+      note: 'Requires better-sqlite3 npm package. DB file must exist (use seed script to create).',
     },
     teams: {
       description: 'Microsoft Graph API for Teams via Zoltbook Python CLI. Provides enriched messages with AI detection, thread views, reactions, and agent-formatted posting. Shells out to scripts/zoltbook/cli.py.',

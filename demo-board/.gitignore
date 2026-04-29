@@ -2,3 +2,5 @@ __pycache__/
 live/*
 !live/cards/
 !live/gandalf-cards/
+!.retain/
+!.retain/**

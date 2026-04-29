@@ -175,6 +175,34 @@ async function handleWorkiqAsk(req, res) {
   });
 }
 
+async function handleRefreshBoards(_req, res) {
+  if (!sharedCliJs || !fs.existsSync(sharedCliJs)) {
+    return jsonReply(res, 503, { error: 'board-live-cards-cli not found' });
+  }
+  const results = [];
+  for (const { key, runtime } of boardRuntimes) {
+    const setupDir = runtime.setupDir;
+    if (!setupDir) { results.push({ board: key, status: 'skipped', reason: 'no setupDir' }); continue; }
+    const cardsGlob = path.join(setupDir, 'cards', '*.json');
+    try {
+      const r = spawnSync(process.execPath, [
+        sharedCliJs, 'upsert-card',
+        '--rg', setupDir,
+        '--card-glob', cardsGlob,
+        '--restart',
+      ], { cwd: __dirname, timeout: 30_000, encoding: 'utf-8' });
+      if (r.status === 0) {
+        results.push({ board: key, status: 'ok', stdout: (r.stdout || '').trim() });
+      } else {
+        results.push({ board: key, status: 'error', code: r.status, stderr: (r.stderr || '').trim() });
+      }
+    } catch (err) {
+      results.push({ board: key, status: 'error', message: err.message });
+    }
+  }
+  return jsonReply(res, 200, { refreshed: results });
+}
+
 const server = http.createServer((req, res) => {
   const method = req.method || 'GET';
   const pathname = new URL(req.url || '/', 'http://localhost').pathname;
@@ -194,6 +222,12 @@ const server = http.createServer((req, res) => {
   // Route: POST /api/workiq/ask — proxy to WorkIQ (M365 Copilot) from server TTY
   if (method === 'POST' && pathname === '/api/workiq/ask') {
     void handleWorkiqAsk(req, res);
+    return;
+  }
+
+  // Route: POST /api/refresh — upsert-card --card-glob --restart for every configured board
+  if (method === 'POST' && pathname === '/api/refresh') {
+    void handleRefreshBoards(req, res);
     return;
   }
 
@@ -222,4 +256,5 @@ server.listen(PORT, '127.0.0.1', () => {
     console.log(`  POST /api/${key}/:boardId/cards/:id/actions`);
   }
   console.log('  POST /api/workiq/ask  {query}                    <- WorkIQ proxy');
+  console.log('  POST /api/refresh                                 <- upsert + restart all boards');
 });

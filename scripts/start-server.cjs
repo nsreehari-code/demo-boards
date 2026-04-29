@@ -48,10 +48,10 @@ const backend = spawn(process.execPath, [demoServerPath], {
 
 let frontend = null;
 if (modeFlag === '--all') {
-  frontend = spawn('npx', ['http-server', boardDir, '-p', '8000', '-c-1'], {
+  const httpServerEntry = require.resolve('http-server/bin/http-server');
+  frontend = spawn(process.execPath, [httpServerEntry, boardDir, '-p', '8000', '-c-1'], {
     cwd: workspaceDir,
     stdio: 'inherit',
-    shell: true,
   });
 }
 
