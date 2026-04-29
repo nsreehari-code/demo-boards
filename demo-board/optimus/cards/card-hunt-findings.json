@@ -1,0 +1,55 @@
+{
+  "id": "card-hunt-findings",
+  "meta": {
+    "title": "Validated Findings",
+    "tags": ["optimus", "crucible", "findings"],
+    "desc": "CRUCIBLE-validated findings with full TAPC scores, Admiralty/NATO confidence codes, and MITRE ATT&CK technique mappings. Only B1/B2 findings reach the analyst."
+  },
+  "provides": [
+    { "bindTo": "findings", "ref": "fetched_sources.findings" }
+  ],
+  "source_defs": [
+    {
+      "bindTo": "findings",
+      "outputFile": "card-hunt-findings-data.json",
+      "sqlite": {
+        "db": "optimus.db",
+        "query": "SELECT entity, org_id, ROUND(tapc_score, 2) as tapc_score, admiralty_code, mitre_technique, kill_chain_stage, status, summary FROM findings ORDER BY tapc_score DESC"
+      }
+    },
+    {
+      "bindTo": "finding_stats",
+      "outputFile": "card-hunt-findings-stats.json",
+      "sqlite": {
+        "db": "optimus.db",
+        "query": "SELECT COUNT(*) as total, SUM(CASE WHEN admiralty_code='B1' THEN 1 ELSE 0 END) as b1_confirmed, SUM(CASE WHEN admiralty_code='B2' THEN 1 ELSE 0 END) as b2_probable, SUM(CASE WHEN status='downgraded' THEN 1 ELSE 0 END) as downgraded, COUNT(DISTINCT org_id) as orgs_hit, ROUND(AVG(tapc_score), 2) as avg_tapc FROM findings"
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "findings_summary",
+      "expr": "'**' & $string(fetched_sources.finding_stats[0].total) & '** findings  |  🔴 **' & $string(fetched_sources.finding_stats[0].b1_confirmed) & '** B1 confirmed  |  🟠 **' & $string(fetched_sources.finding_stats[0].b2_probable) & '** B2 probable  |  ⬇ **' & $string(fetched_sources.finding_stats[0].downgraded) & '** downgraded  |  **' & $string(fetched_sources.finding_stats[0].orgs_hit) & '** orgs  |  Avg TAPC: **' & $string(fetched_sources.finding_stats[0].avg_tapc) & '**'"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "CRUCIBLE Output",
+        "data": { "bind": "computed_values.findings_summary" }
+      },
+      {
+        "kind": "table",
+        "label": "Findings",
+        "data": { "bind": "fetched_sources.findings" }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 5 },
+      "canvas": { "x": 50, "y": 910, "w": 620, "h": 480 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {}
+}

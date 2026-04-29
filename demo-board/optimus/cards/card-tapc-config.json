@@ -1,0 +1,56 @@
+{
+  "id": "card-tapc-config",
+  "meta": {
+    "title": "TAPC Scoring Engine",
+    "tags": ["optimus", "tapc", "reference"],
+    "desc": "The mathematical backbone of OPTIMUS. TAPC = T×0.4 + A×0.2 + P×0.3 + C×0.1. Every observable gets scored before any hunting logic executes."
+  },
+  "provides": [
+    { "bindTo": "tapc_config", "ref": "fetched_sources.tapc" }
+  ],
+  "source_defs": [
+    {
+      "bindTo": "tapc",
+      "outputFile": "card-tapc-config-data.json",
+      "sqlite": {
+        "db": "optimus.db",
+        "query": "SELECT component, signal, weight, description FROM tapc_config ORDER BY CASE component WHEN 'T' THEN 1 WHEN 'A' THEN 2 WHEN 'P' THEN 3 WHEN 'C' THEN 4 ELSE 5 END, weight DESC"
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "formula",
+      "expr": "'**TAPC** = T×0.4 + A×0.2 + P×0.3 + C×0.1  |  **PreGraphTA** = T×0.4 + A×0.2  |  Promote if ≥ 0.35'"
+    },
+    {
+      "bindTo": "signal_count",
+      "expr": "'**' & $string($count(fetched_sources.tapc)) & '** scoring signals configured (including ' & $string($count($filter(fetched_sources.tapc, function($t) { $t.component = 'negative' }))) & ' negative evidence rules)'"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Formula",
+        "data": { "bind": "computed_values.formula" }
+      },
+      {
+        "kind": "markdown",
+        "label": "Signals",
+        "data": { "bind": "computed_values.signal_count" }
+      },
+      {
+        "kind": "table",
+        "label": "TAPC Signals",
+        "data": { "bind": "fetched_sources.tapc" }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 2 },
+      "canvas": { "x": 640, "y": 50, "w": 560, "h": 400 }
+    },
+    "features": { "refresh": true }
+  },
+  "card_data": {}
+}

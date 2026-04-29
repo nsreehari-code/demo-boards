@@ -1,0 +1,90 @@
+{
+  "id": "card-campaign-trend",
+  "meta": {
+    "title": "Campaign & Trend",
+    "tags": ["optimus", "trend", "monitoring"],
+    "desc": "Historical scan results across hunt cycles. Visualizes candidate volume, promotion rates, and finding counts per plane over time. Chart/table toggle via ref+form pattern."
+  },
+  "source_defs": [
+    {
+      "bindTo": "plane_trend",
+      "outputFile": "card-campaign-trend-planes.json",
+      "sqlite": {
+        "db": "optimus.db",
+        "query": "SELECT run_date, plane, candidates_found, promoted, findings_validated, fp_killed FROM scan_history ORDER BY run_date, plane"
+      }
+    },
+    {
+      "bindTo": "cycle_summary",
+      "outputFile": "card-campaign-trend-cycles.json",
+      "sqlite": {
+        "db": "optimus.db",
+        "query": "SELECT run_date, SUM(candidates_found) as total_candidates, SUM(promoted) as total_promoted, SUM(findings_validated) as total_findings, SUM(fp_killed) as total_fp_killed, ROUND(SUM(promoted) * 1.0 / SUM(candidates_found) * 100, 1) as promotion_rate FROM scan_history GROUP BY run_date ORDER BY run_date"
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "trend_summary",
+      "expr": "'**' & $string($count($distinct(fetched_sources.cycle_summary.run_date))) & '** hunt cycles  |  Latest promotion rate: **' & $string(fetched_sources.cycle_summary[-1].promotion_rate) & '%**  |  Total findings: **' & $string($sum(fetched_sources.cycle_summary.total_findings)) & '**'"
+    }
+  ],
+  "provides": [
+    { "bindTo": "scan_trend", "ref": "fetched_sources.cycle_summary" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Trend",
+        "data": { "bind": "computed_values.trend_summary" }
+      },
+      {
+        "kind": "form",
+        "label": "",
+        "data": {
+          "writeTo": "card_data.display_mode",
+          "fields": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "title": "Display as",
+                "enum": ["table", "chart"]
+              }
+            }
+          }
+        }
+      },
+      {
+        "kind": "ref",
+        "label": "Cycle Totals",
+        "data": {
+          "bind": "fetched_sources.cycle_summary",
+          "viewBind": "card_data.display_mode",
+          "fallbackKind": "table",
+          "columns": ["run_date", "total_candidates", "total_promoted", "total_findings", "promotion_rate"],
+          "chartType": "bar",
+          "chartOptions": { "indexAxis": "x" }
+        }
+      },
+      {
+        "kind": "table",
+        "label": "Per-Plane Breakdown",
+        "data": {
+          "bind": "fetched_sources.plane_trend",
+          "columns": ["run_date", "plane", "candidates_found", "promoted", "findings_validated"],
+          "sortable": true
+        }
+      }
+    ],
+    "layout": {
+      "board": { "col": 6, "order": 12 },
+      "canvas": { "x": 1170, "y": 1500, "w": 600, "h": 480 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {
+    "display_mode": { "kind": "table" }
+  }
+}

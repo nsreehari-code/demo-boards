@@ -1,0 +1,47 @@
+{
+  "id": "card-agent-roster",
+  "meta": {
+    "title": "Agent Roster",
+    "tags": ["optimus", "agents"],
+    "desc": "The four OPTIMUS agents: BEACON (scanner), WEAVER (graph), CRUCIBLE (validator), RUBBER DUCK (critic). Each operates independently under the master orchestrator."
+  },
+  "provides": [
+    { "bindTo": "agents", "ref": "fetched_sources.agents" }
+  ],
+  "source_defs": [
+    {
+      "bindTo": "agents",
+      "outputFile": "card-agent-roster-data.json",
+      "sqlite": {
+        "db": "optimus.db",
+        "query": "SELECT name, role, model, tool_count, status, last_run FROM agents ORDER BY id"
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "roster_summary",
+      "expr": "'**' & $string($count(fetched_sources.agents)) & '** agents  |  **' & $string($sum(fetched_sources.agents.tool_count)) & '** MCP tools  |  All status: ' & $join($distinct(fetched_sources.agents.status), ', ')"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Status",
+        "data": { "bind": "computed_values.roster_summary" }
+      },
+      {
+        "kind": "table",
+        "label": "Agents",
+        "data": { "bind": "fetched_sources.agents" }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 3 },
+      "canvas": { "x": 50, "y": 480, "w": 560, "h": 340 }
+    },
+    "features": { "refresh": true }
+  },
+  "card_data": {}
+}

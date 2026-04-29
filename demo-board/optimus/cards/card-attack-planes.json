@@ -1,0 +1,47 @@
+{
+  "id": "card-attack-planes",
+  "meta": {
+    "title": "Attack Planes",
+    "tags": ["optimus", "planes", "reference"],
+    "desc": "The 7 attack planes OPTIMUS scans. Each plane has dedicated KQL queries, T-signal scoring, and data sources. Cross-plane correlation is where the real signal lives."
+  },
+  "provides": [
+    { "bindTo": "attack_planes", "ref": "fetched_sources.planes" }
+  ],
+  "source_defs": [
+    {
+      "bindTo": "planes",
+      "outputFile": "card-attack-planes-data.json",
+      "sqlite": {
+        "db": "optimus.db",
+        "query": "SELECT plane, data_source, signal_type, t_weight, description FROM attack_planes ORDER BY t_weight DESC"
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "plane_count",
+      "expr": "$string($count(fetched_sources.planes)) & ' attack planes monitored'"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Coverage",
+        "data": { "bind": "computed_values.plane_count" }
+      },
+      {
+        "kind": "table",
+        "label": "Attack Surface",
+        "data": { "bind": "fetched_sources.planes" }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 1 },
+      "canvas": { "x": 50, "y": 50, "w": 560, "h": 400 }
+    },
+    "features": { "refresh": true }
+  },
+  "card_data": {}
+}

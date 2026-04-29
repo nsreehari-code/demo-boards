@@ -1,0 +1,50 @@
+{
+  "id": "card-threat-analysis",
+  "meta": {
+    "title": "Threat Analysis",
+    "tags": ["optimus", "copilot", "analysis"],
+    "desc": "AI-generated threat posture summary from validated findings, scan candidates, FP patterns, and attack plane coverage. Powered by Copilot."
+  },
+  "requires": ["findings", "candidates", "fp_patterns", "attack_planes"],
+  "source_defs": [
+    {
+      "bindTo": "analysis",
+      "outputFile": "card-threat-analysis-data.json",
+      "projections": {
+        "findings": "requires.findings",
+        "candidates": "requires.candidates",
+        "fp_patterns": "requires.fp_patterns",
+        "attack_planes": "requires.attack_planes"
+      },
+      "copilot": {
+        "prompt_template": "You are a threat intelligence analyst for OPTIMUS, a multi-agent threat hunting system for Microsoft Defender Experts.\n\nAttack planes monitored:\n{{attack_planes}}\n\nPromoted scan candidates (BEACON output):\n{{candidates}}\n\nValidated findings (CRUCIBLE output):\n{{findings}}\n\nFalse positive patterns suppressed:\n{{fp_patterns}}\n\nIMPORTANT OUTPUT RULES:\n- Return ONLY valid JSON. No markdown fences, no preamble.\n- Start with { and end with }.\n- No emojis. Values are Markdown strings with - bullet points. Max 60 words per section.\n\n{\n  \"threat_posture\": \"<one sentence overall threat posture across DEX tenants>\",\n  \"critical_findings\": \"- <finding 1: entity, technique, kill chain stage, TAPC score>\\n- <finding 2>\\n- (one bullet per B1/B2 finding)\",\n  \"attack_patterns\": \"- <dominant attack pattern observed across findings>\\n- <cross-tenant infrastructure reuse if any>\\n- <kill chain stages most active>\",\n  \"coverage_gaps\": \"- <planes with low scan yield>\\n- <areas where FP suppression may be too aggressive>\\n- <detection blind spots>\",\n  \"recommendations\": \"- <#1 most urgent action for the analyst>\\n- <#2>\\n- <#3>\"\n}"
+      }
+    }
+  ],
+  "compute": [
+    { "bindTo": "threat_posture", "expr": "fetched_sources.analysis.threat_posture" },
+    { "bindTo": "critical_findings", "expr": "fetched_sources.analysis.critical_findings" },
+    { "bindTo": "attack_patterns", "expr": "fetched_sources.analysis.attack_patterns" },
+    { "bindTo": "coverage_gaps", "expr": "fetched_sources.analysis.coverage_gaps" },
+    { "bindTo": "recommendations", "expr": "fetched_sources.analysis.recommendations" }
+  ],
+  "provides": [
+    { "bindTo": "threat_summary", "ref": "computed_values.threat_posture" },
+    { "bindTo": "critical_findings", "ref": "computed_values.critical_findings" }
+  ],
+  "view": {
+    "elements": [
+      { "kind": "markdown", "label": "Threat Posture", "data": { "bind": "computed_values.threat_posture" } },
+      { "kind": "markdown", "label": "Critical Findings", "data": { "bind": "computed_values.critical_findings" } },
+      { "kind": "markdown", "label": "Attack Patterns", "data": { "bind": "computed_values.attack_patterns" } },
+      { "kind": "markdown", "label": "Coverage Gaps", "data": { "bind": "computed_values.coverage_gaps" } },
+      { "kind": "markdown", "label": "Recommendations", "data": { "bind": "computed_values.recommendations" } }
+    ],
+    "layout": {
+      "board": { "col": 3, "order": 8 },
+      "canvas": { "x": 1240, "y": 440, "w": 500, "h": 520 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {}
+}

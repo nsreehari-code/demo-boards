@@ -1,0 +1,86 @@
+{
+  "id": "card-hunt-config",
+  "meta": {
+    "title": "Hunt Configuration",
+    "tags": ["optimus", "config", "v2"],
+    "desc": "Configure the hunt cycle: select attack planes to scan, time window, TAPC promotion threshold, and scan mode. Settings propagate to downstream pipeline cards."
+  },
+  "requires": ["attack_planes", "tapc_config"],
+  "compute": [
+    {
+      "bindTo": "active_planes",
+      "expr": "card_data.hunt_settings.planes = 'all' ? requires.attack_planes : $filter(requires.attack_planes, function($p) { $contains(card_data.hunt_settings.planes, $p.plane) })"
+    },
+    {
+      "bindTo": "config_summary",
+      "expr": "'**Planes:** ' & card_data.hunt_settings.planes & '  |  **Window:** ' & card_data.hunt_settings.time_window & '  |  **Threshold:** ' & $string(card_data.hunt_settings.promotion_threshold) & '  |  **Mode:** ' & card_data.hunt_settings.scan_mode"
+    }
+  ],
+  "provides": [
+    { "bindTo": "hunt_setup", "ref": "card_data.hunt_settings" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "form",
+        "label": "Hunt Parameters",
+        "data": {
+          "writeTo": "card_data.hunt_settings",
+          "fields": {
+            "type": "object",
+            "properties": {
+              "planes": {
+                "type": "string",
+                "title": "Attack Planes",
+                "enum": ["all", "identity", "cloud", "endpoint", "network"],
+                "default": "all"
+              },
+              "time_window": {
+                "type": "string",
+                "title": "Scan Window",
+                "enum": ["1h", "6h", "24h", "7d"],
+                "default": "24h"
+              },
+              "promotion_threshold": {
+                "type": "number",
+                "title": "Promotion Threshold (PreGraphTA)",
+                "enum": [0.25, 0.30, 0.35, 0.40, 0.50],
+                "default": 0.35
+              },
+              "scan_mode": {
+                "type": "string",
+                "title": "Scan Mode",
+                "enum": ["anomaly-first", "targeted-hunt", "full-pipeline"],
+                "default": "full-pipeline"
+              }
+            },
+            "required": ["planes", "time_window"]
+          }
+        }
+      },
+      {
+        "kind": "markdown",
+        "label": "Active Config",
+        "data": { "bind": "computed_values.config_summary" }
+      },
+      {
+        "kind": "table",
+        "label": "Selected Planes",
+        "data": { "bind": "computed_values.active_planes", "columns": ["plane", "data_source", "t_weight"], "maxRows": 7 }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 9 },
+      "canvas": { "x": 50, "y": 1420, "w": 500, "h": 480 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {
+    "hunt_settings": {
+      "planes": "all",
+      "time_window": "24h",
+      "promotion_threshold": 0.35,
+      "scan_mode": "full-pipeline"
+    }
+  }
+}

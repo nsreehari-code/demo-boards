@@ -1,0 +1,47 @@
+{
+  "id": "card-fp-library",
+  "meta": {
+    "title": "FP Pattern Library",
+    "tags": ["optimus", "crucible", "fp"],
+    "desc": "CRUCIBLE's persistent false-positive library. Known benign patterns are auto-suppressed during future scans. Each pattern includes a suppression rule and hit count."
+  },
+  "provides": [
+    { "bindTo": "fp_patterns", "ref": "fetched_sources.fp_patterns" }
+  ],
+  "source_defs": [
+    {
+      "bindTo": "fp_patterns",
+      "outputFile": "card-fp-library-data.json",
+      "sqlite": {
+        "db": "optimus.db",
+        "query": "SELECT pattern_name, plane, suppression_rule, hits, added_date, description FROM fp_patterns ORDER BY hits DESC"
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "fp_summary",
+      "expr": "'**' & $string($count(fetched_sources.fp_patterns)) & '** FP patterns  |  **' & $string($sum(fetched_sources.fp_patterns.hits)) & '** total suppressions  |  Top: ' & fetched_sources.fp_patterns[0].pattern_name & ' (' & $string(fetched_sources.fp_patterns[0].hits) & ' hits)'"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Library",
+        "data": { "bind": "computed_values.fp_summary" }
+      },
+      {
+        "kind": "table",
+        "label": "Suppression Rules",
+        "data": { "bind": "fetched_sources.fp_patterns" }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 6 },
+      "canvas": { "x": 700, "y": 910, "w": 560, "h": 400 }
+    },
+    "features": { "refresh": true }
+  },
+  "card_data": {}
+}

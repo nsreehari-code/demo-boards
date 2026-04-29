@@ -1,0 +1,54 @@
+{
+  "id": "card-pipeline-status",
+  "meta": {
+    "title": "Pipeline Status",
+    "tags": ["optimus", "pipeline", "status"],
+    "desc": "Real-time status of the 4-agent pipeline: BEACON→WEAVER→CRUCIBLE→RUBBER DUCK. Shows agent states, candidate counts at each stage, and pipeline throughput."
+  },
+  "requires": ["agents", "candidates", "findings"],
+  "compute": [
+    {
+      "bindTo": "beacon_out",
+      "expr": "$string($count(requires.candidates)) & ' promoted candidates'"
+    },
+    {
+      "bindTo": "crucible_out",
+      "expr": "$string($count(requires.findings)) & ' validated findings'"
+    },
+    {
+      "bindTo": "conversion",
+      "expr": "$count(requires.candidates) > 0 ? $string($round($count(requires.findings) / $count(requires.candidates) * 100)) & '% conversion' : '0%'"
+    },
+    {
+      "bindTo": "pipeline_summary",
+      "expr": "'🔭 BEACON → **' & computed_values.beacon_out & '**  →  🕸️ WEAVER → graph enrichment  →  🔥 CRUCIBLE → **' & computed_values.crucible_out & '**  →  🦆 DUCK → critique  |  **' & computed_values.conversion & '** (candidate → finding)'"
+    },
+    {
+      "bindTo": "agent_statuses",
+      "expr": "requires.agents.{ 'agent': name, 'role': role, 'status': status, 'tools': tool_count, 'last_run': last_run }"
+    }
+  ],
+  "provides": [
+    { "bindTo": "pipeline_summary", "ref": "computed_values.pipeline_summary" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Pipeline Flow",
+        "data": { "bind": "computed_values.pipeline_summary" }
+      },
+      {
+        "kind": "table",
+        "label": "Agent Status",
+        "data": { "bind": "computed_values.agent_statuses" }
+      }
+    ],
+    "layout": {
+      "board": { "col": 6, "order": 7 },
+      "canvas": { "x": 1240, "y": 50, "w": 600, "h": 360 }
+    },
+    "features": { "refresh": true }
+  },
+  "card_data": {}
+}

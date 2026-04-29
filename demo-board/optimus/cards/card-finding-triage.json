@@ -1,0 +1,65 @@
+{
+  "id": "card-finding-triage",
+  "meta": {
+    "title": "Finding Triage",
+    "tags": ["optimus", "triage", "v2"],
+    "desc": "Interactive triage workflow for the analyst. Todo checklist of validated findings with status tracking. Bridges OPTIMUS automated pipeline to human review."
+  },
+  "requires": ["findings", "agents"],
+  "compute": [
+    {
+      "bindTo": "completion_rate",
+      "expr": "$count(card_data.triage_items) > 0 ? $round($count($filter(card_data.triage_items, function($i) { $i.done })) / $count(card_data.triage_items) * 100) : 0"
+    },
+    {
+      "bindTo": "triage_summary",
+      "expr": "'**' & $string($count($filter(card_data.triage_items, function($i) { $i.done }))) & '/' & $string($count(card_data.triage_items)) & '** triaged (' & $string(computed_values.completion_rate) & '%)'"
+    }
+  ],
+  "provides": [
+    { "bindTo": "triage_progress", "ref": "card_data.triage_items" }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "Triage Progress",
+        "data": { "bind": "computed_values.triage_summary" }
+      },
+      {
+        "kind": "todo",
+        "label": "Analyst Triage Checklist",
+        "data": {
+          "bind": "card_data.triage_items",
+          "writeTo": "card_data.triage_items",
+          "placeholder": "Add a triage action..."
+        }
+      },
+      {
+        "kind": "actions",
+        "label": "Actions",
+        "data": {
+          "buttons": [
+            { "id": "escalate-soc", "label": "Escalate to SOC", "style": "danger" },
+            { "id": "create-incident", "label": "Create Incident", "style": "primary" },
+            { "id": "export-report", "label": "Export Report", "style": "secondary" }
+          ]
+        }
+      }
+    ],
+    "layout": {
+      "board": { "col": 6, "order": 10 },
+      "canvas": { "x": 580, "y": 1420, "w": 560, "h": 480 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {
+    "triage_items": [
+      { "text": "B1 — UserPII_a7f3e2d1 @ contoso: WS-Trust → OAuth consent (T1078.004 + T1098.003) — TAPC 0.68", "done": false },
+      { "text": "B1 — UserPII_c9d5e012 @ contoso: Inbox rule → external domain (T1114.003) — TAPC 0.62", "done": false },
+      { "text": "B2 — UserPII_b8c4f901 @ fabrikam: Device code phishing (T1528) — TAPC 0.57", "done": false },
+      { "text": "B2 — UserPII_d1e6f123 @ woodgrove: SMTP spray (T1110.003) — downgraded, monitor", "done": true },
+      { "text": "B2 — UserPII_e2f7a234 @ contoso: Detection gap — admin, 47 events, 0 alerts", "done": false }
+    ]
+  }
+}

@@ -11,7 +11,8 @@
     "frontend": "npx http-server demo-board -p 8000 -c-1",
     "seed-cpm": "node demo-board/scripts/sqlite/seed-cpm.cjs",
     "seed-cpmV2": "node demo-board/scripts/sqlite/seed-cpm.cjs && node demo-board/scripts/sqlite/seed-cpmV2.cjs",
-    "clean": "node -e \"const fs=require('fs'),p=require('path');['live','cpm','cpmV2'].forEach(sub=>{const d=p.join(__dirname,'demo-board',sub);if(fs.existsSync(d)){for(const e of fs.readdirSync(d,{withFileTypes:true})){if(['cards','gandalf-cards','.gitignore','.retain'].includes(e.name))continue;fs.rmSync(p.join(d,e.name),{recursive:true,force:true});console.log('removed',sub+'/'+e.name)}}});console.log('clean done')\"",
+    "seed-optimus": "node demo-board/scripts/sqlite/seed-optimus.cjs",
+    "clean": "node -e \"const fs=require('fs'),p=require('path');['live','cpm','cpmV2','optimus'].forEach(sub=>{const d=p.join(__dirname,'demo-board',sub);if(fs.existsSync(d)){for(const e of fs.readdirSync(d,{withFileTypes:true})){if(['cards','gandalf-cards','.gitignore','.retain'].includes(e.name))continue;fs.rmSync(p.join(d,e.name),{recursive:true,force:true});console.log('removed',sub+'/'+e.name)}}});console.log('clean done')\"",
     "stop": "node -e \"const {execSync}=require('child_process');['7799','8000'].forEach(p=>{try{execSync('npx kill-port '+p,{stdio:'ignore'})}catch{}});console.log('stopped ports 7799 and 8000')\""
   },
   "keywords": [],

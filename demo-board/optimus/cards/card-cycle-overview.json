@@ -1,0 +1,46 @@
+{
+  "id": "card-cycle-overview",
+  "meta": {
+    "title": "Hunt Cycle Overview",
+    "tags": ["optimus", "copilot", "overview"],
+    "desc": "Executive summary of the current hunt cycle. AI-generated overview for the analyst with key metrics, findings, recommendations, and next actions."
+  },
+  "requires": ["agents", "findings", "candidates", "threat_summary", "critical_findings", "fp_patterns"],
+  "source_defs": [
+    {
+      "bindTo": "overview",
+      "outputFile": "card-cycle-overview-data.json",
+      "projections": {
+        "agents": "requires.agents",
+        "findings": "requires.findings",
+        "candidates": "requires.candidates",
+        "threat_summary": "requires.threat_summary",
+        "critical_findings": "requires.critical_findings",
+        "fp_patterns": "requires.fp_patterns"
+      },
+      "copilot": {
+        "prompt_template": "You are OPTIMUS, a multi-agent autonomous threat hunting system for DEX (Defender Experts). Generate an executive hunt cycle overview for the analyst.\n\nAgent roster:\n{{agents}}\n\nPromoted scan candidates:\n{{candidates}}\n\nValidated findings:\n{{findings}}\n\nThreat posture:\n{{threat_summary}}\n\nCritical findings:\n{{critical_findings}}\n\nFP patterns suppressed:\n{{fp_patterns}}\n\nIMPORTANT OUTPUT RULES:\n- Return ONLY valid JSON. No markdown fences, no preamble.\n- Start with { and end with }.\n- No emojis. Values are Markdown strings with - bullet points. Max 60 words per section.\n\n{\n  \"headline\": \"<one sentence hunt cycle result>\",\n  \"key_metrics\": \"- **Candidates scanned**: <N>\\n- **Promoted**: <N>\\n- **Findings validated**: <N>\\n- **B1 confirmed**: <N>\\n- **B2 probable**: <N>\\n- **FP killed**: <N>\\n- **Orgs affected**: <N>\",\n  \"top_actions\": \"- <#1 most urgent action for the analyst, naming the entity>\\n- <#2>\\n- <#3>\",\n  \"next_cycle\": \"- <what to prioritize in the next hunt cycle>\\n- <planes to focus on>\\n- <TAPC tuning recommendations>\"\n}"
+      }
+    }
+  ],
+  "compute": [
+    { "bindTo": "headline", "expr": "fetched_sources.overview.headline" },
+    { "bindTo": "key_metrics", "expr": "fetched_sources.overview.key_metrics" },
+    { "bindTo": "top_actions", "expr": "fetched_sources.overview.top_actions" },
+    { "bindTo": "next_cycle", "expr": "fetched_sources.overview.next_cycle" }
+  ],
+  "view": {
+    "elements": [
+      { "kind": "markdown", "label": "Status", "data": { "bind": "computed_values.headline" } },
+      { "kind": "markdown", "label": "Key Metrics", "data": { "bind": "computed_values.key_metrics" } },
+      { "kind": "markdown", "label": "Top Actions", "data": { "bind": "computed_values.top_actions" } },
+      { "kind": "markdown", "label": "Next Cycle", "data": { "bind": "computed_values.next_cycle" } }
+    ],
+    "layout": {
+      "board": { "col": 3, "order": 11 },
+      "canvas": { "x": 1170, "y": 990, "w": 480, "h": 480 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {}
+}

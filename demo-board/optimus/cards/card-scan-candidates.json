@@ -1,0 +1,55 @@
+{
+  "id": "card-scan-candidates",
+  "meta": {
+    "title": "Scan Candidates",
+    "tags": ["optimus", "beacon", "scan"],
+    "desc": "BEACON output: entities with PreGraphTA scores from the latest scan cycle. Promoted candidates (≥ 0.35) advance to WEAVER for graph analysis."
+  },
+  "provides": [
+    { "bindTo": "candidates", "ref": "fetched_sources.promoted" }
+  ],
+  "source_defs": [
+    {
+      "bindTo": "promoted",
+      "outputFile": "card-scan-candidates-promoted.json",
+      "sqlite": {
+        "db": "optimus.db",
+        "query": "SELECT entity, org_id, plane, ROUND(pre_graph_ta, 2) as pre_graph_ta, ROUND(t_score, 2) as t_score, ROUND(a_score, 2) as a_score, details FROM scan_candidates WHERE promoted = 1 ORDER BY pre_graph_ta DESC"
+      }
+    },
+    {
+      "bindTo": "stats",
+      "outputFile": "card-scan-candidates-stats.json",
+      "sqlite": {
+        "db": "optimus.db",
+        "query": "SELECT COUNT(*) as total, SUM(promoted) as promoted, COUNT(DISTINCT plane) as planes_hit, COUNT(DISTINCT org_id) as orgs_affected, ROUND(AVG(CASE WHEN promoted=1 THEN pre_graph_ta END), 2) as avg_promoted_score FROM scan_candidates WHERE run_date = (SELECT MAX(run_date) FROM scan_candidates)"
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "scan_summary",
+      "expr": "'**' & $string(fetched_sources.stats[0].total) & '** candidates scanned  |  **' & $string(fetched_sources.stats[0].promoted) & '** promoted (≥ 0.35)  |  **' & $string(fetched_sources.stats[0].planes_hit) & '** planes  |  **' & $string(fetched_sources.stats[0].orgs_affected) & '** orgs  |  Avg promoted score: **' & $string(fetched_sources.stats[0].avg_promoted_score) & '**'"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "label": "BEACON Output",
+        "data": { "bind": "computed_values.scan_summary" }
+      },
+      {
+        "kind": "table",
+        "label": "Promoted Candidates",
+        "data": { "bind": "fetched_sources.promoted" }
+      }
+    ],
+    "layout": {
+      "board": { "col": 4, "order": 4 },
+      "canvas": { "x": 640, "y": 480, "w": 560, "h": 400 }
+    },
+    "features": { "refresh": true, "chat": true }
+  },
+  "card_data": {}
+}

@@ -30,6 +30,16 @@
       "gandalfCardsDir": "./cpmV2/gandalf-cards",
       "gandalfTaskExecutorPath": "./demo-task-executor.js",
       "gandalfChatHandlerPath": "./demo-chat-handler.js"
+    },
+    "optimus": {
+      "label": "OPTIMUS",
+      "setupDir": "./optimus",
+      "cardsDir": "./optimus/cards",
+      "taskExecutorPath": "./demo-task-executor.js",
+      "chatHandlerPath": "./demo-chat-handler.js",
+      "gandalfCardsDir": "./optimus/gandalf-cards",
+      "gandalfTaskExecutorPath": "./demo-task-executor.js",
+      "gandalfChatHandlerPath": "./demo-chat-handler.js"
     }
   }
 }
