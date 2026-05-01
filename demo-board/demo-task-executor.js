@@ -528,11 +528,20 @@ function runSourceFetchSubcommand(argv) {
     const prompt = interpolatePrompt(cfg.prompt_template, interpolationContext);
 
     // Build request payload for the Python script
+    // allowed_dirs: same sandbox as copilot — cards, runtime, runtime-out directories.
+    const allowedDirs = [];
+    if (extra.boardSetupRoot) {
+      if (extra.boardRuntimeDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.boardRuntimeDir));
+      if (extra.runtimeStatusDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.runtimeStatusDir));
+      if (extra.cardsDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.cardsDir));
+    }
+
     const invokeReq = {
       endpoint,
       agent_id: agentId,
       prompt,
       result_shape: cfg.result_shape || undefined,
+      allowed_dirs: allowedDirs.length > 0 ? allowedDirs : undefined,
     };
 
     const reqFile = outFile + '.foundry-req.json';
