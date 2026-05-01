@@ -53,6 +53,9 @@
  *       → Microsoft Graph API for Teams chats/channels via `az rest`.
  *         Supported actions: list-teams, list-channels, read-channel, post-message,
  *         reply-to-message, search-messages. Requires `az login`.
+ *   - { foundry: { endpoint, agent_id, prompt_template, args?, result_shape? } }
+ *       → Azure AI Foundry Agent invocation via Managed Identity (DefaultAzureCredential).
+ *         Uses pre-configured agents. Shells out to scripts/foundry/invoke.py. No API keys needed.
  *   A real executor can also handle: graphapi, mail, incidentdb, script, etc.
  *
  * url / url-list notes:
@@ -496,6 +499,65 @@ function runSourceFetchSubcommand(argv) {
       fail(`teams/${action}: ${msg}`, errFile);
     }
 
+  } else if (sourceDef.foundry) {
+    // ---------------------------------------------------------------------------
+    // foundry — Azure AI Foundry model invocation via Managed Identity.
+    // Shells out to scripts/foundry/invoke.py (uses azure-identity + azure-ai-inference).
+    // No API keys needed — uses DefaultAzureCredential (MI in prod, az login locally).
+    // {{key}} interpolation applied to prompt_template from _projections and args.
+    // ---------------------------------------------------------------------------
+    const cfg = typeof sourceDef.foundry === 'object' ? sourceDef.foundry : {};
+    if (!cfg.prompt_template) {
+      fail('foundry: prompt_template is required', errFile);
+    }
+
+    // Load defaults from demo-server-config.json (endpoint + agent_id)
+    let foundryDefaults = {};
+    try {
+      const serverConfig = readJson(path.join(__dirname, 'demo-server-config.json'));
+      foundryDefaults = serverConfig.foundry || {};
+    } catch {}
+
+    const endpoint = cfg.endpoint || foundryDefaults.endpoint;
+    const agentId  = cfg.agent_id || foundryDefaults.agent_id;
+    if (!endpoint || !agentId) {
+      fail('foundry: endpoint and agent_id must be set in source_def or demo-server-config.json', errFile);
+    }
+
+    const interpolationContext = { ...COPILOT_PROMPT_CONTEXT, ...(sourceDef._projections || {}), ...(cfg.args || {}) };
+    const prompt = interpolatePrompt(cfg.prompt_template, interpolationContext);
+
+    // Build request payload for the Python script
+    const invokeReq = {
+      endpoint,
+      agent_id: agentId,
+      prompt,
+      result_shape: cfg.result_shape || undefined,
+    };
+
+    const reqFile = outFile + '.foundry-req.json';
+    const resFile = outFile + '.foundry-res.json';
+    fs.writeFileSync(reqFile, JSON.stringify(invokeReq), 'utf-8');
+
+    const python = process.platform === 'win32' ? 'python' : 'python3';
+    const invokePath = path.join(__dirname, 'scripts', 'foundry', 'invoke.py');
+
+    try {
+      execFileSync(python, [invokePath, '--input', reqFile, '--output', resFile], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 300_000,  // 5 min
+      });
+      resultValue = JSON.parse(fs.readFileSync(resFile, 'utf-8'));
+    } catch (err) {
+      const msg = err.stderr ? err.stderr.trim() : (err.message || String(err));
+      fail(`foundry invocation failed: ${msg}`, errFile);
+    } finally {
+      try { fs.unlinkSync(reqFile); } catch {}
+      try { fs.unlinkSync(resFile); } catch {}
+    }
+
   } else if (sourceDef.sqlite) {
     // ---------------------------------------------------------------------------
     // sqlite — query a SQLite database via scripts/sqlite/query.cjs.
@@ -537,7 +599,7 @@ function runSourceFetchSubcommand(argv) {
       fail(`Key "${sourceDef.mock}" not found in MOCK_DB`, errFile);
     }
   } else {
-    fail('No recognised source kind (url, url-list, copilot, workiq, teams, sqlite, mock)', errFile);
+    fail('No recognised source kind (url, url-list, copilot, workiq, teams, foundry, sqlite, mock)', errFile);
   }
 
   // Write result to --out as JSON payload, same contract as current mock mode.
@@ -583,13 +645,14 @@ function validateSourceDefSubcommand(argv) {
   const hasCopilot    = !!sourceDef.copilot;
   const hasWorkiq     = !!sourceDef.workiq;
   const hasTeams      = !!sourceDef.teams;
+  const hasFoundry    = !!sourceDef.foundry;
   const hasSqlite     = !!sourceDef.sqlite;
   const hasMock       = sourceDef.mock !== undefined;
 
-  const kindCount = [hasUrl, hasUrlList, hasCopilot, hasWorkiq, hasTeams, hasSqlite, hasMock].filter(Boolean).length;
+  const kindCount = [hasUrl, hasUrlList, hasCopilot, hasWorkiq, hasTeams, hasFoundry, hasSqlite, hasMock].filter(Boolean).length;
 
   if (kindCount === 0) {
-    errors.push('No recognised source kind (url, url-list, copilot, workiq, teams, sqlite, mock). Add one of these fields.');
+    errors.push('No recognised source kind (url, url-list, copilot, workiq, teams, foundry, sqlite, mock). Add one of these fields.');
   } else if (kindCount > 1) {
     const kinds = [];
     if (hasUrl)  kinds.push('url');
@@ -597,6 +660,7 @@ function validateSourceDefSubcommand(argv) {
     if (hasCopilot) kinds.push('copilot');
     if (hasWorkiq)    kinds.push('workiq');
     if (hasTeams)     kinds.push('teams');
+    if (hasFoundry)   kinds.push('foundry');
     if (hasSqlite)    kinds.push('sqlite');
     if (hasMock)      kinds.push('mock');
     errors.push(`Multiple source kinds specified: [${kinds.join(', ')}]. Use exactly one.`);
@@ -643,6 +707,17 @@ function validateSourceDefSubcommand(argv) {
       if (!sourceDef.teams.action || !validActions.includes(sourceDef.teams.action)) {
         errors.push(`teams.action is required and must be one of: ${validActions.join(', ')}.`);
       }
+    }
+  }
+
+  if (hasFoundry) {
+    if (typeof sourceDef.foundry !== 'object') {
+      errors.push('foundry must be an object.');
+    } else {
+      if (!sourceDef.foundry.prompt_template || typeof sourceDef.foundry.prompt_template !== 'string') {
+        errors.push('foundry.prompt_template is required and must be a string.');
+      }
+      // endpoint and agent_id are optional here — fall back to demo-server-config.json at runtime
     }
   }
 
@@ -750,6 +825,24 @@ const CAPABILITIES = {
       },
       outputShape: 'Array of raw JSON responses, one per URL in _projections.url_list.',
       urlListNote: 'Declare `"projections": { "url_list": "<JSONata producing string[]>" }` on the source def. Example: `requires.holdings.ticker.(\'https://api.example.com/\' & $ & \'?q=1\')`',
+    },
+    foundry: {
+      description: 'Azure AI Foundry Agent invocation via Managed Identity (DefaultAzureCredential). Uses pre-configured agents (with model, instructions, tools baked in). No API keys needed. Shells out to scripts/foundry/invoke.py. Default endpoint and agent_id are configured in the server; source_defs only need prompt_template.',
+      inputSchema: {
+        foundry: {
+          type: 'object', required: true,
+          properties: {
+            prompt_template: { type: 'string', required: true,  description: 'Prompt with {{key}} placeholders interpolated from _projections and args.' },
+            endpoint:        { type: 'string', required: false, description: 'Override Foundry project endpoint (default: from defaults configured in the server).' },
+            agent_id:        { type: 'string', required: false, description: 'Override Agent ID (default: from defaults configured in the server).' },
+            args:            { type: 'object', required: false, description: 'Extra interpolation args (highest precedence, merged with _projections).' },
+            result_shape:    { type: 'object', required: false, description: 'Expected top-level keys in the JSON response. Agent is nudged to produce matching structure.' },
+          },
+        },
+      },
+      defaults: 'endpoint and agent_id use defaults configured in the server. Override per source_def if a different agent/project is needed.',
+      outputShape: 'Parsed JSON object (if agent returns valid JSON) or raw string.',
+      note: 'Requires Python 3 and azure-identity + azure-ai-projects packages. Auth via DefaultAzureCredential (Managed Identity in prod, az login locally). Agent must be pre-created in the Foundry portal with model, instructions, and tools configured.',
     },
     sqlite: {
       description: 'Query a SQLite database. DB filename resolved relative to scripts/sqlite/.retain/. Supports SELECT (returns row array) and exec mode for INSERT/UPDATE/DELETE. Shells out to scripts/sqlite/query.cjs.',

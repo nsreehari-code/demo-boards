@@ -6,6 +6,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "install:foundry": "pip install -r demo-board/scripts/foundry/requirements.txt",
+    "postinstall": "npm run install:foundry",
     "start": "node scripts/start-server.cjs demo-board --all",
     "backend": "node scripts/start-server.cjs demo-board --backend",
     "frontend": "npx http-server demo-board -p 8000 -c-1",
