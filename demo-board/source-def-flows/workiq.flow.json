@@ -8,10 +8,18 @@
   "steps": {
     "execute": {
       "description": "Execute workiq source def via demo-server HTTP proxy",
+      "expects_data": ["sourceDef", "serverUrl"],
       "handler": {
         "type": "ref",
         "howToRun": "http:post",
-        "whatToRun": { "kind": "http-url", "value": "/api/workiq/ask" }
+        "whatToRun": { "kind": "http-url", "value": "" },
+        "argsMassaging": {
+          "urlTemplate": "serverUrl & '/api/workiq/ask'",
+          "bodyTemplate": "{ 'query': sourceDef.workiq.query_template }"
+        },
+        "outputTransforms": {
+          "dataTemplate": "{ 'resultValue': output.data.response }"
+        }
       },
       "transitions": {
         "success": "completed",

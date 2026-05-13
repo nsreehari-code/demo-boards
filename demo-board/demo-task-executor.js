@@ -62,7 +62,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseRef, blobStorageForRef, reportComplete, reportFailed } from 'yaml-flow/board-worker-adapter';
 import { loadStepFlow, createStepMachine, MemoryStore, buildStepHandlersForFlow } from 'yaml-flow/step-machine-public';
-import { invokeRefSync } from 'yaml-flow/board-live-cards-node';
+import { invokeExecutionRef } from 'yaml-flow/board-live-cards-node';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE_DEF_FLOWS_FILE = path.join(__dirname, 'source_def_flows.json');
@@ -265,62 +265,7 @@ async function executeStepMachineSourceFlow(context) {
   const flowPath = path.resolve(__dirname, flowRef);
   const flow = await loadStepFlow(flowPath);
 
-  const invokeHttpRef = async (ref, args) => {
-    const rawUrl = typeof ref.whatToRun === 'object' ? ref.whatToRun.value : parseRef(ref.whatToRun).value;
-
-    const base = String(args?.extra?.serverUrl || 'http://127.0.0.1:7799').replace(/\/$/, '');
-    const resolvedUrl = /^https?:\/\//i.test(rawUrl)
-      ? rawUrl
-      : `${base}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
-
-    let body = args;
-    const workiqCfg = args?.sourceDef?.workiq;
-    if (workiqCfg && typeof workiqCfg === 'object' && typeof workiqCfg.query_template === 'string') {
-      const interpolationContext = {
-        ...(args?.sourceDef?._projections || {}),
-        ...(workiqCfg.args || {}),
-      };
-      body = {
-        query: interpolatePrompt(workiqCfg.query_template, interpolationContext),
-      };
-    }
-
-    const method = ref.howToRun === 'http:get' ? 'GET' : 'POST';
-    const response = await fetch(resolvedUrl, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
-    });
-
-    const text = await response.text();
-    let parsed;
-    try {
-      parsed = text ? JSON.parse(text) : {};
-    } catch {
-      parsed = { response: text };
-    }
-
-    if (!response.ok) {
-      const msg = typeof parsed?.error === 'string' ? parsed.error : `HTTP ${response.status}`;
-      return { result: 'failure', data: { error: msg }, error: msg };
-    }
-
-    if (typeof parsed?.error === 'string') {
-      return { result: 'failure', data: { error: parsed.error }, error: parsed.error };
-    }
-
-    return {
-      result: 'success',
-      data: {
-        resultValue: Object.prototype.hasOwnProperty.call(parsed, 'response') ? parsed.response : parsed,
-      },
-    };
-  };
-
   const invoke = async (ref, args) => {
-    if (ref.howToRun === 'http:post' || ref.howToRun === 'http:get') {
-      return invokeHttpRef(ref, args);
-    }
     if (ref.howToRun === 'demo-local-module') {
       const whatValue = typeof ref.whatToRun === 'object' ? ref.whatToRun.value : parseRef(ref.whatToRun).value;
       const modulePath = path.resolve(__dirname, whatValue);
@@ -330,13 +275,15 @@ async function executeStepMachineSourceFlow(context) {
       }
       return mod.execute(args);
     }
-    return invokeRefSync(ref, args, { cliDir: __dirname, cwd: process.cwd() });
+    return invokeExecutionRef(ref, args, { cliDir: __dirname, cwd: process.cwd() });
   };
 
   const handlers = buildStepHandlersForFlow(flow, { invoke });
   const machine = createStepMachine(flow, handlers, { store: new MemoryStore() });
   const run = await machine.run({
     ...context,
+    extra: context.extra ?? {},
+    serverUrl: context.extra?.serverUrl ?? null,
     promptContext: COPILOT_PROMPT_CONTEXT,
     executorDir: __dirname,
   });

@@ -134,10 +134,10 @@ function namedPipePath(pipeName) {
   return path.join(os.tmpdir(), `${pipeName}.sock`);
 }
 
-function makeExecutionRef(scriptPath) {
+function makeExecutionRef(scriptPath, extra) {
   if (!scriptPath) return undefined;
   const resolved = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(process.cwd(), scriptPath);
-  return executionRefFromScriptPath(resolved);
+  return executionRefFromScriptPath(resolved, extra);
 }
 
 function createNamedPipeNotificationTransport() {
@@ -200,7 +200,7 @@ const boardConfigEntries = serverConfig.boards ? Object.entries(serverConfig.boa
 const boardConfigMap = new Map(boardConfigEntries);
 const boardHostConfig = new Map();
 
-function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerPath, infAdapterPath, boardId) {
+function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerPath, infAdapterPath, boardId, executionExtra = {}) {
   fs.mkdirSync(boardDir, { recursive: true });
   const runtimeCardsDir = path.join(boardDir, 'cards');
   const runtimeCardStoreDir = path.join(runtimeCardsDir, 'store');
@@ -223,7 +223,7 @@ function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerPath,
     cardStoreRef,
     outputsStoreRef: serializeRef({ kind: 'fs-path', value: path.join(path.dirname(boardDir), 'runtime-out', '.outputs') }),
     notifyRef: { kind: 'named-pipe', value: namedPipePath(notifyChannel) },
-    taskExecutorRef: makeExecutionRef(taskExecPath),
+    taskExecutorRef: makeExecutionRef(taskExecPath, executionExtra),
     chatHandlerRef: makeExecutionRef(chatHandlerPath),
     inferenceAdapterRef: makeExecutionRef(infAdapterPath),
   };
@@ -262,8 +262,15 @@ const runtime = createMultiBoardServerRuntime({
     const boardRoot = cfg?.setupDir ? path.resolve(__dirname, cfg.setupDir) : path.join(setupDir, `board-${boardId}`);
     fs.mkdirSync(boardRoot, { recursive: true });
     const boardDir = path.join(boardRoot, 'runtime');
+    const runtimeCardsDir = path.join(boardDir, 'cards');
+    const baseExecutionExtra = {
+      boardSetupRoot: boardRoot,
+      chatsBlobBasePath: path.join(runtimeCardsDir, 'chats'),
+      serverUrl: `http://127.0.0.1:${PORT}`,
+      ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
+    };
 
-    const baseCfg = buildBoardContextConfig('base', boardDir, taskExecPath, chatHandlerPath, infAdapterPath, boardId);
+    const baseCfg = buildBoardContextConfig('base', boardDir, taskExecPath, chatHandlerPath, infAdapterPath, boardId, baseExecutionExtra);
     const boards = [baseCfg];
 
     // Gandalf layer
@@ -274,7 +281,13 @@ const runtime = createMultiBoardServerRuntime({
     let gandalfBoardDir = null;
     if (gandalfCardsDir && gandalfTaskExecPath) {
       gandalfBoardDir = path.join(boardRoot, 'gandalf-runtime');
-      const gandalfCfg = buildBoardContextConfig('gandalf', gandalfBoardDir, gandalfTaskExecPath, gandalfChatHandlerPath, gandalfInfPath, boardId);
+      const gandalfExecutionExtra = {
+        boardSetupRoot: boardRoot,
+        chatsBlobBasePath: path.join(gandalfBoardDir, 'cards', 'chats'),
+        serverUrl: `http://127.0.0.1:${PORT}`,
+        ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
+      };
+      const gandalfCfg = buildBoardContextConfig('gandalf', gandalfBoardDir, gandalfTaskExecPath, gandalfChatHandlerPath, gandalfInfPath, boardId, gandalfExecutionExtra);
       gandalfCfg.outputsStoreRef = serializeRef({ kind: 'fs-path', value: path.join(boardRoot, 'gandalf-runtime-out', '.outputs') });
       boards.push(gandalfCfg);
     }
@@ -282,7 +295,6 @@ const runtime = createMultiBoardServerRuntime({
     boardHostConfig.set(boardId, { cardsDir, gandalfCardsDir, boardDir, boardRoot });
     demoPrepSetup(boardId);
 
-    const runtimeCardsDir = path.join(boardDir, 'cards');
     const singleBoardRuntime = createSingleBoardServerRuntime({
       apiBasePath: `${apiBasePath}/${boardId}`,
       boardId,
