@@ -394,6 +394,7 @@ async function handleWorkiqAsk(req, res) {
     let responded = false;
     const child = spawn(process.execPath, [workiqJs, 'ask', '-q', query], {
       stdio: ['inherit', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });

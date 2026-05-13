@@ -98,6 +98,7 @@ function runCopilot(prompt, sourceDef, executorDir, extra) {
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
         timeout: 600_000,
+        windowsHide: true,
       });
       return JSON.parse(fs.readFileSync(outFile, 'utf-8').replace(/^\uFEFF/, ''));
     } finally {

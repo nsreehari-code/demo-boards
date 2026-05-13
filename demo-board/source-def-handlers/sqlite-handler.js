@@ -45,6 +45,7 @@ export async function execute(context) {
       maxBuffer: 10 * 1024 * 1024,
       timeout: 30_000,
       cwd: executorDir,
+      windowsHide: true,
     });
     const resultValue = raw.trim() ? JSON.parse(raw) : [];
     return { result: 'success', data: { resultValue } };

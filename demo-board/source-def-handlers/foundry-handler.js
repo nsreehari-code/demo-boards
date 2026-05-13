@@ -98,6 +98,7 @@ export async function execute(context) {
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 10 * 1024 * 1024,
       timeout: 300_000,
+      windowsHide: true,
     });
     const resultValue = JSON.parse(fs.readFileSync(resFile, 'utf-8'));
     return { result: 'success', data: { resultValue } };
