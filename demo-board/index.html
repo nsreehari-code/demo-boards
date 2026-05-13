@@ -28,12 +28,12 @@
     .lc-result ul, .lc-result ol { font-size: 0.8rem; margin: 0 0 0.25rem; padding-left: 1.2rem; }
     .lc-result li { margin-bottom: 0.15rem; }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/jsonata/jsonata.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.4.2/browser/card-compute.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.4.2/browser/live-cards.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.4.2/browser/board-livegraph-engine.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@5.4.2/browser/board-livecards-runtime-client.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leader-line/leader-line.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@8.0.0/browser/live-cards.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@8.0.0/browser/board-livecards-client.js"></script>
 </head>
 <body class="bg-light">
   <div id="topBar" class="d-flex flex-wrap align-items-center justify-content-between gap-2">
@@ -46,13 +46,11 @@
         <button class="btn btn-outline-primary active" id="modeBoard">Board</button>
         <button class="btn btn-outline-primary" id="modeCanvas">Canvas</button>
       </div>
-      <button class="btn btn-sm btn-outline-secondary" id="devModeToggle">Dev Mode</button>
-      <button class="btn btn-sm btn-outline-secondary ms-1" id="refreshBtn" title="Refresh all boards (upsert + restart)">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-          <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 1 1 .908-.418A6 6 0 1 1 8 2v1z"/>
-          <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966a.25.25 0 0 1 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
-        </svg>
-      </button>
+      <button class="btn btn-sm btn-outline-secondary" id="autoLayout">Auto Layout</button>
+      <div class="form-check ms-2">
+        <input class="form-check-input" type="checkbox" id="devModeToggle" />
+        <label class="form-check-label small" for="devModeToggle">Dev</label>
+      </div>
     </div>
   </div>
 
@@ -71,166 +69,156 @@
 
   <script>
     (function () {
-      // Guard: the runtime client's SSE handler calls buildLiveCardModelsFromArtifacts
-      // on every SSE message.  When the server poll hits an error it sends { error: "…" }
-      // which has no cardDefinitions → returns [] → syncBoardNodes removes all nodes →
-      // blank board.  Wrap the function so error/empty payloads return the last known
-      // good result instead of an empty array.
-      const _origBuild = window.BoardLiveGraph && window.BoardLiveGraph.buildLiveCardModelsFromArtifacts;
-      let _lastGoodNodes = null;
-      const buildLiveCardModelsFromArtifacts = function (payload) {
-        if (!payload || payload.error || !Array.isArray(payload.cardDefinitions) || payload.cardDefinitions.length === 0) {
-          console.warn('[sse-guard] skipping non-card payload:', payload && payload.error ? payload.error : '(no cardDefinitions)');
-          return _lastGoodNodes || [];
-        }
-        _lastGoodNodes = _origBuild(payload);
-        return _lastGoodNodes;
-      };
-      if (window.BoardLiveGraph) {
-        window.BoardLiveGraph.buildLiveCardModelsFromArtifacts = buildLiveCardModelsFromArtifacts;
+      var createBoardRuntimeClient = window.BoardLiveCardsClient && window.BoardLiveCardsClient.createBoardRuntimeClient;
+      var defaultBoardPaths = window.BoardLiveCardsClient && window.BoardLiveCardsClient.defaultBoardPaths;
+      if (!createBoardRuntimeClient || !defaultBoardPaths) {
+        document.getElementById('boardRoot').innerHTML =
+          '<div class="alert alert-danger">board-livecards-client.js not loaded.</div>';
+        throw new Error('BoardLiveCardsClient not loaded');
       }
 
-      let currentMode = localStorage.getItem('demo-board-mode') || 'board';
-      let devMode = localStorage.getItem('demo-board-devmode') === 'true';
-      let bootstrapCompleted = false;
-      let activeBoardId = 'default';
-      let runtimeClient = null;
+      var currentMode = localStorage.getItem('demo-board-mode') || 'board';
+      var devMode = localStorage.getItem('demo-board-devmode') === 'true';
+      var bootstrapCompleted = false;
+      var activeBoardId = new URLSearchParams(window.location.search).get('l') || '';
+      var runtimeClient = null;
+      var activeServerOrigin = null;
+      var serverConfig = null;
 
-      const _params = new URLSearchParams(window.location.search);
-      let boardKey = _params.get('l') || '';
+      // ── Load server-config.json to discover port + boards ──
+
+      async function loadServerConfig() {
+        var res = await fetch('server-config.json');
+        if (!res.ok) throw new Error('Failed to fetch server-config.json: ' + res.status);
+        serverConfig = await res.json();
+        return serverConfig;
+      }
+
+      function serverOriginFromConfig() {
+        var port = serverConfig && serverConfig.port || 7799;
+        var hostPref = window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1';
+        return 'http://' + hostPref + ':' + port;
+      }
+
+      // ── Server communication ──
 
       function boardPaths(boardId) {
-        const b = encodeURIComponent(boardId || activeBoardId || 'default');
-        const base = `/api/${encodeURIComponent(boardKey)}/${b}`;
-        return {
-          initBoard: `${base}/init-board`,
-          bootstrapCards: `${base}/bootstrap-cards`,
-          bootstrap: `${base}/bootstrap`,
-          stream: `${base}/sse`,
-          patchCard: function (id) { return `${base}/cards/${encodeURIComponent(id)}`; },
-          cardAction: function (id) { return `${base}/cards/${encodeURIComponent(id)}/actions`; },
-          cardFile: function (id) { return `${base}/cards/${encodeURIComponent(id)}/files`; },
-          cardChats: function (id) { return `${base}/cards/${encodeURIComponent(id)}/chats`; },
-        };
+        return defaultBoardPaths(boardId || activeBoardId || 'default');
       }
-
-      function localServerOrigins() {
-        const params = new URLSearchParams(window.location.search || '');
-        const fromQuery = params.get('demoServerOrigin');
-        const fromWindow = window.DEMO_SERVER_ORIGIN;
-        const hostPref = window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1';
-        const hostAlt = hostPref === 'localhost' ? '127.0.0.1' : 'localhost';
-        const defaults = [
-          `http://${hostPref}:7799`,
-          `http://${hostAlt}:7799`,
-        ];
-
-        const unique = [];
-        const push = (v) => {
-          if (!v || typeof v !== 'string') return;
-          if (unique.includes(v)) return;
-          unique.push(v);
-        };
-
-        push(fromWindow);
-        push(fromQuery);
-        defaults.forEach(push);
-        return unique;
-      }
-
-      let activeServerOrigin = null;
 
       async function fetchServer(path, init) {
-        const origins = activeServerOrigin ? [activeServerOrigin] : localServerOrigins();
-        const failures = [];
-
-        for (const origin of origins) {
-          const url = `${origin}${path}`;
+        if (!activeServerOrigin) {
+          activeServerOrigin = serverOriginFromConfig();
+        }
+        var url = activeServerOrigin + path;
+        try {
+          var res = await fetch(url, init);
+          return res;
+        } catch (err) {
+          // Retry alternate host
+          var alt = activeServerOrigin.includes('localhost')
+            ? activeServerOrigin.replace('localhost', '127.0.0.1')
+            : activeServerOrigin.replace('127.0.0.1', 'localhost');
           try {
-            const res = await fetch(url, init);
-            activeServerOrigin = origin;
-            return res;
-          } catch (err) {
-            failures.push(`${url} -> ${String(err && err.message || err)}`);
+            var res2 = await fetch(alt + path, init);
+            activeServerOrigin = alt;
+            return res2;
+          } catch (err2) {
+            throw new Error('Cannot reach server at ' + activeServerOrigin + ' or ' + alt + '. Is demo-server.js running?');
           }
         }
-
-        const tip = 'Start the API bridge from the yaml-flow folder: node examples/example-board/demo-server.js';
-        throw new Error(`Unable to reach example-board demo server. Tried: ${failures.join(' | ')}. ${tip}`);
       }
 
-      // Apply persisted UI state to toolbar before bootstrap
+      // ── Register boards from config and populate selector ──
+
+      async function registerAndLoadBoards() {
+        var boards = serverConfig && serverConfig.boards || {};
+        var entries = Object.entries(boards);
+        if (!entries.length) return;
+
+        // Register each board via POST /api/boards (idempotent — 409 if already exists)
+        for (var _i = 0; _i < entries.length; _i++) {
+          var key = entries[_i][0];
+          var cfg = entries[_i][1];
+          try {
+            await fetchServer('/api/boards', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id: key, label: cfg.label || key }),
+            });
+          } catch (e) { /* ignore — server may be unreachable for some boards */ }
+        }
+
+        // Default to first board if ?l= not set
+        if (!activeBoardId) {
+          activeBoardId = entries[0][0];
+        }
+
+        var select = document.getElementById('boardKeySelect');
+        select.innerHTML = '';
+        entries.forEach(function (entry) {
+          var opt = document.createElement('option');
+          opt.value = entry[0];
+          opt.textContent = entry[1].label || entry[0];
+          if (entry[0] === activeBoardId) opt.selected = true;
+          select.appendChild(opt);
+        });
+
+        var match = entries.find(function (e) { return e[0] === activeBoardId; });
+        if (match) {
+          document.getElementById('boardTitle').textContent = match[1].label || match[0];
+        }
+      }
+
+      // ── UI state helpers ──
+
       function syncModeButtons(mode) {
-        var boardBtn = document.getElementById('modeBoard');
-        var canvasBtn = document.getElementById('modeCanvas');
-        boardBtn.classList.toggle('active', mode === 'board');
-        canvasBtn.classList.toggle('active', mode === 'canvas');
-      }
-      function syncDevModeButton(on) {
-        var btn = document.getElementById('devModeToggle');
-        btn.classList.toggle('active', on);
-        btn.classList.toggle('btn-outline-secondary', !on);
-        btn.classList.toggle('btn-secondary', on);
+        document.getElementById('modeBoard').classList.toggle('active', mode === 'board');
+        document.getElementById('modeCanvas').classList.toggle('active', mode === 'canvas');
       }
       syncModeButtons(currentMode);
-      syncDevModeButton(devMode);
+      document.getElementById('devModeToggle').checked = devMode;
 
-      runtimeClient = window.ReusableBoardRuntimeClient.createBoardRuntimeClient({
-        fetchServer,
-        boardPaths,
-        buildLiveCardModelsFromArtifacts,
-        getServerOrigin: function () { return activeServerOrigin; },
-        initialMode: currentMode,
-        canvas: { height: 'calc(100vh - 56px)', overflow: 'auto' },
-      });
+      // ── Bootstrap ──
 
-      // Populate board selector from server config
-      async function loadConfig() {
-        try {
-          var res = await fetchServer('/api/config');
-          var boards = await res.json();
-          if (!Array.isArray(boards) || !boards.length) return;
-          // Default to first board if ?l= not set
-          if (!boardKey) {
-            boardKey = boards[0].key;
-          }
-          var select = document.getElementById('boardKeySelect');
-          boards.forEach(function (b) {
-            var opt = document.createElement('option');
-            opt.value = b.key;
-            opt.textContent = b.label || b.key;
-            if (b.key === boardKey) opt.selected = true;
-            select.appendChild(opt);
-          });
-          select.addEventListener('change', function () {
-            var url = new URL(window.location);
-            url.searchParams.set('l', this.value);
-            window.location.href = url.toString();
-          });
-          var match = boards.find(function (b) { return b.key === boardKey; });
-          if (match) {
-            document.getElementById('boardTitle').textContent = match.label || match.key;
-          }
-        } catch (e) { /* selector stays empty if config unavailable */ }
+      async function switchBoard(boardId) {
+        if (boardId === activeBoardId && bootstrapCompleted) return;
+        if (runtimeClient) runtimeClient.dispose();
+        bootstrapCompleted = false;
+        activeBoardId = boardId;
+        document.getElementById('boardRoot').innerHTML =
+          '<div class="d-flex align-items-center justify-content-center" style="height:90vh">'
+          + '<div class="text-center"><div class="spinner-border mb-3" role="status">'
+          + '<span class="visually-hidden">Loading...</span></div>'
+          + '<p class="text-muted">Loading board...</p></div></div>';
+
+        // Update URL without reload
+        var url = new URL(window.location);
+        url.searchParams.set('l', boardId);
+        history.replaceState(null, '', url);
+
+        // Update title
+        var entries = Object.entries(serverConfig && serverConfig.boards || {});
+        var match = entries.find(function (e) { return e[0] === boardId; });
+        document.getElementById('boardTitle').textContent = match ? (match[1].label || match[0]) : boardId;
+
+        await bootstrapBoard(boardId);
       }
 
-      function resolveTaskExecutorPathParam() {
-        const params = new URLSearchParams(window.location.search || '');
-        const fromQuery = params.get('taskExecutorPath');
-        const fromWindow = window.DEMO_TASK_EXECUTOR_PATH;
-        if (typeof fromQuery === 'string' && fromQuery.trim()) return fromQuery.trim();
-        if (typeof fromWindow === 'string' && fromWindow.trim()) return fromWindow.trim();
-        return '';
-      }
+      async function bootstrapBoard(boardId) {
+        var bid = boardId || activeBoardId || 'default';
 
-      async function bootstrap(boardId) {
-        const bid = boardId || activeBoardId || 'default';
+        runtimeClient = createBoardRuntimeClient({
+          fetchServer: fetchServer,
+          boardPaths: boardPaths,
+          getServerOrigin: function () { return activeServerOrigin; },
+          initialMode: currentMode,
+          canvas: { height: 'calc(100vh - 56px)', overflow: 'auto' },
+        });
 
         await runtimeClient.bootstrapBoard({
           boardId: bid,
-          taskExecutorPath: resolveTaskExecutorPathParam(),
           rootElement: document.getElementById('boardRoot'),
-          runDemoSetup: false,
           mode: currentMode,
         });
 
@@ -238,59 +226,53 @@
         if (devMode) runtimeClient.setDevMode(true);
       }
 
+      // ── Event listeners ──
+
+      document.getElementById('boardKeySelect').addEventListener('change', function () {
+        switchBoard(this.value).catch(function (err) {
+          console.error(err);
+          document.getElementById('boardRoot').innerHTML =
+            '<div class="alert alert-danger">Failed to switch board: ' + String(err && err.message || err) + '</div>';
+        });
+      });
+
       document.getElementById('modeBoard').addEventListener('click', function () {
         currentMode = 'board';
         localStorage.setItem('demo-board-mode', 'board');
         syncModeButtons('board');
-        runtimeClient.setMode('board');
+        if (runtimeClient) runtimeClient.setMode('board');
       });
 
       document.getElementById('modeCanvas').addEventListener('click', function () {
         currentMode = 'canvas';
         localStorage.setItem('demo-board-mode', 'canvas');
         syncModeButtons('canvas');
-        runtimeClient.setMode('canvas');
+        if (runtimeClient) runtimeClient.setMode('canvas');
       });
 
-      document.getElementById('devModeToggle').addEventListener('click', function () {
-        devMode = !devMode;
+      document.getElementById('autoLayout').addEventListener('click', function () {
+        if (runtimeClient) runtimeClient.autoLayout();
+      });
+
+      document.getElementById('devModeToggle').addEventListener('change', function () {
+        devMode = this.checked;
         localStorage.setItem('demo-board-devmode', String(devMode));
-        syncDevModeButton(devMode);
-        runtimeClient.setDevMode(devMode);
+        if (runtimeClient) runtimeClient.setDevMode(devMode);
       });
 
-      document.getElementById('refreshBtn').addEventListener('click', async function () {
-        var btn = this;
-        btn.disabled = true;
-        btn.classList.replace('btn-outline-secondary', 'btn-warning');
-        try {
-          var res = await fetchServer('/api/refresh', { method: 'POST' });
-          var data = await res.json();
-          console.log('[refresh]', data);
-          btn.classList.replace('btn-warning', 'btn-success');
-          setTimeout(function () { btn.classList.replace('btn-success', 'btn-outline-secondary'); }, 2000);
-        } catch (err) {
-          console.error('[refresh] error:', err);
-          btn.classList.replace('btn-warning', 'btn-danger');
-          setTimeout(function () { btn.classList.replace('btn-danger', 'btn-outline-secondary'); }, 3000);
-        } finally {
-          btn.disabled = false;
-        }
-      });
+      // ── Start ──
 
-      async function start() {
-        await loadConfig();
-        await bootstrap(activeBoardId);
-      }
-
-      start().catch(function (err) {
-        console.error(err);
-        document.getElementById('boardRoot').innerHTML =
-          `<div class="alert alert-danger">Failed to start server runtime demo: ${String(err && err.message || err)}</div>`;
-      });
+      loadServerConfig()
+        .then(function () { return registerAndLoadBoards(); })
+        .then(function () { return bootstrapBoard(activeBoardId); })
+        .catch(function (err) {
+          console.error(err);
+          document.getElementById('boardRoot').innerHTML =
+            '<div class="alert alert-danger">Failed to start: ' + String(err && err.message || err) + '</div>';
+        });
 
       window.addEventListener('beforeunload', function () {
-        runtimeClient.dispose();
+        if (runtimeClient) runtimeClient.dispose();
       });
     })();
   </script>

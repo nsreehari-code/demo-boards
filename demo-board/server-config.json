@@ -1,0 +1,66 @@
+{
+  "port": 7799,
+  "serverMetaStoreRef": "b64:eyJraW5kIjoiZnMtcGF0aCIsInZhbHVlIjoiLi8uc2VydmVyLW1ldGEifQ",
+  "foundry": {
+    "endpoint": "https://sz-foundry.services.ai.azure.com/api/projects/sz-project",
+    "agent_id": "asst_IMDJiVnL9fS0QbttDXKxN5lF"
+  },
+  "boards": {
+    "live": {
+      "label": "Live",
+      "setupDir": "./live/.board-ws",
+      "regular": {
+        "seedCardsDir": "./live/cards",
+        "taskExecutorPath": "./demo-task-executor.js",
+        "chatHandlerPath": "./demo-chat-handler.js"
+      },
+      "gandalf": {
+        "seedCardsDir": "./live/gandalf-cards",
+        "taskExecutorPath": "./demo-task-executor.js",
+        "chatHandlerPath": "./demo-chat-handler.js"
+      }
+    },
+    "cpm": {
+      "label": "CPM",
+      "setupDir": "./cpm/.board-ws",
+      "regular": {
+        "seedCardsDir": "./cpm/cards",
+        "taskExecutorPath": "./demo-task-executor.js",
+        "chatHandlerPath": "./demo-chat-handler.js"
+      },
+      "gandalf": {
+        "seedCardsDir": "./cpm/gandalf-cards",
+        "taskExecutorPath": "./demo-task-executor.js",
+        "chatHandlerPath": "./demo-chat-handler.js"
+      }
+    },
+    "cpmV2": {
+      "label": "CPM V2",
+      "setupDir": "./cpmV2/.board-ws",
+      "regular": {
+        "seedCardsDir": "./cpmV2/cards",
+        "taskExecutorPath": "./demo-task-executor.js",
+        "chatHandlerPath": "./demo-chat-handler.js"
+      },
+      "gandalf": {
+        "seedCardsDir": "./cpmV2/gandalf-cards",
+        "taskExecutorPath": "./demo-task-executor.js",
+        "chatHandlerPath": "./demo-chat-handler.js"
+      }
+    },
+    "optimus": {
+      "label": "OPTIMUS",
+      "setupDir": "./optimus/.board-ws",
+      "regular": {
+        "seedCardsDir": "./optimus/cards",
+        "taskExecutorPath": "./demo-task-executor.js",
+        "chatHandlerPath": "./demo-chat-handler.js"
+      },
+      "gandalf": {
+        "seedCardsDir": "./optimus/gandalf-cards",
+        "taskExecutorPath": "./demo-task-executor.js",
+        "chatHandlerPath": "./demo-chat-handler.js"
+      }
+    }
+  }
+}

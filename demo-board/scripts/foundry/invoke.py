@@ -154,9 +154,41 @@ def _validate_card(filepath):
         return {"ok": True, "errors": []}  # don't block on validation failure
 
 
+def tool_read_pdf(arguments, allowed_dirs):
+    """Extract text from a PDF file. Returns page-by-page text content."""
+    filepath = arguments.get("path", "")
+    pages = arguments.get("pages")  # optional: list of 0-based page numbers
+    if not filepath:
+        return json.dumps({"error": "path is required"})
+    if not is_path_allowed(filepath, allowed_dirs):
+        return json.dumps({"error": "access denied: path not in allowed directories"})
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        return json.dumps({"error": "PyMuPDF not installed. Run: pip install PyMuPDF"})
+    try:
+        doc = fitz.open(filepath)
+        result_pages = []
+        page_indices = pages if pages else range(len(doc))
+        total_chars = 0
+        for i in page_indices:
+            if i < 0 or i >= len(doc):
+                continue
+            text = doc[i].get_text()
+            total_chars += len(text)
+            result_pages.append({"page": i, "text": text})
+            if total_chars > 512_000:  # cap total at 512KB
+                break
+        doc.close()
+        return json.dumps({"path": filepath, "total_pages": len(doc), "pages": result_pages})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 TOOL_HANDLERS = {
     "read_file": tool_read_file,
     "list_dir": tool_list_dir,
+    "read_pdf": tool_read_pdf,
     "patch_json_file": tool_patch_json_file,
 }
 
@@ -222,6 +254,27 @@ def build_function_tools():
                         }
                     },
                     "required": ["path", "json_path", "value"]
+                }
+            )
+        ),
+        FunctionToolDefinition(
+            function=FunctionDefinition(
+                name="read_pdf",
+                description="Extract text from a PDF file. Returns page-by-page text content. Use for reading compliance documents, reports, policies, or any PDF in the allowed directories.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Absolute path to the PDF file to read."
+                        },
+                        "pages": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Optional list of 0-based page numbers to read. If omitted, reads all pages."
+                        }
+                    },
+                    "required": ["path"]
                 }
             )
         ),

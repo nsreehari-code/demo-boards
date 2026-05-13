@@ -4,34 +4,30 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawnSync, spawn } from 'node:child_process';
+import net from 'node:net';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 
 import {
   createMultiBoardServerRuntime,
-  createRuntimeRequestDispatcher,
-  isRuntimeRoute,
-} from 'yaml-flow/board-livecards-server-runtime';
+  createSingleBoardServerRuntime,
+} from 'yaml-flow/board-live-cards-server-runtime';
+
+import {
+  createFsBoardPlatformAdapter,
+  createNodeSpawnInvocationAdapter,
+  createArtifactsStore,
+  executionRefFromScriptPath,
+  parseRef,
+  serializeRef,
+} from 'yaml-flow/board-live-cards-node';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const _require = createRequire(import.meta.url);
-
-function resolveYamlFlowDir() {
-  try {
-    return path.dirname(_require.resolve('yaml-flow/package.json'));
-  } catch {
-    return null;
-  }
-}
-
-const _yamlFlowDir = resolveYamlFlowDir();
-const _pkgCliJs = _yamlFlowDir ? path.join(_yamlFlowDir, 'board-live-cards-cli.js') : null;
-const _pkgStepMachineCli = _yamlFlowDir ? path.join(_yamlFlowDir, 'step-machine-cli.js') : null;
+const cliArgs = process.argv.slice(2);
 
 function loadServerConfig() {
-  const configPath = path.join(__dirname, 'demo-server-config.json');
+  const configPath = path.join(__dirname, 'server-config.json');
   if (!fs.existsSync(configPath)) return {};
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
@@ -47,17 +43,45 @@ function resolveFromConfig(configValue) {
   return path.resolve(__dirname, configValue);
 }
 
-const serverConfig = loadServerConfig();
-const configuredCliJs = resolveFromConfig(serverConfig.boardLiveCardsCliJs) || _pkgCliJs;
-
-if (!process.env.BOARD_LIVE_CARDS_CLI_JS && configuredCliJs) {
-  process.env.BOARD_LIVE_CARDS_CLI_JS = configuredCliJs;
+function resolveKindRefFromConfig(configValue) {
+  if (typeof configValue !== 'string' || !configValue.trim()) return null;
+  const trimmed = configValue.trim();
+  if (!trimmed.startsWith('b64:')) return trimmed;
+  try {
+    const parsed = parseRef(trimmed);
+    if (parsed.kind !== 'fs-path') return trimmed;
+    const rawPath = parsed.value.trim();
+    if (!rawPath) return null;
+    const resolved = path.isAbsolute(rawPath) ? rawPath : path.resolve(__dirname, rawPath);
+    return serializeRef({ kind: 'fs-path', value: resolved });
+  } catch {
+    return trimmed;
+  }
 }
 
-const sharedCliJs = process.env.BOARD_LIVE_CARDS_CLI_JS || configuredCliJs;
-const sharedStepMachineCli = process.env.DEMO_STEP_MACHINE_CLI_PATH || _pkgStepMachineCli;
+const serverConfig = loadServerConfig();
+
+// Resolve top-level config defaults (used as fallbacks for per-board config)
+const configuredTaskExecutorPath = resolveFromConfig(serverConfig.taskExecutorPath);
+const configuredChatHandlerPath = resolveFromConfig(serverConfig.chatHandlerPath);
+const configuredInferenceAdapterPath = resolveFromConfig(serverConfig.inferenceAdapterPath);
+const configuredStepMachineCliPath = resolveFromConfig(serverConfig.stepMachineCliPath);
+const configuredServerMetaStoreRef = resolveKindRefFromConfig(serverConfig.serverMetaStoreRef);
+
+if (!process.env.DEMO_STEP_MACHINE_CLI_PATH && configuredStepMachineCliPath) {
+  process.env.DEMO_STEP_MACHINE_CLI_PATH = configuredStepMachineCliPath;
+}
+if (!process.env.DEMO_CHAT_HANDLER_PATH && configuredChatHandlerPath) {
+  process.env.DEMO_CHAT_HANDLER_PATH = configuredChatHandlerPath;
+}
+if (!process.env.DEMO_INFERENCE_ADAPTER_PATH && configuredInferenceAdapterPath) {
+  process.env.DEMO_INFERENCE_ADAPTER_PATH = configuredInferenceAdapterPath;
+}
 
 const PORT = Number(process.env.DEMO_SERVER_PORT || serverConfig.port || 7799);
+const cardsPatternArgIndex = cliArgs.indexOf('--cards-pattern');
+const cliCardsPattern = cardsPatternArgIndex !== -1 ? cliArgs[cardsPatternArgIndex + 1] : null;
+const selectedCardsPattern = (process.env.DEMO_CARDS_PATTERN || cliCardsPattern || '').trim() || null;
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -65,51 +89,280 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS',
 };
 
-// Build per-board runtimes from config
-const boardEntries = serverConfig.boards ? Object.entries(serverConfig.boards) : [];
-const boardRuntimes = boardEntries.map(([key, cfg]) => {
-  const setupDir = resolveFromConfig(cfg.setupDir);
-  const cardsDir = resolveFromConfig(cfg.cardsDir);
-  const taskExec = resolveFromConfig(cfg.taskExecutorPath);
-  const chatHandler = resolveFromConfig(cfg.chatHandlerPath);
-  const stepMachineCli = resolveFromConfig(cfg.stepMachineCliPath) || sharedStepMachineCli;
-  const gandalfCards = resolveFromConfig(cfg.gandalfCardsDir);
-  const gandalfTaskExec = resolveFromConfig(cfg.gandalfTaskExecutorPath);
-  const gandalfChatHandler = resolveFromConfig(cfg.gandalfChatHandlerPath);
+// ---------------------------------------------------------------------------
+// Setup directory
+// ---------------------------------------------------------------------------
 
-  if (chatHandler && !process.env.DEMO_CHAT_HANDLER_PATH) {
-    process.env.DEMO_CHAT_HANDLER_PATH = chatHandler;
-  }
-  if (stepMachineCli && !process.env.DEMO_STEP_MACHINE_CLI_PATH) {
-    process.env.DEMO_STEP_MACHINE_CLI_PATH = stepMachineCli;
-  }
+const setupDir = path.resolve(
+  process.env.DEMO_SETUP_DIR || path.join(__dirname, '.demo-setup'),
+);
+fs.mkdirSync(setupDir, { recursive: true });
 
-  const runtime = createMultiBoardServerRuntime({
-    apiBasePath: `/api/${key}`,
-    serverUrl: `http://127.0.0.1:${PORT}`,
-    setupDir: setupDir || null,
-    defaultCardsDir: cardsDir || null,
-    defaultTaskExecutorPath: taskExec || null,
-    defaultStepMachineCliPath: stepMachineCli,
-    defaultChatHandlerPath: chatHandler || null,
-    defaultGandalfCardsDir: gandalfCards || null,
-    defaultGandalfTaskExecutorPath: gandalfTaskExec || null,
-    defaultGandalfChatHandlerPath: gandalfChatHandler || null,
-    boardLiveCardsCliJs: sharedCliJs,
-  });
+// ---------------------------------------------------------------------------
+// Host adapter factories — Node-specific implementations injected into the
+// platform-free server runtime.
+// ---------------------------------------------------------------------------
+
+function wildcardToRegExp(pattern) {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped.replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
+}
+
+function createFsCardSource(cardsDir, cardPattern = null) {
+  const cardRegex = cardPattern ? wildcardToRegExp(cardPattern) : null;
+  return {
+    listCards() {
+      if (!fs.existsSync(cardsDir)) return [];
+      return fs.readdirSync(cardsDir)
+        .filter(f => {
+          if (!f.endsWith('.json')) return false;
+          if (!cardRegex) return true;
+          const cardId = path.basename(f, '.json');
+          return cardRegex.test(cardId);
+        })
+        .map(f => {
+          try { return JSON.parse(fs.readFileSync(path.join(cardsDir, f), 'utf-8')); }
+          catch { return null; }
+        })
+        .filter(Boolean);
+    },
+  };
+}
+
+function namedPipePath(pipeName) {
+  if (process.platform === 'win32') return `\\\\.\\pipe\\${pipeName}`;
+  return path.join(os.tmpdir(), `${pipeName}.sock`);
+}
+
+function makeExecutionRef(scriptPath) {
+  if (!scriptPath) return undefined;
+  const resolved = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(process.cwd(), scriptPath);
+  return executionRefFromScriptPath(resolved);
+}
+
+function createNamedPipeNotificationTransport() {
+  return {
+    async subscribe(ref, onEvent) {
+      if (ref.kind !== 'named-pipe') return () => {};
+      const pipePath = ref.value;
+      if (process.platform !== 'win32' && fs.existsSync(pipePath)) {
+        try { fs.rmSync(pipePath, { force: true }); } catch { /* */ }
+      }
+      const server = net.createServer((socket) => {
+        let buf = '';
+        socket.on('data', (chunk) => {
+          buf += chunk.toString('utf-8');
+          while (true) {
+            const i = buf.indexOf('\n');
+            if (i < 0) break;
+            const line = buf.slice(0, i).trim();
+            buf = buf.slice(i + 1);
+            if (!line) continue;
+            try { onEvent(JSON.parse(line)?.notification ?? JSON.parse(line)); } catch { /* */ }
+          }
+        });
+      });
+      await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(pipePath, () => resolve());
+      });
+      return () => {
+        server.close();
+        if (process.platform !== 'win32') {
+          try { fs.rmSync(pipePath, { force: true }); } catch { /* */ }
+        }
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Server meta store (multi-board registry)
+// ---------------------------------------------------------------------------
+
+const serverMetaRef = process.env.DEMO_SERVER_META_STORE_REF || configuredServerMetaStoreRef || serializeRef({ kind: 'fs-path', value: setupDir });
+const serverMetaAdapter = createFsBoardPlatformAdapter(
+  parseRef(serverMetaRef), { suppressSpawn: true },
+);
+const serverMetaStore = createArtifactsStore(serverMetaAdapter.blobStorage('server-meta'));
+
+// ---------------------------------------------------------------------------
+// Build multi-board runtime
+// ---------------------------------------------------------------------------
+
+const apiBasePath = '/api/boards';
+const invocationAdapter = createNodeSpawnInvocationAdapter();
+const notificationTransport = createNamedPipeNotificationTransport();
+const logger = { info: console.log, warn: console.warn, error: console.error };
+
+// Map config keys to board entries for the factory
+const boardConfigEntries = serverConfig.boards ? Object.entries(serverConfig.boards) : [];
+const boardConfigMap = new Map(boardConfigEntries);
+const boardHostConfig = new Map();
+
+function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerPath, infAdapterPath, boardId) {
+  fs.mkdirSync(boardDir, { recursive: true });
+  const runtimeCardsDir = path.join(boardDir, 'cards');
+  const runtimeCardStoreDir = path.join(runtimeCardsDir, 'store');
+  fs.mkdirSync(runtimeCardStoreDir, { recursive: true });
+
+  const notifyChannel = `yaml-flow-server-${label}-${boardId}-${process.pid}`;
+  const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardDir }));
+  const boardAdapter = createFsBoardPlatformAdapter(baseRef, { notifyChannel });
+  boardAdapter.requestProcessAccumulated = () => {};
+
+  const artifactsRef = parseRef(serializeRef({ kind: 'fs-path', value: runtimeCardsDir }));
+  const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, { suppressSpawn: true });
+  const cardStoreRef = serializeRef({ kind: 'fs-path', value: runtimeCardStoreDir });
 
   return {
-    key,
-    label: cfg.label || key,
-    runtime,
-    dispatch: createRuntimeRequestDispatcher(runtime),
+    label,
+    boardAdapter,
+    artifactsAdapter,
+    baseRef,
+    cardStoreRef,
+    outputsStoreRef: serializeRef({ kind: 'fs-path', value: path.join(path.dirname(boardDir), 'runtime-out', '.outputs') }),
+    notifyRef: { kind: 'named-pipe', value: namedPipePath(notifyChannel) },
+    taskExecutorRef: makeExecutionRef(taskExecPath),
+    chatHandlerRef: makeExecutionRef(chatHandlerPath),
+    inferenceAdapterRef: makeExecutionRef(infAdapterPath),
   };
+}
+
+// Pre-register configured boards in the server meta store
+for (const [key, cfg] of boardConfigEntries) {
+  const existing = serverMetaStore.getText(`boards/${key}.json`);
+  if (!existing) {
+    serverMetaStore.putText(`boards/${key}.json`, JSON.stringify({ id: key, label: cfg.label || key }));
+  }
+}
+
+const runtime = createMultiBoardServerRuntime({
+  apiBasePath,
+  serverMetaStore,
+  logger,
+  boardRuntimeFactory: (boardId, entry) => {
+    const cfg = boardConfigMap.get(boardId);
+    const regular = cfg?.regular || {};
+    const gandalf = cfg?.gandalf || {};
+
+    const cardsDir = resolveFromConfig(regular.seedCardsDir) || (entry?.cardsDir ? path.resolve(entry.cardsDir) : null);
+    const taskExecPath = resolveFromConfig(regular.taskExecutorPath) || (entry?.taskExecutorPath || configuredTaskExecutorPath);
+    const chatHandlerPath = resolveFromConfig(regular.chatHandlerPath) || (entry?.chatHandlerPath || configuredChatHandlerPath);
+    const infAdapterPath = resolveFromConfig(regular.inferenceAdapterPath) || (entry?.inferenceAdapterPath || configuredInferenceAdapterPath);
+    const stepMachinePath = resolveFromConfig(regular.stepMachineCliPath || cfg?.stepMachineCliPath) || (entry?.stepMachineCliPath || configuredStepMachineCliPath);
+
+    if (chatHandlerPath && !process.env.DEMO_CHAT_HANDLER_PATH) {
+      process.env.DEMO_CHAT_HANDLER_PATH = chatHandlerPath;
+    }
+    if (infAdapterPath && !process.env.DEMO_INFERENCE_ADAPTER_PATH) {
+      process.env.DEMO_INFERENCE_ADAPTER_PATH = infAdapterPath;
+    }
+
+    const boardRoot = cfg?.setupDir ? path.resolve(__dirname, cfg.setupDir) : path.join(setupDir, `board-${boardId}`);
+    fs.mkdirSync(boardRoot, { recursive: true });
+    const boardDir = path.join(boardRoot, 'runtime');
+
+    const baseCfg = buildBoardContextConfig('base', boardDir, taskExecPath, chatHandlerPath, infAdapterPath, boardId);
+    const boards = [baseCfg];
+
+    // Gandalf layer
+    const gandalfCardsDir = resolveFromConfig(gandalf.seedCardsDir) || null;
+    const gandalfTaskExecPath = resolveFromConfig(gandalf.taskExecutorPath) || null;
+    const gandalfChatHandlerPath = resolveFromConfig(gandalf.chatHandlerPath) || null;
+    const gandalfInfPath = resolveFromConfig(gandalf.inferenceAdapterPath) || null;
+    let gandalfBoardDir = null;
+    if (gandalfCardsDir && gandalfTaskExecPath) {
+      gandalfBoardDir = path.join(boardRoot, 'gandalf-runtime');
+      const gandalfCfg = buildBoardContextConfig('gandalf', gandalfBoardDir, gandalfTaskExecPath, gandalfChatHandlerPath, gandalfInfPath, boardId);
+      gandalfCfg.outputsStoreRef = serializeRef({ kind: 'fs-path', value: path.join(boardRoot, 'gandalf-runtime-out', '.outputs') });
+      boards.push(gandalfCfg);
+    }
+
+    boardHostConfig.set(boardId, { cardsDir, gandalfCardsDir, boardDir, boardRoot });
+    demoPrepSetup(boardId);
+
+    const runtimeCardsDir = path.join(boardDir, 'cards');
+    const singleBoardRuntime = createSingleBoardServerRuntime({
+      apiBasePath: `${apiBasePath}/${boardId}`,
+      boardId,
+      boards,
+      invocationAdapter,
+      notificationTransport,
+      logger,
+      serverUrl: `http://127.0.0.1:${PORT}`,
+      executionExtra: {
+        boardSetupRoot: boardRoot,
+        chatsBlobBasePath: path.join(runtimeCardsDir, 'chats'),
+        ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
+      },
+    });
+
+    // Seed card store from source cardsDir if empty
+    const existing = singleBoardRuntime.cardStore.get({});
+    const isEmpty = existing.status !== 'success' || !existing.data?.cards?.length;
+    if (isEmpty && cardsDir) {
+      const cards = createFsCardSource(cardsDir, selectedCardsPattern).listCards();
+      if (cards.length) singleBoardRuntime.cardStore.set({ body: cards });
+    }
+    // Seed gandalf board if present
+    if (gandalfBoardDir && gandalfCardsDir) {
+      const gandalfRuntime = singleBoardRuntime.getBoardRuntime?.('gandalf');
+      if (gandalfRuntime) {
+        const gExisting = gandalfRuntime.cardStore.get({});
+        const gEmpty = gExisting.status !== 'success' || !gExisting.data?.cards?.length;
+        if (gEmpty) {
+          const gCards = createFsCardSource(gandalfCardsDir).listCards();
+          if (gCards.length) gandalfRuntime.cardStore.set({ body: gCards });
+        }
+      }
+    }
+
+    return singleBoardRuntime;
+  },
 });
+
+// ---------------------------------------------------------------------------
+// Demo-setup — host-level concern (writes copilot-instructions.md)
+// ---------------------------------------------------------------------------
+
+const BOARD_SEG_RE = /^\/api\/boards\/([^/]+)\/(.+)$/;
+const _demoPrepSetupDone = new Map();
+
+function demoPrepSetup(boardId) {
+  const cfg = boardHostConfig.get(boardId);
+  if (!cfg) return;
+  const { cardsDir, boardDir } = cfg;
+  if (!cardsDir) return;
+
+  const boardSetupRoot = path.dirname(boardDir);
+  fs.mkdirSync(boardSetupRoot, { recursive: true });
+  const srcDir = path.dirname(cardsDir);
+  const agentInstructionFiles = ['agent-instructions.md', 'agent-instructions-cardlayout.md'];
+  const parts = [];
+  for (const fname of agentInstructionFiles) {
+    const fpath = path.join(srcDir, fname);
+    if (fs.existsSync(fpath)) parts.push(fs.readFileSync(fpath, 'utf-8').trimEnd());
+  }
+  if (parts.length > 0) {
+    fs.writeFileSync(path.join(boardSetupRoot, 'copilot-instructions.md'), parts.join('\n\n') + '\n', 'utf-8');
+  }
+  _demoPrepSetupDone.set(boardId, true);
+}
 
 function jsonReply(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' });
   res.end(body);
+}
+
+async function handleDemoSetup(req, res, boardId) {
+  try {
+    runtime.requireBoardService(boardId);
+    jsonReply(res, 200, { ok: true, setupPerformed: false });
+  } catch (err) {
+    jsonReply(res, err.statusCode || 500, { error: String((err && err.message) || err) });
+  }
 }
 
 async function handleWorkiqAsk(req, res) {
@@ -175,37 +428,10 @@ async function handleWorkiqAsk(req, res) {
   });
 }
 
-async function handleRefreshBoards(_req, res) {
-  if (!sharedCliJs || !fs.existsSync(sharedCliJs)) {
-    return jsonReply(res, 503, { error: 'board-live-cards-cli not found' });
-  }
-  const results = [];
-  for (const { key, runtime } of boardRuntimes) {
-    const setupDir = runtime.setupDir;
-    if (!setupDir) { results.push({ board: key, status: 'skipped', reason: 'no setupDir' }); continue; }
-    const cardsGlob = path.join(setupDir, 'cards', '*.json');
-    try {
-      const r = spawnSync(process.execPath, [
-        sharedCliJs, 'upsert-card',
-        '--rg', setupDir,
-        '--card-glob', cardsGlob,
-        '--restart',
-      ], { cwd: __dirname, timeout: 30_000, encoding: 'utf-8' });
-      if (r.status === 0) {
-        results.push({ board: key, status: 'ok', stdout: (r.stdout || '').trim() });
-      } else {
-        results.push({ board: key, status: 'error', code: r.status, stderr: (r.stderr || '').trim() });
-      }
-    } catch (err) {
-      results.push({ board: key, status: 'error', message: err.message });
-    }
-  }
-  return jsonReply(res, 200, { refreshed: results });
-}
-
 const server = http.createServer((req, res) => {
   const method = req.method || 'GET';
-  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  const url = new URL(req.url || '/', 'http://localhost');
+  const pathname = url.pathname;
 
   if (method === 'OPTIONS') {
     res.writeHead(204, CORS_HEADERS);
@@ -213,9 +439,9 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // GET /api/config — available boards for the UI selector
+  // GET /api/config — available boards for the UI selector (legacy compat)
   if (method === 'GET' && pathname === '/api/config') {
-    const boards = boardRuntimes.map(({ key, label }) => ({ key, label }));
+    const boards = boardConfigEntries.map(([key, cfg]) => ({ key, label: cfg.label || key }));
     return jsonReply(res, 200, boards);
   }
 
@@ -225,36 +451,36 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Route: POST /api/refresh — upsert-card --card-glob --restart for every configured board
-  if (method === 'POST' && pathname === '/api/refresh') {
-    void handleRefreshBoards(req, res);
+  // Route: demo-setup is handled here (host concern)
+  const boardSegMatch = pathname.match(BOARD_SEG_RE);
+  if (boardSegMatch && boardSegMatch[2] === 'demo-setup') {
+    void handleDemoSetup(req, res, boardSegMatch[1]);
     return;
   }
 
-  // Route to matching board runtime by URL prefix
-  for (const { key, dispatch } of boardRuntimes) {
-    if (pathname.startsWith(`/api/${key}/`)) {
-      void dispatch(req, res);
-      return;
+  // All other /api/boards routes are handled by the platform-free runtime
+  runtime.handleApi(req, res, url).then((handled) => {
+    if (!handled) {
+      jsonReply(res, 404, { error: 'Not found' });
     }
-  }
-
-  jsonReply(res, 404, { error: 'Not found' });
+  });
 });
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[demo-server] listening on http://127.0.0.1:${PORT}`);
-  for (const { key, label, runtime } of boardRuntimes) {
-    console.log(`[demo-server] board "${key}" (${label}): ${runtime.setupDir}`);
-  }
+  console.log(`[demo-server] setup dir: ${setupDir}`);
+  console.log(`[demo-server] server-meta store: ${serverMetaRef}`);
   console.log('[demo-server] endpoints:');
-  console.log('  GET  /api/config                                <- available boards');
-  for (const { key } of boardRuntimes) {
-    console.log(`  GET  /api/${key}/:boardId/bootstrap`);
-    console.log(`  GET  /api/${key}/:boardId/sse`);
-    console.log(`  PATCH /api/${key}/:boardId/cards/:id`);
-    console.log(`  POST /api/${key}/:boardId/cards/:id/actions`);
-  }
-  console.log('  POST /api/workiq/ask  {query}                    <- WorkIQ proxy');
-  console.log('  POST /api/refresh                                 <- upsert + restart all boards');
+  console.log(`  GET  ${apiBasePath}                          <- list boards`);
+  console.log(`  POST ${apiBasePath}  {id, label?}            <- register board`);
+  console.log(`  GET  ${apiBasePath}/:boardId/demo-setup  (no-op; setup now runs at board init)`);
+  console.log(`  GET  ${apiBasePath}/:boardId/init-board`);
+  console.log(`  GET  ${apiBasePath}/:boardId/sse`);
+  console.log(`  GET  ${apiBasePath}/:boardId/board-status`);
+  console.log(`  PATCH ${apiBasePath}/:boardId/cards/:id`);
+  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/actions`);
+  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/files`);
+  console.log(`  GET  ${apiBasePath}/:boardId/cards/:id/files/:idx`);
+  console.log(`  GET  ${apiBasePath}/:boardId/cards/:id/chats`);
+  console.log(`  POST /api/workiq/ask  {query}              <- WorkIQ (M365 Copilot) proxy`);
 });

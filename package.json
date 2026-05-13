@@ -22,7 +22,7 @@
   "license": "ISC",
   "dependencies": {
     "better-sqlite3": "^12.9.0",
-    "yaml-flow": "^5.4.2"
+    "yaml-flow": "^8.0.0"
   },
   "devDependencies": {
     "http-server": "^14.1.1"

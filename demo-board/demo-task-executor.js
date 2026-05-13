@@ -32,31 +32,24 @@
  *     "boardId":          "<board id>",        // e.g. "default"
  *     "boardRuntimeDir":  "<relative>",        // e.g. "runtime"
  *     "runtimeStatusDir": "<relative>",        // e.g. "runtime-out"
- *     "cardsDir":         "<relative>"         // e.g. "surface/tmp-cards"
+ *     "cardsDir":         "<relative>",        // e.g. "surface/tmp-cards"
+ *     "serverUrl":        "<base url>",        // optional; e.g. "http://127.0.0.1:7799"
+ *     "boardLiveCardsCliJs":"<abs path>",      // optional; path to board-live-cards-cli.js
+ *     "stepMachineCliPath":"<abs path>"        // optional; path to step-machine-cli.js
  *   }
  *
  * Supported source kinds (based on custom fields in --in):
  *   - { mock: "key" }              → look up key in MOCK_DB (hardcoded below)
- *   - { copilot: { prompt_template, args?, result_shape? } }
- *       → call Copilot CLI with interpolated prompt. Executor auto-sandboxes:
- *         cwd = card runtime dir, --add-dir for cards/runtime/runtime-out,
- *         -s --no-ask-user --allow-all-tools.
+ *   - { copilot: { prompt_template, args? } }  → call Copilot CLI with interpolated prompt
+ *   - { prompt_template: "..." }   → shorthand copilot call (top-level template)
  *   - { workiq: { query_template, args? } }   → call WorkIQ (M365 Copilot) with interpolated query
  *   - { "url": { url, method?, headers?, args?, cacheTimeout? }, tickersFrom? }
  *       → single URL fetch via curl with {{key}} interpolation from _projections
  *   - { "url-list": { method?, headers?, cacheTimeout? } }
  *       → fan-out over _projections.url_list (string[]); returns array of responses.
  *         Build url_list in projections: e.g. `requires.holdings.ticker.('https://host/' & $ & '?q=1')`
- *   - { chartApi: { url, headers? }, tickersFrom }  → removed; use url-list instead
- *     prefer url-list for new sources
- *   - { teams: { action, team_id?, channel_id?, ... } }
- *       → Microsoft Graph API for Teams chats/channels via `az rest`.
- *         Supported actions: list-teams, list-channels, read-channel, post-message,
- *         reply-to-message, search-messages. Requires `az login`.
- *   - { foundry: { endpoint, agent_id, prompt_template, args?, result_shape? } }
- *       → Azure AI Foundry Agent invocation via Managed Identity (DefaultAzureCredential).
- *         Uses pre-configured agents. Shells out to scripts/foundry/invoke.py. No API keys needed.
- *   A real executor can also handle: graphapi, mail, incidentdb, script, etc.
+ *     Prefer url-list for multi-URL fan-out sources.
+ *   A real executor can also handle: graphapi, teams, mail, incidentdb, script, etc.
  *
  * url / url-list notes:
  *   - Results cached in os.tmpdir()/demo-executor-cache/ per URL (default 1 hour, override via cacheTimeout)
@@ -65,11 +58,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parseRef, blobStorageForRef, reportComplete, reportFailed } from 'yaml-flow/board-worker-adapter';
+import { loadStepFlow, createStepMachine, MemoryStore, buildStepHandlersForFlow } from 'yaml-flow/step-machine-public';
+import { invokeRefSync } from 'yaml-flow/board-live-cards-node';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SOURCE_DEF_FLOWS_FILE = path.join(__dirname, 'source_def_flows.json');
 
 // ---------------------------------------------------------------------------
 // Mock data — used when a source has { mock: "key" }.
@@ -88,47 +84,6 @@ const MOCK_DB = {
     },
   },
 };
-
-// ---------------------------------------------------------------------------
-// Simple file cache for url / url-list results.
-// Stored in os.tmpdir()/demo-executor-cache/<hash>.json
-// ---------------------------------------------------------------------------
-const CACHE_DIR = path.join(os.tmpdir(), 'demo-executor-cache');
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
-
-function cacheKey(str) {
-  return crypto.createHash('sha1').update(str).digest('hex');
-}
-
-function readCache(key, ttlMs = CACHE_TTL_MS) {
-  const file = path.join(CACHE_DIR, `${key}.json`);
-  try {
-    const stat = fs.statSync(file);
-    if (Date.now() - stat.mtimeMs < ttlMs) {
-      return JSON.parse(fs.readFileSync(file, 'utf-8'));
-    }
-  } catch {}
-  return null;
-}
-
-// Shared single-URL fetch helper used by both url and url-list.
-// cacheTimeoutSec: override TTL in seconds (null → use CACHE_TTL_MS default).
-function doFetchApi(url, method, headers, cacheTimeoutSec, errFile) {
-  const ttlMs = cacheTimeoutSec != null ? cacheTimeoutSec * 1000 : CACHE_TTL_MS;
-  const k = cacheKey(`url:${method}:${url}`);
-  const cached = readCache(k, ttlMs);
-  if (cached) return cached;
-  const data = curlFetchJson(url, method, headers);
-  writeCache(k, data);
-  return data;
-}
-
-function writeCache(key, value) {
-  try {
-    fs.mkdirSync(CACHE_DIR, { recursive: true });
-    fs.writeFileSync(path.join(CACHE_DIR, `${key}.json`), JSON.stringify(value));
-  } catch {}
-}
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -163,30 +118,10 @@ const COPILOT_PROMPT_CONTEXT = {
   ].join('\n'),
 };
 
-/**
- * Fetch a URL using the system curl binary (synchronous, no Node event-loop handles).
- * Throws if curl exits non-zero (e.g. HTTP 4xx/5xx with -f, or network error).
- */
-function curlFetchJson(url, method, headers) {
-  const bin = process.platform === 'win32' ? 'curl.exe' : 'curl';
-  // -s  : silent (no progress bar)
-  // -S  : show errors despite -s
-  // -f  : fail (non-zero exit) on HTTP 4xx/5xx
-  // -L  : follow redirects
-  // --max-time 10 : hard timeout
-  const args = ['-s', '-S', '-f', '-L', '--max-time', '10', '-X', method];
-  for (const [k, v] of Object.entries(headers)) {
-    args.push('-H', `${k}: ${v}`);
-  }
-  args.push(url);
-  const raw = execFileSync(bin, args, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
-  return JSON.parse(raw);
-}
-
 function resolveCopilotPrompt(sourceDef) {
   const cfg = sourceDef?.copilot && typeof sourceDef.copilot === 'object' ? sourceDef.copilot : {};
-  const template = cfg.prompt_template;
-  const args = cfg.args ?? {};
+  const template = cfg.prompt_template ?? sourceDef.prompt_template;
+  const args = cfg.args ?? cfg.prompt_args ?? sourceDef.prompt_args ?? sourceDef.args ?? {};
   
   // Merge _projections into template interpolation context.
   // _projections contains the named data projections declared in source_defs[].projections,
@@ -207,29 +142,28 @@ function resolveCopilotPrompt(sourceDef) {
  *
  * The wrapper handles:
  *   - Session management (--resume UUID for multi-turn continuity)
- *   - Copilot sandbox: -s --no-ask-user --allow-all-tools --add-dir=...
- *   - Noise/footer stripping, JSON extraction with optional result_shape key matching
- *   - Agentic retry: if the first response isn't valid JSON, the wrapper retries
- *     with a correction prompt in the same session, then falls back to shape skeleton.
+ *   - Noise/footer stripping (via copilot_wrapper_helper.ps1)
+ *   - JSON mode extraction with optional result_shape key matching
+ *   - Agentic retry: if the first response isn't valid JSON, the wrapper calls
+ *     copilot again in the same session with a correction prompt, then re-extracts.
  *
  * @param {string} prompt         - interpolated prompt string
  * @param {object} sourceDef      - source definition (may contain copilot.result_shape)
  * @param {string} wrapperOutFile - path the wrapper writes its JSON output to
  * @param {string} sessionDir     - persistent dir for session UUID (enables --resume)
- * @param {string} cwd            - working directory for copilot (card runtime dir)
- * @param {string[]} addDirs      - directories to expose via --add-dir
+ * @param {string} cwd            - working directory for copilot (boardSetupRoot)
  * @returns {unknown} parsed JSON result value
  */
-function runCopilotViaWrapper(prompt, sourceDef, wrapperOutFile, sessionDir, cwd, addDirs) {
-  const wrapperPath = path.join(__dirname, 'scripts', 'copilot', 'wrapper.py');
-  const python = process.platform === 'win32' ? 'python' : 'python3';
+function runCopilotViaWrapper(prompt, sourceDef, wrapperOutFile, sessionDir, cwd) {
+  const wrapperPath = path.join(__dirname, 'scripts', 'copilot_wrapper.bat');
 
   const promptFile = wrapperOutFile + '.prompt.txt';
   fs.writeFileSync(promptFile, prompt, 'utf-8');
 
   // Optional result_shape_file: top-level keys the response JSON must contain.
+  // Sourced from sourceDef.copilot.result_shape or sourceDef.result_shape.
   let shapeFile = '';
-  const shape = sourceDef?.copilot?.result_shape;
+  const shape = sourceDef?.copilot?.result_shape ?? sourceDef?.result_shape;
   if (shape && typeof shape === 'object') {
     shapeFile = wrapperOutFile + '.shape.json';
     fs.writeFileSync(shapeFile, JSON.stringify(shape), 'utf-8');
@@ -237,28 +171,23 @@ function runCopilotViaWrapper(prompt, sourceDef, wrapperOutFile, sessionDir, cwd
 
   fs.mkdirSync(sessionDir, { recursive: true });
 
-  const pyArgs = [
-    wrapperPath,
-    '--output-file', wrapperOutFile,
-    '--session-dir', sessionDir,
-    '--cwd', cwd || process.cwd(),
-    '--prompt-file', promptFile,
-    '--result-type', 'json',
-    '--agent-name', sourceDef.bindTo || 'executor',
-  ];
-  for (const d of (addDirs || [])) {
-    pyArgs.push('--add-dir', d);
-  }
-  if (shapeFile) {
-    pyArgs.push('--result-shape-file', shapeFile);
-  }
-
   try {
-    execFileSync(python, pyArgs, {
+    execFileSync('cmd.exe', [
+      '/d', '/c',
+      wrapperPath,
+      wrapperOutFile,                    // OUTPUT_FILE
+      sessionDir,                        // SESSION_DIR
+      cwd || process.cwd(),             // WORKING_DIR
+      '@' + promptFile,                 // REQUEST_OR_FILE (@ prefix = file path)
+      'json',                           // RESULT_TYPE — wrapper extracts JSON + retries
+      sourceDef.bindTo || 'executor',   // AGENT_NAME (for log file naming)
+      '',                               // MODEL (empty = wrapper default)
+      shapeFile,                        // RESULT_SHAPE_FILE (empty = accept any JSON)
+    ], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 10 * 1024 * 1024,
-      timeout: 600_000,  // 10 min — copilot can be slow with retries
+      windowsHide: true,
     });
   } finally {
     try { fs.unlinkSync(promptFile); } catch {}
@@ -278,15 +207,181 @@ function fail(msg, errFile) {
   process.exit(1);
 }
 
-function runSourceFetchSubcommand(argv) {
-  const inIdx = argv.indexOf('--in');
-  const outIdx = argv.indexOf('--out');
-  const errIdx = argv.indexOf('--err');
+function loadSourceDefFlowsConfig() {
+  try {
+    return readJson(SOURCE_DEF_FLOWS_FILE);
+  } catch (err) {
+    fail(
+      `Cannot read source flow registry (${SOURCE_DEF_FLOWS_FILE}): ${String(err && err.message || err)}`,
+    );
+  }
+}
+
+function matchesDetectRule(sourceDef, detect) {
+  if (!detect || typeof detect !== 'object') return false;
+  if (typeof detect.field === 'string') {
+    return sourceDef[detect.field] !== undefined;
+  }
+  if (Array.isArray(detect.anyOfFields)) {
+    return detect.anyOfFields.some((field) => sourceDef[field] !== undefined);
+  }
+  return false;
+}
+
+function resolveSourceKind(sourceDef, registry) {
+  const kinds = registry?.kinds && typeof registry.kinds === 'object' ? registry.kinds : {};
+  const order = Array.isArray(registry?.resolveOrder) ? registry.resolveOrder : Object.keys(kinds);
+  const matched = [];
+  for (const kind of order) {
+    const spec = kinds[kind];
+    if (!spec) continue;
+    if (matchesDetectRule(sourceDef, spec.detect)) {
+      matched.push(kind);
+    }
+  }
+
+  if (matched.length === 0) {
+    const knownKinds = Object.keys(kinds);
+    throw new Error(`No recognised source kind. Known kinds: ${knownKinds.join(', ')}`);
+  }
+  if (matched.length > 1) {
+    throw new Error(`Multiple source kinds specified: [${matched.join(', ')}]. Use exactly one.`);
+  }
+  return matched[0];
+}
+
+async function executeStepMachineSourceFlow(context) {
+  const { kind, registry } = context;
+  const spec = registry?.kinds?.[kind];
+  if (!spec) {
+    throw new Error(`Missing flow registration for kind: ${kind}`);
+  }
+
+  const flowRef = spec.flow;
+  if (typeof flowRef !== 'string' || flowRef.length === 0) {
+    throw new Error(`Invalid or missing flow for kind: ${kind}`);
+  }
+
+  const flowPath = path.resolve(__dirname, flowRef);
+  const flow = await loadStepFlow(flowPath);
+
+  const invokeHttpRef = async (ref, args) => {
+    const rawUrl = typeof ref.whatToRun === 'object' ? ref.whatToRun.value : parseRef(ref.whatToRun).value;
+
+    const base = String(args?.extra?.serverUrl || 'http://127.0.0.1:7799').replace(/\/$/, '');
+    const resolvedUrl = /^https?:\/\//i.test(rawUrl)
+      ? rawUrl
+      : `${base}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
+
+    let body = args;
+    const workiqCfg = args?.sourceDef?.workiq;
+    if (workiqCfg && typeof workiqCfg === 'object' && typeof workiqCfg.query_template === 'string') {
+      const interpolationContext = {
+        ...(args?.sourceDef?._projections || {}),
+        ...(workiqCfg.args || {}),
+      };
+      body = {
+        query: interpolatePrompt(workiqCfg.query_template, interpolationContext),
+      };
+    }
+
+    const method = ref.howToRun === 'http:get' ? 'GET' : 'POST';
+    const response = await fetch(resolvedUrl, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
+    });
+
+    const text = await response.text();
+    let parsed;
+    try {
+      parsed = text ? JSON.parse(text) : {};
+    } catch {
+      parsed = { response: text };
+    }
+
+    if (!response.ok) {
+      const msg = typeof parsed?.error === 'string' ? parsed.error : `HTTP ${response.status}`;
+      return { result: 'failure', data: { error: msg }, error: msg };
+    }
+
+    if (typeof parsed?.error === 'string') {
+      return { result: 'failure', data: { error: parsed.error }, error: parsed.error };
+    }
+
+    return {
+      result: 'success',
+      data: {
+        resultValue: Object.prototype.hasOwnProperty.call(parsed, 'response') ? parsed.response : parsed,
+      },
+    };
+  };
+
+  const invoke = async (ref, args) => {
+    if (ref.howToRun === 'http:post' || ref.howToRun === 'http:get') {
+      return invokeHttpRef(ref, args);
+    }
+    if (ref.howToRun === 'demo-local-module') {
+      const whatValue = typeof ref.whatToRun === 'object' ? ref.whatToRun.value : parseRef(ref.whatToRun).value;
+      const modulePath = path.resolve(__dirname, whatValue);
+      const mod = await import(pathToFileURL(modulePath).href);
+      if (typeof mod.execute !== 'function') {
+        throw new Error(`Flow module ${JSON.stringify(ref.whatToRun)} must export execute(context)`);
+      }
+      return mod.execute(args);
+    }
+    return invokeRefSync(ref, args, { cliDir: __dirname, cwd: process.cwd() });
+  };
+
+  const handlers = buildStepHandlersForFlow(flow, { invoke });
+  const machine = createStepMachine(flow, handlers, { store: new MemoryStore() });
+  const run = await machine.run({
+    ...context,
+    promptContext: COPILOT_PROMPT_CONTEXT,
+    executorDir: __dirname,
+  });
+
+  if (run.status !== 'completed') {
+    const reason = run.error?.message ?? run.intent ?? run.status;
+    throw new Error(`flow execution failed: ${reason}`);
+  }
+
+  if (run.intent !== 'success') {
+    const reason = typeof run.data?.error === 'string' ? run.data.error : `flow returned intent: ${run.intent}`;
+    throw new Error(reason);
+  }
+
+  return {
+    resultValue: run.data?.resultValue,
+    wroteOutputDirectly: !!run.data?.wroteOutputDirectly,
+  };
+}
+
+async function resolveAndExecuteSourceFlow(sourceDef, extra, refs = {}) {
+  const registry = loadSourceDefFlowsConfig();
+  const kind = resolveSourceKind(sourceDef, registry);
+  const flowResult = await executeStepMachineSourceFlow({
+    kind,
+    registry,
+    sourceDef,
+    extra,
+    inRef: refs.inRef,
+    outRef: refs.outRef,
+    errRef: refs.errRef,
+    mockDb: MOCK_DB,
+  });
+  return { kind, flowResult };
+}
+
+async function runSourceFetchSubcommand(argv) {
+  const inIdx = argv.indexOf('--in-ref');
+  const outIdx = argv.indexOf('--out-ref');
+  const errIdx = argv.indexOf('--err-ref');
   const extraIdx = argv.indexOf('--extra');
-  const inFile = inIdx !== -1 ? argv[inIdx + 1] : undefined;
-  const outFile = outIdx !== -1 ? argv[outIdx + 1] : undefined;
-  const errFile = errIdx !== -1 ? argv[errIdx + 1] : undefined;
-  const extraB64 = extraIdx !== -1 ? argv[extraIdx + 1] : undefined;
+  const inRefStr  = inIdx  !== -1 ? argv[inIdx + 1]  : undefined;
+  const outRefStr = outIdx !== -1 ? argv[outIdx + 1] : undefined;
+  const errRefStr = errIdx !== -1 ? argv[errIdx + 1] : undefined;
+  const extraB64  = extraIdx !== -1 ? argv[extraIdx + 1] : undefined;
 
   let extra = {};
   if (extraB64) {
@@ -294,331 +389,120 @@ function runSourceFetchSubcommand(argv) {
     catch { console.warn('[demo-task-executor] bad --extra base64, ignoring'); }
   }
 
-  if (!inFile || !outFile) {
-    fail('Usage: run-source-fetch --in <source.json> --out <result.json> [--err <error.txt>]', errFile);
+  if (!inRefStr || !outRefStr) {
+    fail('Usage: run-source-fetch --in-ref <b64:<base64url(json)>> --out-ref <b64:<base64url(json)>> [--err-ref <b64:<base64url(json)>>]');
   }
 
-  if (!fs.existsSync(inFile)) {
-    fail(`Input file not found: ${inFile}`, errFile);
+  let inRef, outRef, errRef;
+  try {
+    inRef  = parseRef(inRefStr);
+    outRef = parseRef(outRefStr);
+    if (errRefStr) errRef = parseRef(errRefStr);
+  } catch (e) {
+    fail(`invalid ref argument: ${e.message}`);
   }
 
+  const inStorage  = blobStorageForRef(inRef);
+  const outStorage = blobStorageForRef(outRef);
+  const errStorage = errRef ? blobStorageForRef(errRef) : undefined;
+
+  // Local error reporter — writes to errStorage and calls back to board if callback present.
+  const failRef = (msg, callback) => {
+    if (errStorage && errRef) { try { errStorage.write(errRef.value, msg); } catch {} }
+    console.error(`[demo-task-executor] ${msg}`);
+    if (callback) { try { reportFailed(callback, msg); } catch {} }
+    process.exit(1);
+  };
+
+  const rawIn = inStorage.read(inRef.value);
+  if (rawIn === null) {
+    failRef(`Input not found: ${inRefStr}`);
+  }
+
+  // Payload may be { source_def, callback } (new protocol) or raw source def (legacy).
+  let envelope;
+  try {
+    envelope = JSON.parse(rawIn);
+  } catch (err) {
+    failRef(`Cannot parse input: ${String(err && err.message || err)}`);
+  }
+
+  const callback = envelope.source_def ? envelope.callback : undefined;
   let sourceDef;
   try {
-    sourceDef = readJson(inFile);
+    sourceDef = envelope.source_def ?? envelope;
   } catch (err) {
-    fail(`Cannot parse source file: ${String(err && err.message || err)}`, errFile);
+    failRef(`Cannot resolve source_def: ${String(err && err.message || err)}`, callback);
   }
 
-  let resultValue;
-
-  if (sourceDef['url']) {
-    // ---------------------------------------------------------------------------
-    // url — single URL fetch via curl
-    // {{key}} interpolation applied to url from _projections and optional args.
-    // cacheTimeout: seconds to cache the response (default: CACHE_TTL_MS / 1000).
-    // ---------------------------------------------------------------------------
-    const cfg     = sourceDef['url'];
-    const method  = (cfg.method || 'GET').toUpperCase();
-    const headers = { ...(cfg.headers || {}) };
-    const cacheTimeoutSec = cfg.cacheTimeout != null ? Number(cfg.cacheTimeout) : null;
-
-    const fetchArgs = { ...(cfg.args || {}) };
-    if (sourceDef.tickersFrom) {
-      const dotIdx = sourceDef.tickersFrom.indexOf('.');
-      if (dotIdx > 0) {
-        const refKey    = sourceDef.tickersFrom.slice(0, dotIdx);
-        const fieldName = sourceDef.tickersFrom.slice(dotIdx + 1);
-        const arr = sourceDef._projections?.[refKey];
-        if (Array.isArray(arr)) {
-          fetchArgs.tickers = arr.map(h => h[fieldName]).filter(Boolean).join(',');
-        }
-      }
-    }
-    if (sourceDef.tickersFrom && !fetchArgs.tickers) {
-      fail('url: tickersFrom resolved to empty list — skipping fetch', errFile);
-    }
-    const urlContext = { ...(sourceDef._projections || {}), ...fetchArgs };
-    const url = interpolatePrompt(cfg.url, urlContext);
-    try {
-      resultValue = doFetchApi(url, method, headers, cacheTimeoutSec, errFile);
-    } catch (err) {
-      fail(`url failed: ${err.message}`, errFile);
-    }
-
-  } else if (sourceDef['url-list']) {
-    // ---------------------------------------------------------------------------
-    // url-list — fan-out over a URL list, calling url logic per URL.
-    // url_list must be a string[] pre-resolved in _projections.url_list.
-    // cacheTimeout: seconds to cache each individual response.
-    // ---------------------------------------------------------------------------
-    const cfg     = sourceDef['url-list'];
-    const method  = (cfg.method || 'GET').toUpperCase();
-    const headers = { ...(cfg.headers || {}) };
-    const cacheTimeoutSec = cfg.cacheTimeout != null ? Number(cfg.cacheTimeout) : null;
-
-    const urlList = Array.isArray(sourceDef._projections?.url_list)
-      ? sourceDef._projections.url_list : null;
-
-    if (!urlList || urlList.length === 0) {
-      fail('url-list: _projections.url_list must be a non-empty string array', errFile);
-    }
-
-    const results = [];
-    for (const u of urlList) {
-      try {
-        results.push(doFetchApi(u, method, headers, cacheTimeoutSec, errFile));
-      } catch (err) {
-        fail(`url-list fetch failed for ${u}: ${err.message}`, errFile);
-      }
-    }
-    resultValue = results;
-
-  } else if (sourceDef.copilot) {
-    const prompt = resolveCopilotPrompt(sourceDef);
-    if (!prompt) {
-      fail('copilot.prompt_template is required', errFile);
-    }
-
-    // Copilot sandbox: cwd = card's surface dir; --add-dir for cards, runtime, runtime-out.
-    // This restricts Copilot to card data, runtime status, and card definitions only.
-    const copilotCwd = extra.cardsDir
-      ? path.resolve(extra.boardSetupRoot, extra.cardsDir)
-      : (sourceDef.cwd || extra.boardSetupRoot || undefined);
-    const addDirs = [];
-    if (extra.boardSetupRoot) {
-      if (extra.boardRuntimeDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.boardRuntimeDir));
-      if (extra.runtimeStatusDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.runtimeStatusDir));
-      if (extra.cardsDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.cardsDir));
-    }
-
-    // Session dir is stable across refreshes so --resume continues the conversation.
-    const sessionDir = path.join(
-      extra.boardSetupRoot || os.tmpdir(),
-      'copilot-sessions',
-      String(sourceDef.bindTo || 'default').replace(/[^a-zA-Z0-9_-]/g, '_'),
-    );
-    const wrapperOutFile = outFile + '.wrapper-out.json';
-    try {
-      resultValue = runCopilotViaWrapper(prompt, sourceDef, wrapperOutFile, sessionDir, copilotCwd, addDirs);
-    } catch (err) {
-      fail(`copilot invocation failed: ${String(err && err.message || err)}`, errFile);
-    } finally {
-      try { fs.unlinkSync(wrapperOutFile); } catch {}
-    }
-
-  } else if (sourceDef.workiq) {
-    const cfg = typeof sourceDef.workiq === 'object' ? sourceDef.workiq : {};
-    if (!cfg.query_template || typeof cfg.query_template !== 'string') {
-      fail('Source definition missing workiq.query_template', errFile);
-    }
-    const interpolationContext = { ...sourceDef._projections, ...(cfg.args ?? {}) };
-    const query = interpolatePrompt(cfg.query_template, interpolationContext);
-
-    const wrapperPath = path.join(__dirname, 'scripts', 'workiq_wrapper.mjs');
-    if (!fs.existsSync(wrapperPath)) {
-      fail('workiq source kind requires workiq_wrapper.js in scripts/', errFile);
-    }
-    try {
-      execFileSync(process.execPath, [wrapperPath, outFile], {
-        encoding: 'utf-8',
-        stdio: ['inherit', 'pipe', 'pipe'],
-        maxBuffer: 10 * 1024 * 1024,
-        env: {
-          ...process.env,
-          WORKIQ_QUERY: query,
-          ...(extra.serverUrl ? { WORKIQ_SERVER_URL: extra.serverUrl } : {}),
-        },
-      });
-      return; // wrapper wrote directly to outFile
-    } catch (err) {
-      fail(`workiq invocation failed: ${String(err && err.message || err)}`, errFile);
-    }
-  } else if (sourceDef.teams) {
-    // ---------------------------------------------------------------------------
-    // teams — Microsoft Graph API via Zoltbook Python CLI.
-    // Uses the current `az login` session (no app registration needed).
-    // Shells out to: python scripts/zoltbook/cli.py <action> [flags]
-    //
-    // Supported actions:
-    //   list-teams          — joined teams
-    //   list-channels       — channels in a team
-    //   read-channel        — enriched messages from a channel
-    //   get-threads         — threads with AI detection + follow-up status
-    //   post-message        — post to a channel (with optional agent formatting)
-    //   reply-to-message    — reply to a thread
-    //   search              — search messages (cache or Graph API)
-    //   set-reaction        — react to a message
-    //   remove-reaction     — remove a reaction
-    //
-    // {{key}} interpolation applied from _projections and optional args.
-    // ---------------------------------------------------------------------------
-    const cfg = typeof sourceDef.teams === 'object' ? sourceDef.teams : {};
-    const action = cfg.action;
-    if (!action) fail('teams: action is required', errFile);
-
-    const ctx = { ...(sourceDef._projections || {}), ...(cfg.args || {}) };
-    const teamId      = interpolatePrompt(cfg.team_id      || '', ctx);
-    const channelId   = interpolatePrompt(cfg.channel_id   || '', ctx);
-    const teamName    = cfg.team_name    ? interpolatePrompt(cfg.team_name, ctx)    : '';
-    const channelName = cfg.channel_name ? interpolatePrompt(cfg.channel_name, ctx) : '';
-
-    // Build CLI args
-    const cliArgs = [action];
-    if (teamId)      { cliArgs.push('--team-id',      teamId); }
-    if (channelId)   { cliArgs.push('--channel-id',   channelId); }
-    if (teamName)    { cliArgs.push('--team-name',    teamName); }
-    if (channelName) { cliArgs.push('--channel-name', channelName); }
-
-    // Action-specific flags
-    if (cfg.top)            cliArgs.push('--top', String(cfg.top));
-    if (cfg.content)        cliArgs.push('--content',      interpolatePrompt(cfg.content, ctx));
-    if (cfg.content_type)   cliArgs.push('--content-type', cfg.content_type);
-    if (cfg.subject)        cliArgs.push('--subject',      interpolatePrompt(cfg.subject, ctx));
-    if (cfg.message_id)     cliArgs.push('--message-id',   interpolatePrompt(cfg.message_id, ctx));
-    if (cfg.query)          cliArgs.push('--query',        interpolatePrompt(cfg.query, ctx));
-    if (cfg.agent_name)     cliArgs.push('--agent-name',   interpolatePrompt(cfg.agent_name, ctx));
-    if (cfg.agent_icon)     cliArgs.push('--agent-icon',   cfg.agent_icon);
-    if (cfg.reaction_type)  cliArgs.push('--reaction-type', cfg.reaction_type);
-    if (cfg.unanswered_only) cliArgs.push('--unanswered-only');
-    if (cfg.refresh)        cliArgs.push('--refresh');
-
-    // Resolve python and CLI path (scripts/ lives alongside this executor, always use __dirname)
-    const python = process.platform === 'win32' ? 'python' : 'python3';
-    const cliPath = path.join(__dirname, 'scripts', 'zoltbook', 'cli.py');
-
-    try {
-      const raw = execFileSync(python, [cliPath, ...cliArgs], {
-        encoding: 'utf-8',
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: 120_000,
-        cwd: __dirname,
-      });
-      resultValue = raw.trim() ? JSON.parse(raw) : [];
-    } catch (err) {
-      const msg = err.stderr ? err.stderr.trim() : (err.message || String(err));
-      fail(`teams/${action}: ${msg}`, errFile);
-    }
-
-  } else if (sourceDef.foundry) {
-    // ---------------------------------------------------------------------------
-    // foundry — Azure AI Foundry model invocation via Managed Identity.
-    // Shells out to scripts/foundry/invoke.py (uses azure-identity + azure-ai-inference).
-    // No API keys needed — uses DefaultAzureCredential (MI in prod, az login locally).
-    // {{key}} interpolation applied to prompt_template from _projections and args.
-    // ---------------------------------------------------------------------------
-    const cfg = typeof sourceDef.foundry === 'object' ? sourceDef.foundry : {};
-    if (!cfg.prompt_template) {
-      fail('foundry: prompt_template is required', errFile);
-    }
-
-    // Load defaults from demo-server-config.json (endpoint + agent_id)
-    let foundryDefaults = {};
-    try {
-      const serverConfig = readJson(path.join(__dirname, 'demo-server-config.json'));
-      foundryDefaults = serverConfig.foundry || {};
-    } catch {}
-
-    const endpoint = cfg.endpoint || foundryDefaults.endpoint;
-    const agentId  = cfg.agent_id || foundryDefaults.agent_id;
-    if (!endpoint || !agentId) {
-      fail('foundry: endpoint and agent_id must be set in source_def or demo-server-config.json', errFile);
-    }
-
-    const interpolationContext = { ...COPILOT_PROMPT_CONTEXT, ...(sourceDef._projections || {}), ...(cfg.args || {}) };
-    const prompt = interpolatePrompt(cfg.prompt_template, interpolationContext);
-
-    // Build request payload for the Python script
-    // allowed_dirs: same sandbox as copilot — cards, runtime, runtime-out directories.
-    const allowedDirs = [];
-    if (extra.boardSetupRoot) {
-      if (extra.boardRuntimeDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.boardRuntimeDir));
-      if (extra.runtimeStatusDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.runtimeStatusDir));
-      if (extra.cardsDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.cardsDir));
-    }
-
-    const invokeReq = {
-      endpoint,
-      agent_id: agentId,
-      prompt,
-      result_shape: cfg.result_shape || undefined,
-      allowed_dirs: allowedDirs.length > 0 ? allowedDirs : undefined,
-    };
-
-    const reqFile = outFile + '.foundry-req.json';
-    const resFile = outFile + '.foundry-res.json';
-    fs.writeFileSync(reqFile, JSON.stringify(invokeReq), 'utf-8');
-
-    const python = process.platform === 'win32' ? 'python' : 'python3';
-    const invokePath = path.join(__dirname, 'scripts', 'foundry', 'invoke.py');
-
-    try {
-      execFileSync(python, [invokePath, '--input', reqFile, '--output', resFile], {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: 300_000,  // 5 min
-      });
-      resultValue = JSON.parse(fs.readFileSync(resFile, 'utf-8'));
-    } catch (err) {
-      const msg = err.stderr ? err.stderr.trim() : (err.message || String(err));
-      fail(`foundry invocation failed: ${msg}`, errFile);
-    } finally {
-      try { fs.unlinkSync(reqFile); } catch {}
-      try { fs.unlinkSync(resFile); } catch {}
-    }
-
-  } else if (sourceDef.sqlite) {
-    // ---------------------------------------------------------------------------
-    // sqlite — query a SQLite database via scripts/sqlite/query.cjs.
-    // db is a filename; query.cjs resolves it to scripts/sqlite/.retain/<name>.
-    // {{key}} interpolation applied to params from _projections.
-    // ---------------------------------------------------------------------------
-    const cfg = typeof sourceDef.sqlite === 'object' ? sourceDef.sqlite : {};
-    if (!cfg.db || !cfg.query) {
-      fail('sqlite: db and query are required', errFile);
-    }
-    const queryScript = path.join(__dirname, 'scripts', 'sqlite', 'query.cjs');
-    const cliArgs = ['--db', cfg.db, '--sql', cfg.query];
-    if (cfg.params) {
-      const resolvedParams = Array.isArray(cfg.params)
-        ? cfg.params.map(p => typeof p === 'string' ? interpolatePrompt(p, sourceDef._projections || {}) : p)
-        : [];
-      cliArgs.push('--params', JSON.stringify(resolvedParams));
-    }
-    if (cfg.mode === 'exec') {
-      cliArgs.push('--mode', 'exec');
-    }
-    try {
-      const raw = execFileSync(process.execPath, [queryScript, ...cliArgs], {
-        encoding: 'utf-8',
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: 30_000,
-        cwd: __dirname,
-      });
-      resultValue = raw.trim() ? JSON.parse(raw) : [];
-    } catch (err) {
-      const msg = err.stderr ? err.stderr.trim() : (err.message || String(err));
-      fail(`sqlite query failed: ${msg}`, errFile);
-    }
-
-  } else if (sourceDef.mock) {
-    // MOCK_DB lookup — data hardcoded at the top of this file
-    resultValue = MOCK_DB[sourceDef.mock];
-    if (resultValue === undefined) {
-      fail(`Key "${sourceDef.mock}" not found in MOCK_DB`, errFile);
-    }
-  } else {
-    fail('No recognised source kind (url, url-list, copilot, workiq, teams, foundry, sqlite, mock)', errFile);
-  }
-
-  // Write result to --out as JSON payload, same contract as current mock mode.
+  let kind;
+  let flowResult;
   try {
-    if (resultValue === undefined) resultValue = null;
-    fs.writeFileSync(outFile, JSON.stringify(resultValue, null, 2));
+    const resolved = await resolveAndExecuteSourceFlow(sourceDef, extra, { inRef, outRef, errRef });
+    kind = resolved.kind;
+    flowResult = resolved.flowResult;
   } catch (err) {
-    fail(`Cannot write output file: ${String(err && err.message || err)}`, errFile);
+    const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
+    failRef(`source invocation failed: ${String(err && err.message || err)}${detail}`, callback);
   }
 
+  if (!flowResult?.wroteOutputDirectly) {
+    try {
+      outStorage.write(outRef.value, JSON.stringify(flowResult?.resultValue, null, 2));
+    } catch (err) {
+      failRef(`Cannot write output: ${String(err && err.message || err)}`, callback);
+    }
+  }
+
+  if (callback) {
+    try {
+      reportComplete(callback, outRef);
+    } catch (err) {
+      console.error(`[demo-task-executor] reportComplete failed: ${String(err && err.message || err)}`);
+      process.exit(1);
+    }
+  }
+
+}
+
+async function probeSourcePreflightSubcommand(argv) {
+  const extraIdx = argv.indexOf('--extra');
+  const extraB64 = extraIdx !== -1 ? argv[extraIdx + 1] : undefined;
+
+  let extra = {};
+  if (extraB64) {
+    try { extra = JSON.parse(Buffer.from(extraB64, 'base64').toString('utf-8')); }
+    catch { /* ignore malformed extra */ }
+  }
+
+  const startedAt = Date.now();
+  try {
+    const chunks = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const raw = Buffer.concat(chunks).toString('utf-8').trim();
+    if (!raw) {
+      console.log(JSON.stringify({ ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: 'Missing probe input JSON on stdin' }));
+      process.exit(0);
+    }
+
+    let sourceDef;
+    try {
+      sourceDef = JSON.parse(raw);
+    } catch (err) {
+      console.log(JSON.stringify({ ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: `Invalid probe JSON: ${String(err && err.message || err)}` }));
+      process.exit(0);
+    }
+
+    await resolveAndExecuteSourceFlow(sourceDef, extra);
+    console.log(JSON.stringify({ ok: true, reachable: true, latencyMs: Date.now() - startedAt }));
+    process.exit(0);
+  } catch (err) {
+    const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
+    console.log(JSON.stringify({ ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: `source invocation failed: ${String(err && err.message || err)}${detail}` }));
+    process.exit(0);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -647,35 +531,16 @@ function validateSourceDefSubcommand(argv) {
   }
 
   const errors = [];
+  const registry = loadSourceDefFlowsConfig();
 
-  // Determine source kind and validate required fields
-  const hasUrl   = !!sourceDef['url'];
-  const hasUrlList  = !!sourceDef['url-list'];
-  const hasCopilot    = !!sourceDef.copilot;
-  const hasWorkiq     = !!sourceDef.workiq;
-  const hasTeams      = !!sourceDef.teams;
-  const hasFoundry    = !!sourceDef.foundry;
-  const hasSqlite     = !!sourceDef.sqlite;
-  const hasMock       = sourceDef.mock !== undefined;
-
-  const kindCount = [hasUrl, hasUrlList, hasCopilot, hasWorkiq, hasTeams, hasFoundry, hasSqlite, hasMock].filter(Boolean).length;
-
-  if (kindCount === 0) {
-    errors.push('No recognised source kind (url, url-list, copilot, workiq, teams, foundry, sqlite, mock). Add one of these fields.');
-  } else if (kindCount > 1) {
-    const kinds = [];
-    if (hasUrl)  kinds.push('url');
-    if (hasUrlList) kinds.push('url-list');
-    if (hasCopilot) kinds.push('copilot');
-    if (hasWorkiq)    kinds.push('workiq');
-    if (hasTeams)     kinds.push('teams');
-    if (hasFoundry)   kinds.push('foundry');
-    if (hasSqlite)    kinds.push('sqlite');
-    if (hasMock)      kinds.push('mock');
-    errors.push(`Multiple source kinds specified: [${kinds.join(', ')}]. Use exactly one.`);
+  let kind = '';
+  try {
+    kind = resolveSourceKind(sourceDef, registry);
+  } catch (err) {
+    errors.push(String(err && err.message || err));
   }
 
-  if (hasUrl) {
+  if (kind === 'url') {
     if (typeof sourceDef['url'] !== 'object') {
       errors.push('url must be an object.');
     } else if (!sourceDef['url'].url || typeof sourceDef['url'].url !== 'string') {
@@ -683,24 +548,24 @@ function validateSourceDefSubcommand(argv) {
     }
   }
 
-  if (hasUrlList) {
+  if (kind === 'url-list') {
     if (typeof sourceDef['url-list'] !== 'object') {
       errors.push('url-list must be an object.');
     }
     // url_list is supplied via _projections at runtime — no static validation needed.
   }
 
-  if (hasCopilot) {
+  if (kind === 'copilot') {
     if (typeof sourceDef.copilot !== 'object') {
-      errors.push('copilot must be an object.');
-    } else {
-      if (!sourceDef.copilot.prompt_template) {
-        errors.push('copilot.prompt_template is required.');
+      if (typeof sourceDef.prompt_template !== 'string') {
+        errors.push('copilot must be an object when prompt_template is not provided at top level.');
       }
+    } else if (!sourceDef.copilot.prompt_template && typeof sourceDef.prompt_template !== 'string') {
+        errors.push('copilot.prompt_template is required (or use top-level prompt_template).');
     }
   }
 
-  if (hasWorkiq) {
+  if (kind === 'workiq') {
     if (typeof sourceDef.workiq !== 'object') {
       errors.push('workiq must be an object.');
     } else if (!sourceDef.workiq.query_template || typeof sourceDef.workiq.query_template !== 'string') {
@@ -708,44 +573,43 @@ function validateSourceDefSubcommand(argv) {
     }
   }
 
-  if (hasTeams) {
+  if (kind === 'mock') {
+    if (typeof sourceDef.mock !== 'string') {
+      errors.push('mock must be a string key.');
+    }
+  }
+
+  if (kind === 'teams') {
     if (typeof sourceDef.teams !== 'object') {
       errors.push('teams must be an object.');
     } else {
-      const validActions = ['list-teams', 'list-channels', 'read-channel', 'post-message', 'reply-to-message', 'search-messages'];
+      const validActions = ['list-teams', 'list-channels', 'read-channel', 'get-threads', 'post-message', 'reply-to-message', 'search', 'set-reaction', 'remove-reaction'];
       if (!sourceDef.teams.action || !validActions.includes(sourceDef.teams.action)) {
         errors.push(`teams.action is required and must be one of: ${validActions.join(', ')}.`);
       }
     }
   }
 
-  if (hasFoundry) {
+  if (kind === 'foundry') {
     if (typeof sourceDef.foundry !== 'object') {
       errors.push('foundry must be an object.');
     } else {
       if (!sourceDef.foundry.prompt_template || typeof sourceDef.foundry.prompt_template !== 'string') {
         errors.push('foundry.prompt_template is required and must be a string.');
       }
-      // endpoint and agent_id are optional here — fall back to demo-server-config.json at runtime
     }
   }
 
-  if (hasSqlite) {
+  if (kind === 'sqlite') {
     if (typeof sourceDef.sqlite !== 'object') {
       errors.push('sqlite must be an object.');
     } else {
       if (!sourceDef.sqlite.db || typeof sourceDef.sqlite.db !== 'string') {
-        errors.push('sqlite.db is required and must be a string path.');
+        errors.push('sqlite.db is required and must be a string.');
       }
       if (!sourceDef.sqlite.query || typeof sourceDef.sqlite.query !== 'string') {
-        errors.push('sqlite.query is required and must be a SQL string.');
+        errors.push('sqlite.query is required and must be a string.');
       }
-    }
-  }
-
-  if (hasMock) {
-    if (typeof sourceDef.mock !== 'string') {
-      errors.push('mock must be a string key.');
     }
   }
 
@@ -760,7 +624,7 @@ function validateSourceDefSubcommand(argv) {
 const CAPABILITIES = {
   version: '1.0',
   executor: 'demo-task-executor',
-  subcommands: ['run-source-fetch', 'describe-capabilities', 'validate-source-def'],
+  subcommands: ['run-source-fetch', 'probe-source-preflight', 'describe-capabilities', 'validate-source-def'],
   sourceKinds: {
     mock: {
       description: 'Look up a key in a hardcoded MOCK_DB dictionary.',
@@ -774,20 +638,19 @@ const CAPABILITIES = {
       },
     },
     copilot: {
-      description: 'Invoke GitHub Copilot CLI with an interpolated prompt template. Executor automatically sandboxes: cwd = card runtime dir, --add-dir for cards/runtime/runtime-out dirs, -s --no-ask-user --allow-all-tools.',
+      description: 'Invoke GitHub Copilot CLI with an interpolated prompt template.',
       inputSchema: {
         copilot: {
-          type: 'object', required: true,
-          description: 'Object with prompt_template (string), optional args (object), and optional result_shape (object).',
+          type: 'object', required: false,
+          description: 'Object with prompt_template (string) and optional args (object).',
           properties: {
             prompt_template: { type: 'string', required: true, description: 'Prompt with {{key}} placeholders.' },
-            args:            { type: 'object', required: false, description: 'Extra interpolation args (merged with _projections).' },
-            result_shape:    { type: 'object', required: false, description: 'Expected top-level keys in the JSON response. Enables agentic retry if response shape is wrong.' },
+            args:            { type: 'object', required: false, description: 'Extra interpolation args (highest precedence).' },
           },
         },
+        prompt_template: { type: 'string', required: false, description: 'Shorthand — top-level prompt template (alternative to copilot.prompt_template).' },
       },
       outputShape: 'string | object — raw Copilot text, or parsed JSON if the response is valid JSON.',
-      note: 'Copilot sees only card data, runtime status, and card definitions. Board internals (graph, .task-executor) are excluded.',
     },
     workiq: {
       description: 'Query WorkIQ (Microsoft 365 Copilot) with an interpolated query template. Returns raw text response.',
@@ -835,42 +698,8 @@ const CAPABILITIES = {
       outputShape: 'Array of raw JSON responses, one per URL in _projections.url_list.',
       urlListNote: 'Declare `"projections": { "url_list": "<JSONata producing string[]>" }` on the source def. Example: `requires.holdings.ticker.(\'https://api.example.com/\' & $ & \'?q=1\')`',
     },
-    foundry: {
-      description: 'Azure AI Foundry Agent invocation via Managed Identity (DefaultAzureCredential). Uses pre-configured agents (with model, instructions, tools baked in). No API keys needed. Shells out to scripts/foundry/invoke.py. Default endpoint and agent_id are configured in the server; source_defs only need prompt_template.',
-      inputSchema: {
-        foundry: {
-          type: 'object', required: true,
-          properties: {
-            prompt_template: { type: 'string', required: true,  description: 'Prompt with {{key}} placeholders interpolated from _projections and args.' },
-            endpoint:        { type: 'string', required: false, description: 'Override Foundry project endpoint (default: from defaults configured in the server).' },
-            agent_id:        { type: 'string', required: false, description: 'Override Agent ID (default: from defaults configured in the server).' },
-            args:            { type: 'object', required: false, description: 'Extra interpolation args (highest precedence, merged with _projections).' },
-            result_shape:    { type: 'object', required: false, description: 'Expected top-level keys in the JSON response. Agent is nudged to produce matching structure.' },
-          },
-        },
-      },
-      defaults: 'endpoint and agent_id use defaults configured in the server. Override per source_def if a different agent/project is needed.',
-      outputShape: 'Parsed JSON object (if agent returns valid JSON) or raw string.',
-      note: 'Requires Python 3 and azure-identity + azure-ai-projects packages. Auth via DefaultAzureCredential (Managed Identity in prod, az login locally). Agent must be pre-created in the Foundry portal with model, instructions, and tools configured.',
-    },
-    sqlite: {
-      description: 'Query a SQLite database. DB filename resolved relative to scripts/sqlite/.retain/. Supports SELECT (returns row array) and exec mode for INSERT/UPDATE/DELETE. Shells out to scripts/sqlite/query.cjs.',
-      inputSchema: {
-        sqlite: {
-          type: 'object', required: true,
-          properties: {
-            db:     { type: 'string', required: true,  description: 'DB filename, resolved relative to scripts/sqlite/.retain/ (e.g. "compliance.db").' },
-            query:  { type: 'string', required: true,  description: 'SQL query. Use ? placeholders for params.' },
-            params: { type: 'array',  required: false, description: 'Bind parameters. Strings support {{key}} interpolation from _projections.' },
-            mode:   { type: 'string', required: false, description: '"query" (default, returns rows) or "exec" (returns { changes, lastInsertRowid }).' },
-          },
-        },
-      },
-      outputShape: 'Array of row objects (query mode) or { changes, lastInsertRowid } (exec mode).',
-      note: 'Requires better-sqlite3 npm package. DB file must exist (use seed script to create).',
-    },
     teams: {
-      description: 'Microsoft Graph API for Teams via Zoltbook Python CLI. Provides enriched messages with AI detection, thread views, reactions, and agent-formatted posting. Shells out to scripts/zoltbook/cli.py.',
+      description: 'Microsoft Graph API for Teams via Zoltbook Python CLI. Provides enriched messages with AI detection, thread views, reactions, and agent-formatted posting.',
       inputSchema: {
         teams: {
           type: 'object', required: true,
@@ -878,15 +707,15 @@ const CAPABILITIES = {
             action:          { type: 'string', required: true,  description: 'One of: list-teams, list-channels, read-channel, get-threads, post-message, reply-to-message, search, set-reaction, remove-reaction.' },
             team_id:         { type: 'string', required: false, description: 'Team ID (supports {{key}} interpolation).' },
             channel_id:      { type: 'string', required: false, description: 'Channel ID (supports {{key}} interpolation).' },
-            team_name:       { type: 'string', required: false, description: 'Team display name (used for cache directories).' },
-            channel_name:    { type: 'string', required: false, description: 'Channel display name (used for cache directories).' },
+            team_name:       { type: 'string', required: false, description: 'Team display name.' },
+            channel_name:    { type: 'string', required: false, description: 'Channel display name.' },
             top:             { type: 'number', required: false, description: 'Max messages/threads to return (default: 20).' },
-            content:         { type: 'string', required: false, description: 'Message content for post/reply (supports {{key}} interpolation).' },
+            content:         { type: 'string', required: false, description: 'Message content for post/reply.' },
             content_type:    { type: 'string', required: false, description: '"html" (default) or "text".' },
             subject:         { type: 'string', required: false, description: 'Thread subject for post-message.' },
-            message_id:      { type: 'string', required: false, description: 'Message ID for reply-to-message, set-reaction, remove-reaction.' },
+            message_id:      { type: 'string', required: false, description: 'Message ID for reply/reaction actions.' },
             query:           { type: 'string', required: false, description: 'Search query for search action.' },
-            agent_name:      { type: 'string', required: false, description: 'Agent name — if set, post/reply use Zoltbook agent formatting with AI markers.' },
+            agent_name:      { type: 'string', required: false, description: 'Agent name — enables Zoltbook agent formatting.' },
             agent_icon:      { type: 'string', required: false, description: 'Agent icon emoji (default: 🤖).' },
             reaction_type:   { type: 'string', required: false, description: 'Reaction type: like, heart, laugh, surprised, sad, angry.' },
             unanswered_only: { type: 'boolean', required: false, description: 'For get-threads: only threads without AI replies.' },
@@ -895,8 +724,42 @@ const CAPABILITIES = {
           },
         },
       },
-      outputShape: 'Enriched message/thread objects from Zoltbook (with sender, sender_type, is_ai_message, content_text, attachments, urls, etc.).',
-      note: 'Requires Azure CLI logged in (`az login`) and Python 3. Uses Zoltbook (scripts/zoltbook/) for enrichment, caching, AI detection.',
+      outputShape: 'Enriched message/thread objects from Zoltbook.',
+      note: 'Requires Azure CLI logged in (`az login`) and Python 3.',
+    },
+    foundry: {
+      description: 'Azure AI Foundry Agent invocation via Managed Identity (DefaultAzureCredential). Uses pre-configured agents. No API keys needed.',
+      inputSchema: {
+        foundry: {
+          type: 'object', required: true,
+          properties: {
+            prompt_template: { type: 'string', required: true,  description: 'Prompt with {{key}} placeholders.' },
+            endpoint:        { type: 'string', required: false, description: 'Override Foundry project endpoint.' },
+            agent_id:        { type: 'string', required: false, description: 'Override Agent ID.' },
+            args:            { type: 'object', required: false, description: 'Extra interpolation args.' },
+            result_shape:    { type: 'object', required: false, description: 'Expected top-level keys in the JSON response.' },
+          },
+        },
+      },
+      defaults: 'endpoint and agent_id use defaults from server-config.json.',
+      outputShape: 'Parsed JSON object or raw string.',
+      note: 'Requires Python 3 and azure-identity + azure-ai-projects packages.',
+    },
+    sqlite: {
+      description: 'Query a SQLite database. DB filename resolved relative to scripts/sqlite/.retain/.',
+      inputSchema: {
+        sqlite: {
+          type: 'object', required: true,
+          properties: {
+            db:     { type: 'string', required: true,  description: 'DB filename (e.g. "compliance.db").' },
+            query:  { type: 'string', required: true,  description: 'SQL query. Use ? placeholders for params.' },
+            params: { type: 'array',  required: false, description: 'Bind parameters.' },
+            mode:   { type: 'string', required: false, description: '"query" (default) or "exec".' },
+          },
+        },
+      },
+      outputShape: 'Array of row objects (query) or { changes, lastInsertRowid } (exec).',
+      note: 'Requires better-sqlite3 npm package.',
     },
   },
   extraSchema: {
@@ -908,21 +771,38 @@ const CAPABILITIES = {
       runtimeStatusDir: { type: 'string', description: 'Relative path to runtime-out dir.' },
       cardsDir:         { type: 'string', description: 'Relative path to cards dir.' },
       serverUrl:        { type: 'string', description: 'Base URL of the hosting server (e.g. http://127.0.0.1:7799). Used by source kinds that call server-side proxy endpoints.' },
+      boardLiveCardsCliJs: { type: 'string', description: 'Absolute path to board-live-cards-cli.js when configured by the runtime.' },
+      stepMachineCliPath: { type: 'string', description: 'Absolute path to step-machine-cli.js when configured by the runtime.' },
     },
   },
 };
 
 function describeCapabilities() {
-  console.log(JSON.stringify(CAPABILITIES, null, 2));
+  const registry = loadSourceDefFlowsConfig();
+  const merged = {
+    ...CAPABILITIES,
+    sourceKinds: Object.fromEntries(
+      Object.entries(registry?.kinds || {}).map(([kind, spec]) => {
+        const existing = CAPABILITIES.sourceKinds[kind] || {};
+        const manifest = spec?.manifest && typeof spec.manifest === 'object' ? spec.manifest : {};
+        return [kind, { ...existing, ...manifest }];
+      }),
+    ),
+  };
+  console.log(JSON.stringify(merged, null, 2));
 }
 
 async function main() {
   const sub = process.argv[2];
   if (sub === 'run-source-fetch') {
-    runSourceFetchSubcommand(process.argv.slice(3));
+    await runSourceFetchSubcommand(process.argv.slice(3));
     return;
   }
-  if (sub === 'describe-capabilities') {
+  if (sub === 'probe-source-preflight') {
+    await probeSourcePreflightSubcommand(process.argv.slice(3));
+    return;
+  }
+  if (sub === 'describe' || sub === 'describe-capabilities') {
     describeCapabilities();
     return;
   }

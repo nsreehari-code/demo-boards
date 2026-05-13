@@ -1,4 +1,6 @@
 __pycache__/
+.server-meta/
+.demo-setup/
 live/*
 !live/cards/
 !live/gandalf-cards/

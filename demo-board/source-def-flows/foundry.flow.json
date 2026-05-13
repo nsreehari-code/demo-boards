@@ -1,0 +1,33 @@
+{
+  "id": "demo-source-foundry",
+  "settings": {
+    "start_step": "execute",
+    "max_total_steps": 8,
+    "timeout_ms": 300000
+  },
+  "steps": {
+    "execute": {
+      "description": "Execute Foundry agent source def",
+      "handler": {
+        "type": "ref",
+        "howToRun": "demo-local-module",
+        "whatToRun": { "kind": "fs-path", "value": "./source-def-handlers/foundry-handler.js" }
+      },
+      "transitions": {
+        "success": "completed",
+        "failure": "failed"
+      }
+    }
+  },
+  "terminal_states": {
+    "completed": {
+      "description": "Foundry source succeeded",
+      "return_intent": "success",
+      "return_artifacts": ["resultValue", "wroteOutputDirectly"]
+    },
+    "failed": {
+      "description": "Foundry source failed",
+      "return_intent": "failure"
+    }
+  }
+}

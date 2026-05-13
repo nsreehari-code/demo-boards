@@ -1,7 +1,1 @@
-*
-!.gitignore
-!cards/
-!cards/*.json
-!gandalf-cards/
-!gandalf-cards/*.json
-**/chats/*.txt
+.board-ws/**
