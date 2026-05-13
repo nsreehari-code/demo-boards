@@ -177,10 +177,12 @@ def tool_read_pdf(arguments, allowed_dirs):
             text = doc[i].get_text()
             total_chars += len(text)
             result_pages.append({"page": i, "text": text})
-            if total_chars > 512_000:  # cap total at 512KB
+            if total_chars > 200_000:  # cap to stay well under 1MB API limit
+                result_pages.append({"page": "truncated", "text": f"... output truncated at {total_chars} chars. Use 'pages' parameter to read specific pages."})
                 break
+        total_pages = len(doc)
         doc.close()
-        return json.dumps({"path": filepath, "total_pages": len(doc), "pages": result_pages})
+        return json.dumps({"path": filepath, "total_pages": total_pages, "pages": result_pages})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
