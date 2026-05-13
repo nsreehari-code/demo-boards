@@ -43,12 +43,12 @@
         "data": { "bind": "computed_values.gainersLosers" }
       },
       {
-        "kind": "table",
-        "label": "Positions",
+        "kind": "chart",
+        "label": "Portfolio Mix",
         "data": {
           "bind": "computed_values.positions",
-          "columns": ["ticker", "value", "gain_$", "gain_%"],
-          "sortable": true
+          "chartType": "pie",
+          "columns": ["ticker", "value"]
         }
       }
     ],
