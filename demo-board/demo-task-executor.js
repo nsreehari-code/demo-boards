@@ -31,7 +31,7 @@
  *     "boardRuntimeDir":  "<relative>",        // e.g. "runtime"
  *     "runtimeStatusDir": "<relative>",        // e.g. "runtime-out"
  *     "cardsDir":         "<relative>",        // e.g. "surface/tmp-cards"
- *     "serverUrl":        "<base url>",        // optional; e.g. "http://127.0.0.1:7799"
+ *     "serverUrl":        "<base url>",        // optional; e.g. "http://127.0.0.1:7813"
  *     "boardLiveCardsCliJs":"<abs path>",      // optional; path to board-live-cards-cli.js
  *     "stepMachineCliPath":"<abs path>"        // optional; path to step-machine-cli.js
  *   }
@@ -40,7 +40,6 @@
  *   - { mock: "key" }              → look up key in MOCK_DB (hardcoded below)
  *   - { copilot: { prompt_template, args? } }  → call Copilot CLI with interpolated prompt
  *   - { prompt_template: "..." }   → shorthand copilot call (top-level template)
- *   - { workiq: { query_template, args? } }   → call WorkIQ (M365 Copilot) with interpolated query
  *   - { mcp: { tool, manifest?, server?, input? } } → call an MCP tool via stdio or hosted transport
  *   - { "url": { url, method?, headers?, args?, cacheTimeout? }, tickersFrom? }
  *       → single URL fetch via curl with {{key}} interpolation from _projections
@@ -48,7 +47,7 @@
  *       → fan-out over _projections.url_list (string[]); returns array of responses.
  *         Build url_list in projections: e.g. `requires.holdings.ticker.('https://host/' & $ & '?q=1')`
  *     Prefer url-list for multi-URL fan-out sources.
- *   A real executor can also handle: graphapi, teams, mail, incidentdb, script, etc.
+ *   A real executor could also handle: graphapi, mail, incidentdb, script, etc.
  *
  * url / url-list notes:
  *   - Results cached in os.tmpdir()/demo-executor-cache/ per URL (default 1 hour, override via cacheTimeout)
@@ -441,8 +440,20 @@ async function probeSourcePreflightSubcommand(argv) {
       return;
     }
 
-    await resolveAndExecuteSourceFlow(sourceDef, extra);
-    console.log(JSON.stringify({ ok: true, reachable: true, latencyMs: Date.now() - startedAt }));
+    const projections = sourceDef?._projections;
+    const mockProjectionsMissing = !projections || typeof projections !== 'object' || Array.isArray(projections) || Object.keys(projections).length === 0;
+    const mockProjectionWarning = mockProjectionsMissing
+      ? 'Mock projections / _projections missing. Hence mock run not performed.'
+      : undefined;
+
+    const { flowResult } = await resolveAndExecuteSourceFlow(sourceDef, extra);
+    console.log(JSON.stringify({
+      ok: true,
+      reachable: true,
+      latencyMs: Date.now() - startedAt,
+      ...(mockProjectionWarning ? { error: mockProjectionWarning } : {}),
+      ...(!mockProjectionWarning ? { resultValue: flowResult?.resultValue } : {}),
+    }));
     return;
   } catch (err) {
     const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
@@ -511,14 +522,6 @@ function validateSourceDefSubcommand(argv) {
     }
   }
 
-  if (kind === 'workiq') {
-    if (typeof sourceDef.workiq !== 'object') {
-      errors.push('workiq must be an object.');
-    } else if (!sourceDef.workiq.query_template || typeof sourceDef.workiq.query_template !== 'string') {
-      errors.push('workiq.query_template is required and must be a string.');
-    }
-  }
-
   if (kind === 'mcp') {
     if (typeof sourceDef.mcp !== 'object') {
       errors.push('mcp must be an object.');
@@ -541,17 +544,6 @@ function validateSourceDefSubcommand(argv) {
   if (kind === 'mock') {
     if (typeof sourceDef.mock !== 'string') {
       errors.push('mock must be a string key.');
-    }
-  }
-
-  if (kind === 'teams') {
-    if (typeof sourceDef.teams !== 'object') {
-      errors.push('teams must be an object.');
-    } else {
-      const validActions = ['list-teams', 'list-channels', 'read-channel', 'get-threads', 'post-message', 'reply-to-message', 'search', 'set-reaction', 'remove-reaction'];
-      if (!sourceDef.teams.action || !validActions.includes(sourceDef.teams.action)) {
-        errors.push(`teams.action is required and must be one of: ${validActions.join(', ')}.`);
-      }
     }
   }
 
@@ -617,20 +609,6 @@ const CAPABILITIES = {
       },
       outputShape: 'string | object — raw Copilot text, or parsed JSON if the response is valid JSON.',
     },
-    workiq: {
-      description: 'Query WorkIQ (Microsoft 365 Copilot) with an interpolated query template. Returns raw text response.',
-      inputSchema: {
-        workiq: {
-          type: 'object', required: true,
-          properties: {
-            query_template: { type: 'string', required: true,  description: 'Query with {{key}} placeholders interpolated from _projections and args.' },
-            args:            { type: 'object', required: false, description: 'Extra interpolation args (highest precedence).' },
-          },
-        },
-      },
-      outputShape: 'string — raw M365 Copilot response text.',
-      note: 'Requires workiq CLI installed and Azure CLI logged in (az login).',
-    },
     mcp: {
       description: 'Call a tool on an MCP server selected by manifest and/or explicit server transport settings.',
       inputSchema: {
@@ -680,35 +658,6 @@ const CAPABILITIES = {
       outputShape: 'Array of raw JSON responses, one per URL in _projections.url_list.',
       urlListNote: 'Declare `"projections": { "url_list": "<JSONata producing string[]>" }` on the source def. Example: `requires.holdings.ticker.(\'https://api.example.com/\' & $ & \'?q=1\')`',
     },
-    teams: {
-      description: 'Microsoft Graph API for Teams via Zoltbook Python CLI. Provides enriched messages with AI detection, thread views, reactions, and agent-formatted posting.',
-      inputSchema: {
-        teams: {
-          type: 'object', required: true,
-          properties: {
-            action:          { type: 'string', required: true,  description: 'One of: list-teams, list-channels, read-channel, get-threads, post-message, reply-to-message, search, set-reaction, remove-reaction.' },
-            team_id:         { type: 'string', required: false, description: 'Team ID (supports {{key}} interpolation).' },
-            channel_id:      { type: 'string', required: false, description: 'Channel ID (supports {{key}} interpolation).' },
-            team_name:       { type: 'string', required: false, description: 'Team display name.' },
-            channel_name:    { type: 'string', required: false, description: 'Channel display name.' },
-            top:             { type: 'number', required: false, description: 'Max messages/threads to return (default: 20).' },
-            content:         { type: 'string', required: false, description: 'Message content for post/reply.' },
-            content_type:    { type: 'string', required: false, description: '"html" (default) or "text".' },
-            subject:         { type: 'string', required: false, description: 'Thread subject for post-message.' },
-            message_id:      { type: 'string', required: false, description: 'Message ID for reply/reaction actions.' },
-            query:           { type: 'string', required: false, description: 'Search query for search action.' },
-            agent_name:      { type: 'string', required: false, description: 'Agent name — enables Zoltbook agent formatting.' },
-            agent_icon:      { type: 'string', required: false, description: 'Agent icon emoji (default: 🤖).' },
-            reaction_type:   { type: 'string', required: false, description: 'Reaction type: like, heart, laugh, surprised, sad, angry.' },
-            unanswered_only: { type: 'boolean', required: false, description: 'For get-threads: only threads without AI replies.' },
-            refresh:         { type: 'boolean', required: false, description: 'For search: use Graph API instead of local cache.' },
-            args:            { type: 'object', required: false, description: 'Extra interpolation args.' },
-          },
-        },
-      },
-      outputShape: 'Enriched message/thread objects from Zoltbook.',
-      note: 'Requires Azure CLI logged in (`az login`) and Python 3.',
-    },
     foundry: {
       description: 'Azure AI Foundry Agent invocation via Managed Identity (DefaultAzureCredential). Uses pre-configured agents. No API keys needed.',
       inputSchema: {
@@ -752,7 +701,7 @@ const CAPABILITIES = {
       boardRuntimeDir:  { type: 'string', description: 'Relative path to runtime dir.' },
       runtimeStatusDir: { type: 'string', description: 'Relative path to runtime-out dir.' },
       cardsDir:         { type: 'string', description: 'Relative path to cards dir.' },
-      serverUrl:        { type: 'string', description: 'Base URL of the hosting server (e.g. http://127.0.0.1:7799). Used by source kinds that call server-side proxy endpoints.' },
+      serverUrl:        { type: 'string', description: 'Base URL of the hosting server (e.g. http://127.0.0.1:7813). Used by source kinds that call server-side endpoints.' },
       boardLiveCardsCliJs: { type: 'string', description: 'Absolute path to board-live-cards-cli.js when configured by the runtime.' },
       stepMachineCliPath: { type: 'string', description: 'Absolute path to step-machine-cli.js when configured by the runtime.' },
     },

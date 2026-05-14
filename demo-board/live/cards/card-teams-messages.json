@@ -6,7 +6,7 @@
       "teams",
       "graph"
     ],
-    "desc": "Reads recent messages from a Teams channel via Zoltbook (enriched with AI detection)."
+    "desc": "Reads recent messages from a Teams channel via an MCP-hosted Zoltbook Graph tool."
   },
   "requires": [],
   "source_defs": [
@@ -17,11 +17,15 @@
         "team_id": "card_data.team_id",
         "channel_id": "card_data.channel_id"
       },
-      "teams": {
-        "action": "read-channel",
-        "team_id": "{{team_id}}",
-        "channel_id": "{{channel_id}}",
-        "top": 20
+      "mcp": {
+        "manifest": "demo-boards.graph.json",
+        "tool": "teams.graph",
+        "input": {
+          "action": "read-channel",
+          "team_id": "{{team_id}}",
+          "channel_id": "{{channel_id}}",
+          "top": 20
+        }
       }
     }
   ],

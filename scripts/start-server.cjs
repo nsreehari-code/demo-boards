@@ -35,7 +35,7 @@ const sharedEnv = {
 };
 
 console.log(`[start-server] board dir: ${boardDir}`);
-console.log('[start-server] backend:  http://127.0.0.1:7799');
+console.log('[start-server] backend:  http://127.0.0.1:7813');
 if (modeFlag === '--all') {
   console.log('[start-server] frontend: http://127.0.0.1:8000');
 }

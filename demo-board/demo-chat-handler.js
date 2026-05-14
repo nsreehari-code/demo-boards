@@ -11,7 +11,7 @@
  *   cardsDir        — relative subdir: 'surface/tmp-cards'
  *   chatDir         — absolute path to the card's chats directory
  *   lastChatFile    — filename of the just-written user message, e.g. '001_user.txt'
- *   serverUrl       — base URL of hosting server (e.g. http://127.0.0.1:7799), optional
+ *   serverUrl       — base URL of hosting server (e.g. http://127.0.0.1:7813), optional
  *
  * Invokes scripts/copilot/wrapper.py with a prompt built from conversation history.
  * Session dir is per-card: os.tmpdir()/demo-chat-handler-sessions/<boardId>_<cardId>

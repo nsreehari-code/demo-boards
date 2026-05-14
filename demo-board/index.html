@@ -95,7 +95,7 @@
       }
 
       function serverOriginFromConfig() {
-        var port = serverConfig && serverConfig.port || 7799;
+        var port = serverConfig && serverConfig.port || 7813;
         var hostPref = window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1';
         return 'http://' + hostPref + ':' + port;
       }

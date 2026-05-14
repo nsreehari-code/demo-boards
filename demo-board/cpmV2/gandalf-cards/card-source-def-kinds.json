@@ -27,13 +27,12 @@
     }
   },
   "card_data": {
-    "summary": "This board's task executor supports 5 source-def kinds. Each source_def entry requires `bindTo` (string) and `outputFile` (string). The kind-specific key (e.g. `url`, `copilot`, `teams`) determines how data is fetched.",
+    "summary": "Each source_def entry requires `bindTo` (string) and `outputFile` (string). Use `mcp` for hosted integrations such as Teams Graph tools.",
     "kinds_table": [
       { "kind": "url",      "description": "Single URL fetch with {{key}} interpolation. Supports caching.",  "required_fields": "url.url (string)",                                     "notes": "Optional: url.method, url.headers, url.args, url.cacheTimeout, tickersFrom." },
       { "kind": "url-list", "description": "Fan-out over a pre-resolved URL list from _projections.url_list.","required_fields": "url-list (object)",                                     "notes": "Declare projections.url_list with JSONata producing string[]." },
       { "kind": "copilot",  "description": "Invoke GitHub Copilot CLI with an interpolated prompt template.", "required_fields": "copilot.prompt_template (string)",                     "notes": "Optional: copilot.args, copilot.result_shape. Auto-sandboxed." },
-      { "kind": "workiq",   "description": "Query Microsoft 365 Copilot with an interpolated query.",         "required_fields": "workiq.query_template (string)",                       "notes": "Requires az login. Optional: workiq.args." },
-      { "kind": "teams",    "description": "Microsoft Graph Teams API via Zoltbook CLI.",                      "required_fields": "teams.action (string: list-teams|list-channels|read-channel|get-threads|post-message|reply-to-message|search|set-reaction|remove-reaction)", "notes": "Requires az login + Python 3. Optional: team_id, channel_id, top, content, query, etc." }
+      { "kind": "mcp",      "description": "Invoke an MCP tool via a manifest-selected or explicitly configured MCP server.", "required_fields": "mcp.tool (string)",                              "notes": "Optional: mcp.manifest, mcp.server, mcp.input, mcp.args. Use this for hosted integrations such as Teams Graph and WorkIQ." }
     ],
     "common_source_def_fields": {
       "bindTo":     "Namespace key — result lands in fetched_sources.<bindTo>",

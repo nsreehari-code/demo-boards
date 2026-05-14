@@ -1,5 +1,5 @@
 {
-  "port": 7799,
+  "port": 7813,
   "serverMetaStoreRef": "b64:eyJraW5kIjoiZnMtcGF0aCIsInZhbHVlIjoiLi8uc2VydmVyLW1ldGEifQ",
   "foundry": {
     "endpoint": "https://sz-foundry.services.ai.azure.com/api/projects/sz-project",

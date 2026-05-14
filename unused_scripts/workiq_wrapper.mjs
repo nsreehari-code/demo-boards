@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 /**
- * workiq_wrapper.mjs — Calls the demo-server /api/workiq/ask proxy endpoint.
+ * Legacy manual helper for the removed demo-server /api/workiq/ask proxy.
+ * Kept out of the active runtime paths for ad hoc local use only.
  *
  * Usage: node workiq_wrapper.mjs <out_file>
  *   WORKIQ_QUERY env var:       the interpolated query string
- *   WORKIQ_SERVER_URL env var:  base URL of demo-server (default: http://127.0.0.1:7799)
- *
- * The demo-server has a TTY so workiq can produce output there.
- * Writes raw WorkIQ response text to <out_file>.
+ *   WORKIQ_SERVER_URL env var:  base URL of demo-server (default: http://127.0.0.1:7813)
  */
 
 import http from 'node:http';
@@ -15,7 +13,7 @@ import fs from 'node:fs';
 
 const outFile = process.argv[2];
 const query = process.env.WORKIQ_QUERY;
-const serverBase = (process.env.WORKIQ_SERVER_URL || 'http://127.0.0.1:7799').replace(/\/$/, '');
+const serverBase = (process.env.WORKIQ_SERVER_URL || 'http://127.0.0.1:7813').replace(/\/$/, '');
 
 if (!outFile) { console.error('workiq_wrapper: missing <out_file> argument'); process.exit(1); }
 if (!query)   { console.error('workiq_wrapper: WORKIQ_QUERY env var not set'); process.exit(1); }
@@ -63,4 +61,3 @@ req.setTimeout(60_000, () => {
 
 req.write(body);
 req.end();
-

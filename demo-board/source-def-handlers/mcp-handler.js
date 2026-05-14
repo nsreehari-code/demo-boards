@@ -115,6 +115,16 @@ function normalizeToolResult(response) {
     return structured.response;
   }
 
+  if (
+    structured &&
+    typeof structured === 'object' &&
+    !Array.isArray(structured) &&
+    Object.keys(structured).length === 1 &&
+    Object.prototype.hasOwnProperty.call(structured, 'result')
+  ) {
+    return structured.result;
+  }
+
   if (firstText && (!structured || (typeof structured === 'object' && Object.keys(structured).length === 0))) {
     return firstText.text;
   }

@@ -29,14 +29,14 @@ npm start
 
 | Script | What it does |
 |---|---|
-| `npm start` | Start backend (port 7799) + frontend (port 8000) together |
-| `npm run backend` | Start backend API server only at `http://127.0.0.1:7799` |
+| `npm start` | Start backend (port 7813) + frontend (port 8000) together |
+| `npm run backend` | Start backend API server only at `http://127.0.0.1:7813` |
 | `npm run frontend` | Serve `demo-board/` as static files at `http://127.0.0.1:8000` |
 | `npm run mcp:install` | Install dependencies for `mcp-server/` |
 | `npm run mcp:dry-run` | Validate the WorkIQ MCP manifest without starting transport |
-| `npm run mcp:start` | Start the hosted MCP server for the demo-boards WorkIQ manifest at `http://127.0.0.1:7801/mcp` |
+| `npm run mcp:start` | Start the hosted MCP server for the demo-boards WorkIQ manifest at `http://127.0.0.1:7823/mcp` |
 | `npm run clean` | Wipe runtime state in `demo-board/live/` (preserves cards) |
-| `npm run stop` | Kill processes on ports 7799 and 8000 |
+| `npm run stop` | Kill processes on ports 7813, 7823 and 8000 |
 
 ## Directory structure
 

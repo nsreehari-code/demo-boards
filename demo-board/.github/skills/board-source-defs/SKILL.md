@@ -64,8 +64,7 @@ These are the kinds typically available (run the command to confirm):
 - **url** — single HTTP fetch with `{{key}}` interpolation
 - **url-list** — fan-out over a pre-resolved URL list
 - **copilot** — invoke GitHub Copilot CLI with a prompt template
-- **workiq** — query Microsoft 365 Copilot
-- **teams** — Microsoft Graph Teams API via Zoltbook
+- **mcp** — call a tool on an MCP server selected by manifest and/or explicit server settings, including hosted integrations such as Microsoft Graph Teams
 
 ## Probe a Source (Live Test)
 

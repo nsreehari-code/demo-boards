@@ -1,0 +1,102 @@
+{
+  "server": {
+    "name": "demo-boards-mcp",
+    "version": "0.1.0",
+    "description": "demo-boards Graph and collaboration tool surface"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+    "urlDefault": "http://127.0.0.1:7823/mcp"
+  },
+  "tools": [
+    {
+      "name": "teams.graph",
+      "title": "Microsoft Graph Teams",
+      "description": "Run Microsoft Teams Graph operations through the Zoltbook CLI.",
+      "handler": "teams.graph",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "One of: list-teams, list-channels, read-channel, get-threads, post-message, reply-to-message, search, set-reaction, remove-reaction."
+          },
+          "team_id": {
+            "type": "string",
+            "description": "Team ID."
+          },
+          "channel_id": {
+            "type": "string",
+            "description": "Channel ID."
+          },
+          "team_name": {
+            "type": "string",
+            "description": "Team display name."
+          },
+          "channel_name": {
+            "type": "string",
+            "description": "Channel display name."
+          },
+          "top": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Max messages or threads to return."
+          },
+          "content": {
+            "type": "string",
+            "description": "Message content for post or reply actions."
+          },
+          "content_type": {
+            "type": "string",
+            "description": "html or text."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Thread subject for post-message."
+          },
+          "message_id": {
+            "type": "string",
+            "description": "Message ID for reply or reaction actions."
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query for search action."
+          },
+          "agent_name": {
+            "type": "string",
+            "description": "Agent name used for Zoltbook agent formatting."
+          },
+          "agent_icon": {
+            "type": "string",
+            "description": "Optional agent icon emoji."
+          },
+          "reaction_type": {
+            "type": "string",
+            "description": "Reaction type: like, heart, laugh, surprised, sad, angry."
+          },
+          "unanswered_only": {
+            "type": "boolean",
+            "description": "For get-threads, only return unanswered threads."
+          },
+          "refresh": {
+            "type": "boolean",
+            "description": "For search, refresh from Graph instead of cache."
+          },
+          "args": {
+            "type": "object",
+            "description": "Optional interpolation args for string fields."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "description": "Optional timeout override in milliseconds."
+          }
+        },
+        "required": ["action"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

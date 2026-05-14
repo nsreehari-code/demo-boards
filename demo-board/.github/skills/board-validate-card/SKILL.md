@@ -50,7 +50,7 @@ npx board-live-cards-cli validate-card --card-glob "cards/*.json" --rg <board-ru
 4. **source_defs** — each source def is forwarded to the task executor's
    `validate-source-def` subcommand, which checks kind-specific required
    fields (e.g. `copilot` needs `copilot.prompt_template`, `url` needs
-   `url.url`, `teams` needs `teams.action`).
+   `url.url`, `mcp` needs `mcp.tool`).
 
 ## Typical Workflow
 

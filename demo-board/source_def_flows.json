@@ -34,7 +34,7 @@
       },
       "serverUrl": {
         "type": "string",
-        "description": "Base URL of the hosting server (e.g. http://127.0.0.1:7799). Used by source kinds that call server-side proxy endpoints."
+        "description": "Base URL of the hosting server (e.g. http://127.0.0.1:7813). Used by source kinds that call server-side endpoints."
       },
       "boardLiveCardsCliJs": {
         "type": "string",
@@ -179,40 +179,6 @@
         }
       }
     },
-    "workiq": {
-      "detect": {
-        "field": "workiq"
-      },
-      "flow": "./source-def-flows/workiq.flow.json",
-      "validate": [
-        {
-          "field": "workiq",
-          "type": "object",
-          "message": "workiq must be an object."
-        },
-        {
-          "field": "workiq.query_template",
-          "type": "string",
-          "message": "workiq.query_template is required and must be a string."
-        }
-      ],
-      "probe": {
-        "strategy": "command-check",
-        "command": "workiq",
-        "args": [
-          "--version"
-        ]
-      },
-      "manifest": {
-        "description": "Invoke WorkIQ via demo-server HTTP proxy endpoint.",
-        "inputSchema": {
-          "workiq": {
-            "type": "object",
-            "required": true
-          }
-        }
-      }
-    },
     "mcp": {
       "detect": {
         "field": "mcp"
@@ -287,51 +253,6 @@
           "mock": {
             "type": "string",
             "required": true
-          }
-        }
-      }
-    },
-    "teams": {
-      "detect": {
-        "field": "teams"
-      },
-      "flow": "./source-def-flows/teams.flow.json",
-      "validate": [
-        {
-          "field": "teams",
-          "type": "object",
-          "message": "teams must be an object."
-        },
-        {
-          "field": "teams.action",
-          "type": "string",
-          "message": "teams.action is required and must be a string."
-        }
-      ],
-      "probe": {
-        "strategy": "command-check",
-        "command": "az",
-        "args": ["account", "show"]
-      },
-      "manifest": {
-        "description": "Microsoft Graph API for Teams via Zoltbook Python CLI.",
-        "inputSchema": {
-          "teams": {
-            "type": "object",
-            "required": true,
-            "properties": {
-              "action": { "type": "string", "required": true },
-              "team_id": { "type": "string", "required": false },
-              "channel_id": { "type": "string", "required": false },
-              "team_name": { "type": "string", "required": false },
-              "channel_name": { "type": "string", "required": false },
-              "top": { "type": "number", "required": false },
-              "content": { "type": "string", "required": false },
-              "message_id": { "type": "string", "required": false },
-              "query": { "type": "string", "required": false },
-              "agent_name": { "type": "string", "required": false },
-              "args": { "type": "object", "required": false }
-            }
           }
         }
       }
@@ -422,8 +343,6 @@
     "url-list",
     "copilot",
     "mcp",
-    "workiq",
-    "teams",
     "foundry",
     "sqlite",
     "mock"

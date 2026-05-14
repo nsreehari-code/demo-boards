@@ -34,7 +34,7 @@ Recommended split:
 
 ## Important WorkIQ note
 
-The current WorkIQ invocation in `demo-board/demo-server.js` inherits terminal stdin. That is a strong signal that WorkIQ should not be hosted behind an MCP `stdio` transport, because MCP stdio uses the same stdin/stdout channels.
+The current WorkIQ invocation in `src/handlers/workiq.js` inherits terminal stdin. That is a strong signal that WorkIQ should not be hosted behind an MCP `stdio` transport, because MCP stdio uses the same stdin/stdout channels.
 
 So:
 - use this scaffold for manifest and tool registration now
@@ -130,7 +130,7 @@ Start the hosted MCP server for WorkIQ:
 npm run start:http
 ```
 
-That serves the demo WorkIQ manifest at `http://127.0.0.1:7801/mcp` by default.
+That serves the demo WorkIQ manifest at `http://127.0.0.1:7823/mcp` by default.
 
 Start a stdio MCP server for non-TTY tools:
 

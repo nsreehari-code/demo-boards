@@ -3,9 +3,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import net from 'node:net';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -78,7 +76,7 @@ if (!process.env.DEMO_INFERENCE_ADAPTER_PATH && configuredInferenceAdapterPath) 
   process.env.DEMO_INFERENCE_ADAPTER_PATH = configuredInferenceAdapterPath;
 }
 
-const PORT = Number(process.env.DEMO_SERVER_PORT || serverConfig.port || 7799);
+const PORT = Number(process.env.DEMO_SERVER_PORT || serverConfig.port || 7813);
 const cardsPatternArgIndex = cliArgs.indexOf('--cards-pattern');
 const cliCardsPattern = cardsPatternArgIndex !== -1 ? cliArgs[cardsPatternArgIndex + 1] : null;
 const selectedCardsPattern = (process.env.DEMO_CARDS_PATTERN || cliCardsPattern || '').trim() || null;
@@ -377,70 +375,6 @@ async function handleDemoSetup(req, res, boardId) {
   }
 }
 
-async function handleWorkiqAsk(req, res) {
-  let body = '';
-  for await (const chunk of req) body += chunk;
-  let query;
-  try {
-    query = JSON.parse(body).query;
-  } catch {
-    return jsonReply(res, 400, { error: 'Invalid JSON body' });
-  }
-  if (!query || typeof query !== 'string') {
-    return jsonReply(res, 400, { error: '{ query } string is required' });
-  }
-
-  const workiqJs = path.join(
-    process.env.APPDATA || os.homedir(),
-    'npm', 'node_modules', '@microsoft', 'workiq', 'bin', 'workiq.js'
-  );
-  if (!fs.existsSync(workiqJs)) {
-    return jsonReply(res, 503, { error: `WorkIQ CLI not found at: ${workiqJs}` });
-  }
-
-  // Server has TTY on stdin — workiq can produce output.
-  // Use async spawn (not spawnSync) to avoid blocking the event loop during the call.
-  await new Promise((resolve) => {
-    let stdout = '';
-    let stderr = '';
-    let responded = false;
-    const child = spawn(process.execPath, [workiqJs, 'ask', '-q', query], {
-      stdio: ['inherit', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    child.stdout.on('data', chunk => { stdout += chunk; });
-    child.stderr.on('data', chunk => { stderr += chunk; });
-    child.on('error', (err) => {
-      if (!responded) {
-        responded = true;
-        clearTimeout(timeoutId);
-        jsonReply(res, 500, { error: `workiq spawn error: ${err.message}` });
-      }
-      resolve();
-    });
-    child.on('close', (code) => {
-      if (!responded) {
-        responded = true;
-        clearTimeout(timeoutId);
-        if (code !== 0) {
-          jsonReply(res, 500, { error: `workiq exited ${code}`, stderr });
-        } else {
-          jsonReply(res, 200, { response: stdout });
-        }
-      }
-      resolve();
-    });
-    const timeoutId = setTimeout(() => {
-      if (!responded) {
-        responded = true;
-        child.kill();
-        jsonReply(res, 504, { error: 'workiq timed out after 60s' });
-      }
-      resolve();
-    }, 60_000);
-  });
-}
-
 const server = http.createServer((req, res) => {
   const method = req.method || 'GET';
   const url = new URL(req.url || '/', 'http://localhost');
@@ -456,12 +390,6 @@ const server = http.createServer((req, res) => {
   if (method === 'GET' && pathname === '/api/config') {
     const boards = boardConfigEntries.map(([key, cfg]) => ({ key, label: cfg.label || key }));
     return jsonReply(res, 200, boards);
-  }
-
-  // Route: POST /api/workiq/ask — proxy to WorkIQ (M365 Copilot) from server TTY
-  if (method === 'POST' && pathname === '/api/workiq/ask') {
-    void handleWorkiqAsk(req, res);
-    return;
   }
 
   // Route: demo-setup is handled here (host concern)
@@ -495,5 +423,4 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`  POST ${apiBasePath}/:boardId/cards/:id/files`);
   console.log(`  GET  ${apiBasePath}/:boardId/cards/:id/files/:idx`);
   console.log(`  GET  ${apiBasePath}/:boardId/cards/:id/chats`);
-  console.log(`  POST /api/workiq/ask  {query}              <- WorkIQ (M365 Copilot) proxy`);
 });
