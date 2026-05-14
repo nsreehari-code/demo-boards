@@ -1,0 +1,34 @@
+{
+  "id": "demo-source-mcp",
+  "settings": {
+    "start_step": "execute",
+    "max_total_steps": 8,
+    "timeout_ms": 180000
+  },
+  "steps": {
+    "execute": {
+      "description": "Execute MCP source def",
+      "handler": {
+        "type": "ref",
+        "howToRun": "demo-local-module",
+        "whatToRun": { "kind": "fs-path", "value": "./source-def-handlers/mcp-handler.js" }
+      },
+      "transitions": {
+        "success": "completed",
+        "failure": "failed"
+      }
+    }
+  },
+  "terminal_states": {
+    "completed": {
+      "description": "MCP source succeeded",
+      "return_intent": "success",
+      "return_artifacts": ["resultValue", "wroteOutputDirectly"]
+    },
+    "failed": {
+      "description": "MCP source failed",
+      "return_intent": "failure",
+      "return_artifacts": ["error"]
+    }
+  }
+}

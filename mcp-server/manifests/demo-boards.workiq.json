@@ -1,0 +1,41 @@
+{
+  "server": {
+    "name": "demo-boards-mcp",
+    "version": "0.1.0",
+    "description": "demo-boards tool surface"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+    "urlDefault": "http://127.0.0.1:7801/mcp"
+  },
+  "tools": [
+    {
+      "name": "workiq.ask",
+      "title": "Ask WorkIQ",
+      "description": "Query Microsoft 365 through the WorkIQ CLI.",
+      "handler": "workiq.ask",
+      "runtime": {
+        "requiresTerminalStdin": true,
+        "recommendedTransport": "streamable-http"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural-language query to send to WorkIQ."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "description": "Optional timeout override in milliseconds."
+          }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

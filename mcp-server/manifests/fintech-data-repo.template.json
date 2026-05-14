@@ -1,0 +1,46 @@
+{
+  "server": {
+    "name": "fintech-data-repo-mcp",
+    "version": "0.1.0",
+    "description": "Template manifest for repo-backed fintech tools"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlEnvVar": "FINTECH_DATA_REPO_MCP_URL",
+    "urlDefault": "http://127.0.0.1:7802/mcp"
+  },
+  "tools": [
+    {
+      "name": "repo.export",
+      "title": "Export Repo Data",
+      "description": "Export a computed view from a connected data repo.",
+      "handler": "repo.export",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": { "type": "string" },
+          "account": { "type": "string" },
+          "report": { "type": "string" },
+          "asOn": { "type": "string" }
+        },
+        "required": ["repoId", "report"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "repo.query",
+      "title": "Query Repo",
+      "description": "Ask repo-backed Copilot or a repo query surface for raw data.",
+      "handler": "repo.query",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repoId": { "type": "string" },
+          "query": { "type": "string" }
+        },
+        "required": ["repoId", "query"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

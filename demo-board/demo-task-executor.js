@@ -7,12 +7,10 @@
  *   run-source-fetch        — fetch data for one source entry
  *   describe-capabilities   — print supported source kinds + schemas to stdout (JSON)
  *
- * CLI args:
- *   --in    <source.json>   Required. Path to a temp JSON file containing the source definition.
- *   --out   <result.json>   Required. Path where this executor must write its JSON result.
- *   --err   <error.txt>     Optional. Path where this executor writes an error message on failure.
- *   --extra <base64json>    Optional. Base64-encoded JSON with board topology context
- *                           (baked into .task-executor at board init time, passed blindly by the CLI).
+ * Runtime invocation shapes used by board-live-cards:
+ *   run-source-fetch --in-ref <b64ref> --out-ref <b64ref> [--err-ref <b64ref>] [--extra <base64json>]
+ *   validate-source-def    <stdin: source JSON>
+ *   probe-source-preflight <stdin: source JSON> [--extra <base64json>]
  *
  * --in payload (source definition):
  *   {
@@ -43,6 +41,7 @@
  *   - { copilot: { prompt_template, args? } }  → call Copilot CLI with interpolated prompt
  *   - { prompt_template: "..." }   → shorthand copilot call (top-level template)
  *   - { workiq: { query_template, args? } }   → call WorkIQ (M365 Copilot) with interpolated query
+ *   - { mcp: { tool, manifest?, server?, input? } } → call an MCP tool via stdio or hosted transport
  *   - { "url": { url, method?, headers?, args?, cacheTimeout? }, tickersFrom? }
  *       → single URL fetch via curl with {{key}} interpolation from _projections
  *   - { "url-list": { method?, headers?, cacheTimeout? } }
@@ -431,7 +430,7 @@ async function probeSourcePreflightSubcommand(argv) {
     const raw = Buffer.concat(chunks).toString('utf-8').trim();
     if (!raw) {
       console.log(JSON.stringify({ ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: 'Missing probe input JSON on stdin' }));
-      process.exit(0);
+      return;
     }
 
     let sourceDef;
@@ -439,16 +438,16 @@ async function probeSourcePreflightSubcommand(argv) {
       sourceDef = JSON.parse(raw);
     } catch (err) {
       console.log(JSON.stringify({ ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: `Invalid probe JSON: ${String(err && err.message || err)}` }));
-      process.exit(0);
+      return;
     }
 
     await resolveAndExecuteSourceFlow(sourceDef, extra);
     console.log(JSON.stringify({ ok: true, reachable: true, latencyMs: Date.now() - startedAt }));
-    process.exit(0);
+    return;
   } catch (err) {
     const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
     console.log(JSON.stringify({ ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: `source invocation failed: ${String(err && err.message || err)}${detail}` }));
-    process.exit(0);
+    return;
   }
 }
 
@@ -456,24 +455,24 @@ async function probeSourcePreflightSubcommand(argv) {
 // validate-source-def — structural validation of a source definition
 // ---------------------------------------------------------------------------
 function validateSourceDefSubcommand(argv) {
-  const inIdx = argv.indexOf('--in');
-  const inFile = inIdx !== -1 ? argv[inIdx + 1] : undefined;
-
-  if (!inFile) {
-    console.error('[demo-task-executor] Usage: validate-source-def --in <source.json>');
+  let rawInput = '';
+  try {
+    rawInput = fs.readFileSync(0, 'utf-8').trim();
+  } catch (err) {
+    console.log(JSON.stringify({ ok: false, errors: [`Cannot read stdin: ${err && err.message || err}`] }));
     process.exit(1);
   }
 
-  if (!fs.existsSync(inFile)) {
-    console.log(JSON.stringify({ ok: false, errors: [`Input file not found: ${inFile}`] }));
+  if (!rawInput) {
+    console.error('[demo-task-executor] Usage: validate-source-def < source.json');
     process.exit(1);
   }
 
   let sourceDef;
   try {
-    sourceDef = readJson(inFile);
+    sourceDef = JSON.parse(rawInput);
   } catch (err) {
-    console.log(JSON.stringify({ ok: false, errors: [`Cannot parse source file: ${err && err.message || err}`] }));
+    console.log(JSON.stringify({ ok: false, errors: [`Cannot parse source JSON from stdin: ${err && err.message || err}`] }));
     process.exit(1);
   }
 
@@ -517,6 +516,25 @@ function validateSourceDefSubcommand(argv) {
       errors.push('workiq must be an object.');
     } else if (!sourceDef.workiq.query_template || typeof sourceDef.workiq.query_template !== 'string') {
       errors.push('workiq.query_template is required and must be a string.');
+    }
+  }
+
+  if (kind === 'mcp') {
+    if (typeof sourceDef.mcp !== 'object') {
+      errors.push('mcp must be an object.');
+    } else {
+      if (!sourceDef.mcp.tool || typeof sourceDef.mcp.tool !== 'string') {
+        errors.push('mcp.tool is required and must be a string.');
+      }
+      if (sourceDef.mcp.manifest !== undefined && typeof sourceDef.mcp.manifest !== 'string') {
+        errors.push('mcp.manifest must be a string when provided.');
+      }
+      if (sourceDef.mcp.server !== undefined && typeof sourceDef.mcp.server !== 'object') {
+        errors.push('mcp.server must be an object when provided.');
+      }
+      if (sourceDef.mcp.input !== undefined && typeof sourceDef.mcp.input !== 'object') {
+        errors.push('mcp.input must be an object when provided.');
+      }
     }
   }
 
@@ -612,6 +630,23 @@ const CAPABILITIES = {
       },
       outputShape: 'string — raw M365 Copilot response text.',
       note: 'Requires workiq CLI installed and Azure CLI logged in (az login).',
+    },
+    mcp: {
+      description: 'Call a tool on an MCP server selected by manifest and/or explicit server transport settings.',
+      inputSchema: {
+        mcp: {
+          type: 'object', required: true,
+          properties: {
+            tool:     { type: 'string', required: true,  description: 'Fully qualified MCP tool name (for example: workiq.ask).' },
+            manifest: { type: 'string', required: false, description: 'Manifest filename or path used to resolve defaults and validate the tool.' },
+            server:   { type: 'object', required: false, description: 'Optional connection override: transport plus url or command details.' },
+            input:    { type: 'object', required: false, description: 'Tool input object after {{key}} interpolation from _projections and args.' },
+            args:     { type: 'object', required: false, description: 'Extra interpolation args applied on top of _projections.' },
+          },
+        },
+      },
+      outputShape: 'MCP tool result content or structuredContent.',
+      note: 'Prefer one generic mcp source kind with per-source server/tool parameters instead of one source kind per server.',
     },
     'url': {
       description: 'Single URL fetch via curl with {{key}} interpolation from _projections. Supports cacheTimeout.',

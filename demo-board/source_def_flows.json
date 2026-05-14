@@ -213,6 +213,59 @@
         }
       }
     },
+    "mcp": {
+      "detect": {
+        "field": "mcp"
+      },
+      "flow": "./source-def-flows/mcp.flow.json",
+      "validate": [
+        {
+          "field": "mcp",
+          "type": "object",
+          "message": "mcp must be an object."
+        },
+        {
+          "field": "mcp.tool",
+          "type": "string",
+          "message": "mcp.tool is required and must be a string."
+        }
+      ],
+      "probe": {
+        "strategy": "manifest-or-runtime-check",
+        "field": "mcp"
+      },
+      "manifest": {
+        "description": "Invoke an MCP tool via a manifest-selected or explicitly configured MCP server.",
+        "inputSchema": {
+          "mcp": {
+            "type": "object",
+            "required": true,
+            "properties": {
+              "tool": {
+                "type": "string",
+                "required": true
+              },
+              "manifest": {
+                "type": "string",
+                "required": false
+              },
+              "server": {
+                "type": "object",
+                "required": false
+              },
+              "input": {
+                "type": "object",
+                "required": false
+              },
+              "args": {
+                "type": "object",
+                "required": false
+              }
+            }
+          }
+        }
+      }
+    },
     "mock": {
       "detect": {
         "field": "mock"
@@ -368,6 +421,7 @@
     "url",
     "url-list",
     "copilot",
+    "mcp",
     "workiq",
     "teams",
     "foundry",

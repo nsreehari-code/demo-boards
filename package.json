@@ -11,6 +11,9 @@
     "start": "node scripts/start-server.cjs demo-board --all",
     "backend": "node scripts/start-server.cjs demo-board --backend",
     "frontend": "npx http-server demo-board -p 8000 -c-1",
+    "mcp:install": "npm --prefix mcp-server install",
+    "mcp:dry-run": "npm --prefix mcp-server run dry-run -- --manifest manifests/demo-boards.workiq.json --transport streamable-http",
+    "mcp:start": "npm --prefix mcp-server run start:http",
     "seed-cpm": "node demo-board/scripts/sqlite/seed-cpm.cjs",
     "seed-cpmV2": "node demo-board/scripts/sqlite/seed-cpm.cjs && node demo-board/scripts/sqlite/seed-cpmV2.cjs",
     "seed-optimus": "node demo-board/scripts/sqlite/seed-optimus.cjs",
@@ -21,8 +24,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "latest",
     "better-sqlite3": "^12.9.0",
-    "yaml-flow": "^8.0.3"
+    "yaml-flow": "^8.0.5"
   },
   "devDependencies": {
     "http-server": "^14.1.1"

@@ -1,0 +1,301 @@
+{
+  "server": {
+    "name": "finbook-data-actual-mcp",
+    "version": "0.1.0",
+    "description": "Manifest-driven MCP tools for the local actual-data finbook repo"
+  },
+  "tools": [
+    {
+      "name": "finbook.actual.get_schema",
+      "title": "Get Finbook Schema (Actual Data)",
+      "description": "Return Finbook schema metadata for all supported tables and computed fields.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.list_accounts",
+      "title": "List Finbook Accounts (Actual Data)",
+      "description": "List available Finbook accounts in the actual-data repo.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.list_table_rows",
+      "title": "List Finbook Table Rows (Actual Data)",
+      "description": "Return computed rows for a Finbook table from the actual-data repo, optionally filtered by financial year.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "table": { "type": "string", "description": "Exact Finbook table name." },
+          "fy": { "type": "string", "description": "Optional FY filter such as 2024-25." }
+        },
+        "required": ["account", "table"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.run_report",
+      "title": "Run Finbook Report (Actual Data)",
+      "description": "Run a shared Finbook computed report for an account in the actual-data repo.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "report": {
+            "type": "string",
+            "enum": ["income-summary", "capital-gains", "stock-transactions", "holdings", "stock-purchases", "stock-sales"],
+            "description": "Shared Finbook report name."
+          },
+          "fy": { "type": "string", "description": "Optional FY filter such as 2024-25." },
+          "asOn": { "type": "string", "description": "Optional as-on date in YYYY-MM-DD format for holdings." }
+        },
+        "required": ["account", "report"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.export_account",
+      "title": "Export Finbook Account (Actual Data)",
+      "description": "Return the shared Finbook export payload for an account and financial year from the actual-data repo.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "fy": { "type": "string", "description": "Optional FY filter such as 2024-25 or All." },
+          "asOn": { "type": "string", "description": "Optional as-on date in YYYY-MM-DD format." }
+        },
+        "required": ["account"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.upsert_row",
+      "title": "Upsert Finbook Row (Actual Data)",
+      "description": "Create or update one Finbook row in a table and persist it to the actual-data repo DB.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "table": { "type": "string", "description": "Exact Finbook table name." },
+          "row": { "type": "object", "description": "Row payload to create or merge." },
+          "index": { "type": "integer", "minimum": 0, "description": "Optional explicit row index to update." }
+        },
+        "required": ["account", "table", "row"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.delete_row",
+      "title": "Delete Finbook Row (Actual Data)",
+      "description": "Delete one Finbook row from a table by index or row reference and persist the change in the actual-data repo.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "table": { "type": "string", "description": "Exact Finbook table name." },
+          "row": { "type": "object", "description": "Optional row reference when deleting by dedup keys." },
+          "index": { "type": "integer", "minimum": 0, "description": "Optional explicit row index to delete." }
+        },
+        "required": ["account", "table"],
+        "anyOf": [
+          { "required": ["index"] },
+          { "required": ["row"] }
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.lock_row",
+      "title": "Lock Finbook Row (Actual Data)",
+      "description": "Lock one Finbook row in the actual-data repo so future updates or deletes are rejected until it is explicitly unlocked.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "table": { "type": "string", "description": "Exact Finbook table name." },
+          "row": { "type": "object", "description": "Optional row reference when locking by dedup keys." },
+          "index": { "type": "integer", "minimum": 0, "description": "Optional explicit row index to lock." }
+        },
+        "required": ["account", "table"],
+        "anyOf": [
+          { "required": ["index"] },
+          { "required": ["row"] }
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.unlock_row",
+      "title": "Unlock Finbook Row (Actual Data)",
+      "description": "Unlock one Finbook row in the actual-data repo so future updates or deletes are allowed again.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "table": { "type": "string", "description": "Exact Finbook table name." },
+          "row": { "type": "object", "description": "Optional row reference when unlocking by dedup keys." },
+          "index": { "type": "integer", "minimum": 0, "description": "Optional explicit row index to unlock." }
+        },
+        "required": ["account", "table"],
+        "anyOf": [
+          { "required": ["index"] },
+          { "required": ["row"] }
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.record_stock_purchase",
+      "title": "Record Stock Purchase (Actual Data)",
+      "description": "Record a stock purchase or transfer-in entry in Finbook in the actual-data repo.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "entry": { "type": "object", "description": "Stock purchase entry payload for StockPurchasesOrTransferIns." },
+          "index": { "type": "integer", "minimum": 0, "description": "Optional explicit row index to update." }
+        },
+        "required": ["account", "entry"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.record_stock_sale",
+      "title": "Record Stock Sale (Actual Data)",
+      "description": "Record a stock sale or transfer-out entry in Finbook in the actual-data repo.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "entry": { "type": "object", "description": "Stock sale entry payload for StockSalesOrTransferOuts." },
+          "index": { "type": "integer", "minimum": 0, "description": "Optional explicit row index to update." }
+        },
+        "required": ["account", "entry"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.record_income",
+      "title": "Record Income (Actual Data)",
+      "description": "Record a non-stock income entry in the actual-data repo using one of the known Finbook income types: salary, foreign, property, or other.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "incomeType": { "type": "string", "enum": ["salary", "foreign", "property", "other"], "description": "Known Finbook income type." },
+          "entry": { "type": "object", "description": "Income entry payload for the selected income type table." },
+          "index": { "type": "integer", "minimum": 0, "description": "Optional explicit row index to update." }
+        },
+        "required": ["account", "incomeType", "entry"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.record_capital_gain_outside_stock_transactions",
+      "title": "Record Capital Gain Outside Stock Transactions (Actual Data)",
+      "description": "Record a manual or consolidated capital gain entry in the actual-data repo that cannot be derived from recorded stock purchase and sale transactions.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "entry": { "type": "object", "description": "CapitalGainsConsolidated entry payload." },
+          "index": { "type": "integer", "minimum": 0, "description": "Optional explicit row index to update." }
+        },
+        "required": ["account", "entry"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.record_advance_tax_paid",
+      "title": "Record Advance Tax Paid (Actual Data)",
+      "description": "Record an advance-tax payment entry in Finbook in the actual-data repo.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
+        "dbPath": "DB/finbook.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "description": "Account code or display name." },
+          "entry": { "type": "object", "description": "AdvanceTax entry payload." },
+          "index": { "type": "integer", "minimum": 0, "description": "Optional explicit row index to update." }
+        },
+        "required": ["account", "entry"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
