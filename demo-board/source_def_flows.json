@@ -47,31 +47,31 @@
     }
   },
   "kinds": {
-    "url": {
+    "urls": {
       "detect": {
-        "field": "url"
+        "field": "urls"
       },
       "flow": "./source-def-flows/url.flow.json",
       "validate": [
         {
-          "field": "url",
+          "field": "urls",
           "type": "object",
-          "message": "url must be an object."
+          "message": "urls must be an object."
         },
         {
-          "field": "url.url",
+          "field": "urls.url",
           "type": "string",
-          "message": "url.url is required and must be a string."
+          "message": "urls.url is required and must be a string."
         }
       ],
       "probe": {
         "strategy": "http-head",
-        "urlFrom": "url.url"
+        "urlFrom": "urls.url"
       },
       "manifest": {
-        "description": "Single URL fetch via curl with interpolation and cache.",
+        "description": "URL fetch via interpolation and cache, with optional fan-out over a projected URL list.",
         "inputSchema": {
-          "url": {
+          "urls": {
             "type": "object",
             "required": true,
             "properties": {
@@ -94,52 +94,16 @@
               "cacheTimeout": {
                 "type": "number",
                 "required": false
+              },
+              "projectionList": {
+                "type": "string",
+                "required": false
               }
             }
           },
           "tickersFrom": {
             "type": "string",
             "required": false
-          }
-        }
-      }
-    },
-    "url-list": {
-      "detect": {
-        "field": "url-list"
-      },
-      "flow": "./source-def-flows/url-list.flow.json",
-      "validate": [
-        {
-          "field": "url-list",
-          "type": "object",
-          "message": "url-list must be an object."
-        }
-      ],
-      "probe": {
-        "strategy": "http-head",
-        "urlFrom": "_projections.url_list[0]"
-      },
-      "manifest": {
-        "description": "Fan-out URL fetch over _projections.url_list.",
-        "inputSchema": {
-          "url-list": {
-            "type": "object",
-            "required": true,
-            "properties": {
-              "method": {
-                "type": "string",
-                "required": false
-              },
-              "headers": {
-                "type": "object",
-                "required": false
-              },
-              "cacheTimeout": {
-                "type": "number",
-                "required": false
-              }
-            }
           }
         }
       }
@@ -339,8 +303,7 @@
     }
   },
   "resolveOrder": [
-    "url",
-    "url-list",
+    "urls",
     "copilot",
     "mcp",
     "foundry",

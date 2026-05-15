@@ -29,8 +29,7 @@
   "card_data": {
     "summary": "Each source_def entry requires `bindTo` (string) and `outputFile` (string). Use `mcp` for hosted integrations such as Teams Graph tools.",
     "kinds_table": [
-      { "kind": "url",      "description": "Single URL fetch with {{key}} interpolation. Supports caching.",  "required_fields": "url.url (string)",                                     "notes": "Optional: url.method, url.headers, url.args, url.cacheTimeout, tickersFrom." },
-      { "kind": "url-list", "description": "Fan-out over a pre-resolved URL list from _projections.url_list.","required_fields": "url-list (object)",                                     "notes": "Declare projections.url_list with JSONata producing string[]." },
+      { "kind": "urls",     "description": "URL fetch with {{key}} interpolation. Supports caching and projected forEach fan-out.",  "required_fields": "urls.url (string)",                                     "notes": "Optional: urls.method, urls.headers, urls.args, urls.cacheTimeout, urls.projectionList, tickersFrom." },
       { "kind": "copilot",  "description": "Invoke GitHub Copilot CLI with an interpolated prompt template.", "required_fields": "copilot.prompt_template (string)",                     "notes": "Optional: copilot.args, copilot.result_shape. Auto-sandboxed." },
       { "kind": "mcp",      "description": "Invoke an MCP tool via a manifest-selected or explicitly configured MCP server.", "required_fields": "mcp.tool (string)",                              "notes": "Optional: mcp.manifest, mcp.server, mcp.input, mcp.args. Use this for hosted integrations such as Teams Graph and WorkIQ." }
     ],

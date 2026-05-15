@@ -41,15 +41,12 @@
  *   - { copilot: { prompt_template, args? } }  → call Copilot CLI with interpolated prompt
  *   - { prompt_template: "..." }   → shorthand copilot call (top-level template)
  *   - { mcp: { tool, manifest?, server?, input? } } → call an MCP tool via stdio or hosted transport
- *   - { "url": { url, method?, headers?, args?, cacheTimeout? }, tickersFrom? }
- *       → single URL fetch via curl with {{key}} interpolation from _projections
- *   - { "url-list": { method?, headers?, cacheTimeout? } }
- *       → fan-out over _projections.url_list (string[]); returns array of responses.
- *         Build url_list in projections: e.g. `requires.holdings.ticker.('https://host/' & $ & '?q=1')`
- *     Prefer url-list for multi-URL fan-out sources.
+ *   - { "urls": { url, method?, headers?, args?, cacheTimeout?, projectionList? }, tickersFrom? }
+ *       → URL fetch via {{key}} interpolation from _projections. When projectionList is set,
+ *         the flow fans out over _projections[projectionList] and returns an array of responses.
  *   A real executor could also handle: graphapi, mail, incidentdb, script, etc.
  *
- * url / url-list notes:
+ * urls notes:
  *   - Results cached in os.tmpdir()/demo-executor-cache/ per URL (default 1 hour, override via cacheTimeout)
  */
 
@@ -497,19 +494,15 @@ function validateSourceDefSubcommand(argv) {
     errors.push(String(err && err.message || err));
   }
 
-  if (kind === 'url') {
-    if (typeof sourceDef['url'] !== 'object') {
-      errors.push('url must be an object.');
-    } else if (!sourceDef['url'].url || typeof sourceDef['url'].url !== 'string') {
-      errors.push('url.url is required and must be a string.');
+  if (kind === 'urls') {
+    if (typeof sourceDef.urls !== 'object') {
+      errors.push('urls must be an object.');
+    } else if (!sourceDef.urls.url || typeof sourceDef.urls.url !== 'string') {
+      errors.push('urls.url is required and must be a string.');
     }
-  }
-
-  if (kind === 'url-list') {
-    if (typeof sourceDef['url-list'] !== 'object') {
-      errors.push('url-list must be an object.');
+    if (sourceDef.urls?.projectionList !== undefined && typeof sourceDef.urls.projectionList !== 'string') {
+      errors.push('urls.projectionList must be a string when provided.');
     }
-    // url_list is supplied via _projections at runtime — no static validation needed.
   }
 
   if (kind === 'copilot') {
@@ -626,10 +619,10 @@ const CAPABILITIES = {
       outputShape: 'MCP tool result content or structuredContent.',
       note: 'Prefer one generic mcp source kind with per-source server/tool parameters instead of one source kind per server.',
     },
-    'url': {
-      description: 'Single URL fetch via curl with {{key}} interpolation from _projections. Supports cacheTimeout.',
+    'urls': {
+      description: 'URL fetch via interpolation from _projections. Supports cacheTimeout and optional fan-out over a projected URL list.',
       inputSchema: {
-        'url': {
+        'urls': {
           type: 'object', required: true,
           properties: {
             url:          { type: 'string', required: true,  description: 'URL template with {{key}} placeholders.' },
@@ -637,26 +630,13 @@ const CAPABILITIES = {
             headers:      { type: 'object', required: false, description: 'Request headers.' },
             args:         { type: 'object', required: false, description: 'Extra interpolation args (highest precedence).' },
             cacheTimeout: { type: 'number', required: false, description: 'Cache TTL in seconds (default: 3600).' },
+            projectionList: { type: 'string', required: false, description: 'Projection key containing a string[] of concrete URLs for flow fan-out.' },
           },
         },
         tickersFrom: { type: 'string', required: false, description: '"refKey.fieldName" — join tickers from _projections into {{tickers}}.' },
       },
-      outputShape: 'Arbitrary JSON from the fetched URL.',
-    },
-    'url-list': {
-      description: 'Fan-out over a pre-resolved URL list — calls url logic per URL and returns an array of responses. url_list must be a string[] in _projections.url_list (built via projections JSONata).',
-      inputSchema: {
-        'url-list': {
-          type: 'object', required: true,
-          properties: {
-            method:       { type: 'string', required: false, description: 'HTTP method (default: GET).' },
-            headers:      { type: 'object', required: false, description: 'Request headers.' },
-            cacheTimeout: { type: 'number', required: false, description: 'Cache TTL per URL in seconds (default: 3600).' },
-          },
-        },
-      },
-      outputShape: 'Array of raw JSON responses, one per URL in _projections.url_list.',
-      urlListNote: 'Declare `"projections": { "url_list": "<JSONata producing string[]>" }` on the source def. Example: `requires.holdings.ticker.(\'https://api.example.com/\' & $ & \'?q=1\')`',
+      outputShape: 'Arbitrary JSON from one URL, or an array of JSON responses when projectionList is used.',
+      urlListNote: 'Declare `"projections": { "quote_urls": "<JSONata producing string[]>" }` and set `urls.projectionList` to `quote_urls` for fan-out.',
     },
     foundry: {
       description: 'Azure AI Foundry Agent invocation via Managed Identity (DefaultAzureCredential). Uses pre-configured agents. No API keys needed.',

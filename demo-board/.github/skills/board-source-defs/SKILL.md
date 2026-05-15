@@ -62,7 +62,7 @@ These are the kinds typically available (run the command to confirm):
 
 - **mock** — look up a key in a hardcoded dictionary
 - **url** — single HTTP fetch with `{{key}}` interpolation
-- **url-list** — fan-out over a pre-resolved URL list
+- **urls** — URL fetch with optional fan-out over a projected URL list via `urls.projectionList`
 - **copilot** — invoke GitHub Copilot CLI with a prompt template
 - **mcp** — call a tool on an MCP server selected by manifest and/or explicit server settings, including hosted integrations such as Microsoft Graph Teams
 

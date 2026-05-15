@@ -16,9 +16,11 @@
       "bindTo": "quotes",
       "outputFile": "market-prices-quotes.json",
       "projections": {
-        "url_list": "requires.holdings.ticker.('https://query1.finance.yahoo.com/v8/finance/chart/' & $ & '?interval=1d&range=1d')"
+        "quote_urls": "requires.holdings.ticker.('https://query1.finance.yahoo.com/v8/finance/chart/' & $ & '?interval=1d&range=1d')"
       },
-      "url-list": {
+      "urls": {
+        "url": "{{url}}",
+        "projectionList": "quote_urls",
         "headers": {
           "User-Agent": "Mozilla/5.0 (compatible; portfolio-tracker-demo/1.0)"
         },

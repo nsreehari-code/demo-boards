@@ -78,9 +78,9 @@ function resolveTickersArg(sourceDef, fetchArgs) {
 }
 
 async function executeUrl(sourceDef) {
-  const cfg = sourceDef?.url;
+  const cfg = sourceDef?.urls;
   if (!cfg || typeof cfg !== 'object') {
-    throw new Error('url source requires object config');
+    throw new Error('urls source requires object config');
   }
   const method = String(cfg.method || 'GET').toUpperCase();
   const headers = cfg.headers && typeof cfg.headers === 'object' ? cfg.headers : {};
@@ -89,7 +89,7 @@ async function executeUrl(sourceDef) {
 
   resolveTickersArg(sourceDef, fetchArgs);
   if (sourceDef?.tickersFrom && !fetchArgs.tickers) {
-    throw new Error('url: tickersFrom resolved to empty list - skipping fetch');
+    throw new Error('urls: tickersFrom resolved to empty list - skipping fetch');
   }
 
   const ctx = {
@@ -98,42 +98,50 @@ async function executeUrl(sourceDef) {
   };
 
   if (typeof cfg.url !== 'string' || !cfg.url) {
-    throw new Error('url source missing url template');
+    throw new Error('urls source missing url template');
   }
   const url = interpolate(cfg.url, ctx);
   return doFetchApi(url, method, headers, ttlMs);
 }
 
-async function executeUrlList(sourceDef) {
-  const cfg = sourceDef?.['url-list'];
+async function executeProjectedUrl(sourceDef, selectedUrl) {
+  const cfg = sourceDef?.urls;
   if (!cfg || typeof cfg !== 'object') {
-    throw new Error('url-list source requires object config');
+    throw new Error('urls source requires object config');
   }
   const method = String(cfg.method || 'GET').toUpperCase();
   const headers = cfg.headers && typeof cfg.headers === 'object' ? cfg.headers : {};
   const ttlMs = typeof cfg.cacheTimeout === 'number' ? cfg.cacheTimeout * 1000 : DEFAULT_CACHE_TTL_MS;
+  const fetchArgs = cfg.args && typeof cfg.args === 'object' ? { ...cfg.args } : {};
 
-  const urlList = sourceDef?._projections?.url_list;
-  if (!Array.isArray(urlList) || urlList.length === 0) {
-    throw new Error('url-list source requires _projections.url_list as non-empty array');
+  resolveTickersArg(sourceDef, fetchArgs);
+
+  const ctx = {
+    ...(sourceDef?._projections || {}),
+    ...fetchArgs,
+  };
+
+  if (typeof selectedUrl !== 'string' || !selectedUrl) {
+    throw new Error('urls projected execution requires a concrete URL string');
   }
 
-  const results = [];
-  for (const u of urlList) {
-    results.push(await doFetchApi(String(u), method, headers, ttlMs));
-  }
-  return results;
+  const url = interpolate(selectedUrl, ctx);
+  return doFetchApi(url, method, headers, ttlMs);
 }
 
 export async function execute(context) {
-  const kind = context?.kind;
-  const sourceDef = context?.sourceDef || {};
+  const kind = context?.kind || context?.expects_data?.kind;
+  const sourceDef = context?.sourceDef || context?.expects_data?.sourceDef || {};
   try {
     let resultValue;
-    if (kind === 'url') {
-      resultValue = await executeUrl(sourceDef);
-    } else if (kind === 'url-list') {
-      resultValue = await executeUrlList(sourceDef);
+    if (kind === 'urls' || sourceDef?.urls) {
+      const projectedUrl =
+        typeof context?.url === 'string' ? context.url :
+        typeof context?.item === 'string' ? context.item :
+        typeof context?.expects_data?.url === 'string' ? context.expects_data.url :
+        typeof context?.expects_data?.item === 'string' ? context.expects_data.item :
+        undefined;
+      resultValue = projectedUrl ? await executeProjectedUrl(sourceDef, projectedUrl) : await executeUrl(sourceDef);
     } else {
       throw new Error(`http-source-handler does not support kind: ${kind}`);
     }
