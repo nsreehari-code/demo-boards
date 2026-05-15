@@ -2,8 +2,6 @@
 !.gitignore
 !cards/
 !cards/*.json
-!gandalf-cards/
-!gandalf-cards/*.json
 !.retain/
 !.retain/**
 **/chats/*.txt

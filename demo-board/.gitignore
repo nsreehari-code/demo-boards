@@ -3,6 +3,5 @@ __pycache__/
 .demo-setup/
 live/*
 !live/cards/
-!live/gandalf-cards/
 !.retain/
 !.retain/**

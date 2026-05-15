@@ -13,11 +13,6 @@
         "seedCardsDir": "./live/cards",
         "taskExecutorPath": "./demo-task-executor.js",
         "chatHandlerPath": "./demo-chat-handler.js"
-      },
-      "gandalf": {
-        "seedCardsDir": "./live/gandalf-cards",
-        "taskExecutorPath": "./demo-task-executor.js",
-        "chatHandlerPath": "./demo-chat-handler.js"
       }
     },
     "ingest1": {
@@ -36,11 +31,6 @@
         "seedCardsDir": "./cpm/cards",
         "taskExecutorPath": "./demo-task-executor.js",
         "chatHandlerPath": "./demo-chat-handler.js"
-      },
-      "gandalf": {
-        "seedCardsDir": "./cpm/gandalf-cards",
-        "taskExecutorPath": "./demo-task-executor.js",
-        "chatHandlerPath": "./demo-chat-handler.js"
       }
     },
     "cpmV2": {
@@ -50,11 +40,6 @@
         "seedCardsDir": "./cpmV2/cards",
         "taskExecutorPath": "./demo-task-executor.js",
         "chatHandlerPath": "./demo-chat-handler.js"
-      },
-      "gandalf": {
-        "seedCardsDir": "./cpmV2/gandalf-cards",
-        "taskExecutorPath": "./demo-task-executor.js",
-        "chatHandlerPath": "./demo-chat-handler.js"
       }
     },
     "optimus": {
@@ -62,11 +47,6 @@
       "setupDir": "./optimus/.board-ws",
       "regular": {
         "seedCardsDir": "./optimus/cards",
-        "taskExecutorPath": "./demo-task-executor.js",
-        "chatHandlerPath": "./demo-chat-handler.js"
-      },
-      "gandalf": {
-        "seedCardsDir": "./optimus/gandalf-cards",
         "taskExecutorPath": "./demo-task-executor.js",
         "chatHandlerPath": "./demo-chat-handler.js"
       }
