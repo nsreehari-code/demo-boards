@@ -62,5 +62,7 @@
       "refresh": true
     }
   },
-  "card_data": {}
+  "card_data": {
+    "X": "active"
+  }
 }

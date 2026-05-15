@@ -6,6 +6,11 @@
   <title>Live Boards</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <style>
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
     /* Fixed overlay header */
     #topBar {
       position: fixed;
@@ -17,8 +22,45 @@
       border-bottom: 1px solid rgba(0,0,0,0.08);
       padding: 0.5rem 1rem;
     }
-    /* Push content below the fixed header */
-    #boardRoot { padding-top: 56px; min-height: 100vh; }
+    #pageShell {
+      position: relative;
+      box-sizing: border-box;
+      height: 100dvh;
+      padding-top: 56px;
+      overflow: hidden;
+    }
+    #ingestRailSlot {
+      display: none;
+      position: fixed;
+      top: 56px;
+      left: 0;
+      height: calc(100dvh - 56px);
+      z-index: 1040;
+      width: min(30rem, calc(100vw - 32px));
+      min-width: 0;
+      padding: 16px 0 16px 16px;
+      box-sizing: border-box;
+      overflow: visible;
+      pointer-events: none;
+      transition: width .24s cubic-bezier(.22,1,.36,1), padding .24s cubic-bezier(.22,1,.36,1);
+    }
+    #ingestRailSlot.has-ingest {
+      display: block;
+    }
+    #ingestRailSlot.has-ingest > * {
+      pointer-events: auto;
+    }
+    #ingestRailSlot.has-ingest.lc-ingest-host-collapsed {
+      width: 2.75rem;
+      padding-left: 8px;
+      padding-right: 0;
+    }
+    #boardRoot {
+      height: calc(100dvh - 56px);
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+    }
 
     /* Scale down markdown headings inside cards to stay in proportion with card body text */
     .lc-result h1 { font-size: 1rem;   font-weight: 700; margin: 0.5rem 0 0.25rem; }
@@ -32,8 +74,9 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/leader-line/leader-line.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@8.0.5/browser/live-cards.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/yaml-flow@8.0.5/browser/board-livecards-client.js"></script>
+  <script src="../node_modules/yaml-flow/browser/live-cards.js"></script>
+  <script src="../node_modules/yaml-flow/browser/board-livecards-client.js"></script>
+  <script defer src="../newcode/ingest-board.js"></script>
 </head>
 <body class="bg-light">
   <div id="topBar" class="d-flex flex-wrap align-items-center justify-content-between gap-2">
@@ -54,14 +97,17 @@
     </div>
   </div>
 
-  <div id="boardRoot">
-    <div class="container-fluid">
-      <div class="d-flex align-items-center justify-content-center" style="height: 90vh;">
-        <div class="text-center">
-          <div class="spinner-border mb-3" role="status">
-            <span class="visually-hidden">Loading...</span>
+  <div id="pageShell">
+    <aside id="ingestRailSlot"></aside>
+    <div id="boardRoot">
+      <div class="container-fluid">
+        <div class="d-flex align-items-center justify-content-center" style="height: 90vh;">
+          <div class="text-center">
+            <div class="spinner-border mb-3" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="text-muted">Initializing board...</p>
           </div>
-          <p class="text-muted">Initializing board...</p>
         </div>
       </div>
     </div>
@@ -80,8 +126,13 @@
       var currentMode = localStorage.getItem('demo-board-mode') || 'board';
       var devMode = localStorage.getItem('demo-board-devmode') === 'true';
       var bootstrapCompleted = false;
-      var activeBoardId = new URLSearchParams(window.location.search).get('l') || '';
+      var searchParams = new URLSearchParams(window.location.search);
+      var activeBoardId = searchParams.get('l') || '';
+      var ingestBoardId = searchParams.get('ingestBoardId') || '';
+      var ingestNamespace = searchParams.get('ingestNamespace') || searchParams.get('ingestSubBoard') || searchParams.get('ingestLayer') || '';
+      var ingestRenderer = searchParams.get('ingestRenderer') || '';
       var runtimeClient = null;
+      var ingestRuntime = null;
       var activeServerOrigin = null;
       var serverConfig = null;
 
@@ -176,6 +227,51 @@
         document.getElementById('modeBoard').classList.toggle('active', mode === 'board');
         document.getElementById('modeCanvas').classList.toggle('active', mode === 'canvas');
       }
+
+      function getEffectiveIngestNamespace() {
+        return ingestNamespace || 'gandalf';
+      }
+
+      function getEffectiveIngestRenderer() {
+        return ingestRenderer || '';
+      }
+
+      function boardHasGandalf(boardId) {
+        var boards = serverConfig && serverConfig.boards ? serverConfig.boards : null;
+        var cfg = boards && boardId ? boards[boardId] : null;
+        return !!(cfg && cfg.gandalf && cfg.gandalf.seedCardsDir);
+      }
+
+      function getIngestTargetBoardId() {
+        return ingestBoardId || activeBoardId || '';
+      }
+
+      function syncIngestRail() {
+        var slot = document.getElementById('ingestRailSlot');
+        var targetBoardId = getIngestTargetBoardId();
+        var effectiveNamespace = getEffectiveIngestNamespace();
+        var effectiveRenderer = getEffectiveIngestRenderer();
+        var shouldShowIngest = !!(targetBoardId && boardHasGandalf(targetBoardId) && effectiveNamespace);
+        if (ingestRuntime && typeof ingestRuntime.dispose === 'function') {
+          ingestRuntime.dispose();
+          ingestRuntime = null;
+        }
+        slot.innerHTML = '';
+        slot.classList.toggle('has-ingest', shouldShowIngest);
+        if (!shouldShowIngest || !window.IngestBoard || typeof window.IngestBoard.mount !== 'function') {
+          return;
+        }
+
+        ingestRuntime = window.IngestBoard.mount({
+          rootElement: slot,
+          boardId: targetBoardId,
+          namespace: effectiveNamespace,
+          cardRenderer: effectiveRenderer,
+          serverConfigPath: 'server-config.json',
+          canvas: { height: 'calc(100vh - 88px)', overflow: 'auto' }
+        });
+      }
+
       syncModeButtons(currentMode);
       document.getElementById('devModeToggle').checked = devMode;
 
@@ -202,6 +298,7 @@
         var match = entries.find(function (e) { return e[0] === boardId; });
         document.getElementById('boardTitle').textContent = match ? (match[1].label || match[0]) : boardId;
 
+        syncIngestRail();
         await bootstrapBoard(boardId);
       }
 
@@ -264,6 +361,7 @@
 
       loadServerConfig()
         .then(function () { return registerAndLoadBoards(); })
+        .then(function () { syncIngestRail(); })
         .then(function () { return bootstrapBoard(activeBoardId); })
         .catch(function (err) {
           console.error(err);
@@ -273,6 +371,7 @@
 
       window.addEventListener('beforeunload', function () {
         if (runtimeClient) runtimeClient.dispose();
+        if (ingestRuntime) ingestRuntime.dispose();
       });
     })();
   </script>
