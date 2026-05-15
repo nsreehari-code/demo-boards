@@ -66,6 +66,7 @@ function resolveSetupDirRoot() {
 }
 
 const SETUP_DIR = path.join(resolveSetupDirRoot(), RUN_ID);
+const BOARD_SETUP_ROOT = path.join(SETUP_DIR, 'boards');
 if (fs.existsSync(SETUP_DIR)) {
   fs.rmSync(SETUP_DIR, { recursive: true, force: true });
   console.log(`[demo-http-test] wiped setup dir: ${SETUP_DIR}`);
@@ -199,6 +200,7 @@ function startServer(port) {
         ...process.env,
         DEMO_SERVER_PORT: String(port),
         DEMO_SETUP_DIR: SETUP_DIR,
+        DEMO_BOARD_SETUP_ROOT: BOARD_SETUP_ROOT,
         DEMO_CARDS_PATTERN: CARD_PATTERN,
       },
     });
@@ -250,8 +252,10 @@ try {
   console.log('[T0.1] init-board ok');
 
   console.log('\n=== T0 Step 2: start SSE worker ===');
+  const sseClientId = `server-http-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const sseUrl = `${BASE}/sse?clientId=${encodeURIComponent(sseClientId)}`;
   sseWorker = new Worker(SSE_WORKER_SCRIPT, {
-    workerData: { sseUrl: `${BASE}/sse` },
+    workerData: { sseUrl },
   });
   sseWorker.on('message', (msg) => {
     if (msg.type === 'frame') applyFrame(msg.payload);
