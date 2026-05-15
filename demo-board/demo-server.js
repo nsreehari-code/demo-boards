@@ -76,7 +76,7 @@ if (!process.env.DEMO_INFERENCE_ADAPTER_PATH && configuredInferenceAdapterPath) 
   process.env.DEMO_INFERENCE_ADAPTER_PATH = configuredInferenceAdapterPath;
 }
 
-const PORT = Number(process.env.DEMO_SERVER_PORT || serverConfig.port || 7813);
+const PORT = Number(process.env.DEMO_SERVER_PORT || serverConfig.port || 7799);
 const cardsPatternArgIndex = cliArgs.indexOf('--cards-pattern');
 const cliCardsPattern = cardsPatternArgIndex !== -1 ? cliArgs[cardsPatternArgIndex + 1] : null;
 const selectedCardsPattern = (process.env.DEMO_CARDS_PATTERN || cliCardsPattern || '').trim() || null;

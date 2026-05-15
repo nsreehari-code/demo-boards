@@ -34,7 +34,7 @@
       },
       "serverUrl": {
         "type": "string",
-        "description": "Base URL of the hosting server (e.g. http://127.0.0.1:7813). Used by source kinds that call server-side endpoints."
+        "description": "Base URL of the hosting server (e.g. http://127.0.0.1:7799). Used by source kinds that call server-side endpoints."
       },
       "boardLiveCardsCliJs": {
         "type": "string",

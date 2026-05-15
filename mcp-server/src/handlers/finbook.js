@@ -22,12 +22,10 @@ function toMcpResult(envelope) {
 
 function resolveRepoDir(tool) {
   const repoPath = tool?.config?.repoPath;
-  if (!repoPath || typeof repoPath !== 'string') {
-    throw new Error(`Tool ${tool?.name || '(unknown)'} is missing config.repoPath`);
-  }
-
   const manifestDir = path.dirname(tool.manifestPath);
-  const repoDir = path.resolve(manifestDir, repoPath);
+  const repoDir = repoPath && typeof repoPath === 'string'
+    ? path.resolve(manifestDir, repoPath)
+    : manifestDir;
   if (!fs.existsSync(repoDir)) {
     throw new Error(`Configured repoPath does not exist: ${repoDir}`);
   }
@@ -78,6 +76,31 @@ function getOperation(toolName) {
   return toolName;
 }
 
+function loadStateSnapshot(api, dbFile, state = 'working') {
+  const committedDb = api.loadDb(dbFile);
+  const journalFile = api.getJournalFilePath(dbFile);
+  const serverJournal = api.loadJournal(journalFile);
+  const pendingServerJournal = api.getPendingJournalEntries(committedDb, serverJournal);
+  const appliedWorkingDb = api.applyJournal(committedDb, pendingServerJournal).db;
+  return {
+    state,
+    committedDb,
+    serverJournal,
+    pendingServerJournal,
+    workingDb: state === 'committed' ? committedDb : appliedWorkingDb,
+  };
+}
+
+function buildStatePayload(snapshot) {
+  return {
+    state: snapshot.state,
+    committedDb: snapshot.committedDb,
+    serverJournal: snapshot.serverJournal,
+    pendingServerJournal: snapshot.pendingServerJournal,
+    workingDb: snapshot.workingDb,
+  };
+}
+
 function getToolAction(toolName) {
   return String(toolName || '').replace(/^finbook(?:\.[^.]+)?\./, '');
 }
@@ -90,18 +113,57 @@ export async function handleFinbookTool(args, tool) {
   const action = getToolAction(tool.name);
   const meta = {
     surface: 'mcp',
-    repoDir,
-    dbFile,
   };
 
   try {
     switch (action) {
+      case 'get_contract': {
+        const params = {
+          includeSemanticManifest: args?.includeSemanticManifest === true,
+        };
+        const result = contract.getToolContract({
+          includeSemanticManifest: args?.includeSemanticManifest === true,
+        });
+        return toMcpResult(contract.success(operation, params, result, meta));
+      }
+
+      case 'describe_semantic_structure':
+        return toMcpResult(contract.success(operation, {}, api.getSemanticStructure(), meta));
+
       case 'get_schema':
         return toMcpResult(contract.success(operation, {}, api.getSchema(), meta));
+
+      case 'get_committed_state': {
+        const snapshot = loadStateSnapshot(api, dbFile, 'committed');
+        return toMcpResult(contract.success(operation, { state: 'committed' }, buildStatePayload(snapshot), meta));
+      }
+
+      case 'get_working_state': {
+        const snapshot = loadStateSnapshot(api, dbFile, 'working');
+        return toMcpResult(contract.success(operation, { state: 'working' }, buildStatePayload(snapshot), meta));
+      }
+
+      case 'validate_working_state': {
+        const snapshot = loadStateSnapshot(api, dbFile, 'working');
+        return toMcpResult(contract.success(operation, {}, api.validateWorkingState(snapshot.workingDb), meta));
+      }
 
       case 'list_accounts': {
         const db = api.loadDb(dbFile);
         return toMcpResult(contract.success(operation, {}, { accounts: api.listAccounts(db) }, meta));
+      }
+
+      case 'get_repo_config': {
+        const db = api.loadDb(dbFile);
+        return toMcpResult(contract.success(operation, {}, api.getRepoConfig(db), meta));
+      }
+
+      case 'get_account_profile': {
+        const params = {
+          account: args?.account || null,
+        };
+        const db = api.loadDb(dbFile);
+        return toMcpResult(contract.success(operation, params, api.getAccountProfile(db, args.account), meta));
       }
 
       case 'list_table_rows': {
@@ -131,6 +193,22 @@ export async function handleFinbookTool(args, tool) {
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
+      case 'get_computed_view': {
+        const params = {
+          account: args?.account || null,
+          view: args?.view || null,
+          fy: args?.fy || null,
+          asOn: args?.asOn || null,
+        };
+        const db = api.loadDb(dbFile);
+        const result = api.runReport(db, args.account, args.view, {
+          fy: args.fy || undefined,
+          asOn: args.asOn || undefined,
+          asOnDate: args.asOn || undefined,
+        });
+        return toMcpResult(contract.success(operation, params, result, meta));
+      }
+
       case 'export_account': {
         const params = {
           account: args?.account || null,
@@ -139,6 +217,29 @@ export async function handleFinbookTool(args, tool) {
         };
         const db = api.loadDb(dbFile);
         const result = api.exportAccount(db, args.account, args.fy || 'All', { asOnDate: args.asOn || undefined });
+        return toMcpResult(contract.success(operation, params, result, meta));
+      }
+
+      case 'append_repo_config_entry': {
+        const params = {
+          category: args?.category || null,
+          key: args?.key || null,
+        };
+        const db = api.loadDb(dbFile);
+        const result = api.appendRepoConfigEntry(db, args.category, args.key, args.value);
+        api.saveDb(dbFile, db);
+        return toMcpResult(contract.success(operation, params, result, meta));
+      }
+
+      case 'append_account_profile_entry': {
+        const params = {
+          account: args?.account || null,
+          category: args?.category || null,
+          key: args?.key || null,
+        };
+        const db = api.loadDb(dbFile);
+        const result = api.appendAccountProfileEntry(db, args.account, args.category, args.key, args.value);
+        api.saveDb(dbFile, db);
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 

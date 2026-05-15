@@ -6,13 +6,45 @@
   },
   "tools": [
     {
+      "name": "finbook.actual.get_contract",
+      "title": "Get Finbook Contract (Actual Data)",
+      "description": "Return the current Finbook MCP contract for the actual-data repo, optionally including the semantic manifest.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeSemanticManifest": {
+            "type": "boolean",
+            "description": "When true, include the semantic managed-truthsets manifest in the response."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.actual.describe_semantic_structure",
+      "title": "Describe Finbook Semantic Structure (Actual Data)",
+      "description": "Describe the semantic structure of the Finbook model, tables, computed views, and preferred mutation patterns for the actual-data repo.",
+      "handler": "finbook.api",
+      "config": {
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "finbook.actual.get_schema",
       "title": "Get Finbook Schema (Actual Data)",
       "description": "Return Finbook schema metadata for all supported tables and computed fields.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -26,8 +58,7 @@
       "description": "List available Finbook accounts in the actual-data repo.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -41,8 +72,7 @@
       "description": "Return computed rows for a Finbook table from the actual-data repo, optionally filtered by financial year.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -61,8 +91,7 @@
       "description": "Run a shared Finbook computed report for an account in the actual-data repo.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -86,8 +115,7 @@
       "description": "Return the shared Finbook export payload for an account and financial year from the actual-data repo.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -106,8 +134,7 @@
       "description": "Create or update one Finbook row in a table and persist it to the actual-data repo DB.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -127,8 +154,7 @@
       "description": "Delete one Finbook row from a table by index or row reference and persist the change in the actual-data repo.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -152,8 +178,7 @@
       "description": "Lock one Finbook row in the actual-data repo so future updates or deletes are rejected until it is explicitly unlocked.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -177,8 +202,7 @@
       "description": "Unlock one Finbook row in the actual-data repo so future updates or deletes are allowed again.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -202,8 +226,7 @@
       "description": "Record a stock purchase or transfer-in entry in Finbook in the actual-data repo.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -222,8 +245,7 @@
       "description": "Record a stock sale or transfer-out entry in Finbook in the actual-data repo.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -242,8 +264,7 @@
       "description": "Record a non-stock income entry in the actual-data repo using one of the known Finbook income types: salary, foreign, property, or other.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -263,8 +284,7 @@
       "description": "Record a manual or consolidated capital gain entry in the actual-data repo that cannot be derived from recorded stock purchase and sale transactions.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",
@@ -283,8 +303,7 @@
       "description": "Record an advance-tax payment entry in Finbook in the actual-data repo.",
       "handler": "finbook.api",
       "config": {
-        "repoPath": "../../../fintech/data-repos/actual data/finbook-data",
-        "dbPath": "DB/finbook.json"
+        "repoPath": "../../../fintech/data-repos/actual data/finbook-data"
       },
       "inputSchema": {
         "type": "object",

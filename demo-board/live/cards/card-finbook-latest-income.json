@@ -1,0 +1,92 @@
+{
+  "id": "card-finbook-latest-income",
+  "meta": {
+    "title": "Finbook Latest Income",
+    "tags": [
+      "finbook",
+      "mcp",
+      "income"
+    ],
+    "desc": "Shows the latest fiscal total income for each account from the local finbook managed-truthsets repo through MCP."
+  },
+  "requires": [],
+  "source_defs": [
+    {
+      "bindTo": "sarala_income",
+      "outputFile": "card-finbook-income-sarala.json",
+      "mcp": {
+        "manifest": "../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json",
+        "tool": "finbook.run_report",
+        "input": {
+          "account": "Sarala",
+          "report": "income-summary",
+          "fy": "2025-26"
+        }
+      }
+    },
+    {
+      "bindTo": "hari_income",
+      "outputFile": "card-finbook-income-hari.json",
+      "mcp": {
+        "manifest": "../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json",
+        "tool": "finbook.run_report",
+        "input": {
+          "account": "Hari",
+          "report": "income-summary",
+          "fy": "2025-26"
+        }
+      }
+    },
+    {
+      "bindTo": "z_income",
+      "outputFile": "card-finbook-income-z.json",
+      "mcp": {
+        "manifest": "../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json",
+        "tool": "finbook.run_report",
+        "input": {
+          "account": "Z",
+          "report": "income-summary",
+          "fy": "2025-26"
+        }
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "rows",
+      "expr": "[{\"account\": \"Sarala\", \"totalIncome\": $round(fetched_sources.sarala_income.data.totalIncome, 2)}, {\"account\": \"Hari\", \"totalIncome\": $round(fetched_sources.hari_income.data.totalIncome, 2)}, {\"account\": \"Z\", \"totalIncome\": $round(fetched_sources.z_income.data.totalIncome, 2)}]"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "table",
+        "label": "Latest Fiscal Total Income",
+        "data": {
+          "bind": "computed_values.rows",
+          "columns": [
+            "account",
+            "totalIncome"
+          ],
+          "maxRows": 8
+        }
+      }
+    ],
+    "layout": {
+      "board": {
+        "col": 6,
+        "order": 12
+      },
+      "canvas": {
+        "x": 1080,
+        "y": 450,
+        "w": 620,
+        "h": 420
+      }
+    },
+    "features": {
+      "refresh": true
+    }
+  },
+  "card_data": {}
+}

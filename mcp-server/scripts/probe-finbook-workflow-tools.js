@@ -16,7 +16,7 @@ function readJson(filePath) {
 
 function parseArgs(argv) {
   const options = {
-    manifest: 'manifests/finbook-data.local.json',
+    manifest: '../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json',
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -73,13 +73,40 @@ function getFinbookToolPrefix(manifest) {
   return listAccountsTool.name.replace(/list_accounts$/, '');
 }
 
+function resolveDbFile(repoPath, toolConfig = {}) {
+  if (toolConfig.dbPath) {
+    return path.resolve(repoPath, toolConfig.dbPath);
+  }
+
+  const defaultPath = path.resolve(repoPath, 'DB', 'data.json');
+  if (fs.existsSync(defaultPath)) return defaultPath;
+
+  const dbDir = path.resolve(repoPath, 'DB');
+  if (fs.existsSync(dbDir)) {
+    const jsonFiles = fs.readdirSync(dbDir).filter((entry) => entry.toLowerCase().endsWith('.json'));
+    if (jsonFiles.length === 1) {
+      return path.join(dbDir, jsonFiles[0]);
+    }
+  }
+
+  return defaultPath;
+}
+
+function resolveRepoPath(manifestPath, toolConfig = {}) {
+  if (toolConfig.repoPath) {
+    return path.resolve(path.dirname(manifestPath), toolConfig.repoPath);
+  }
+  return path.dirname(manifestPath);
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const manifestPath = path.resolve(options.manifest);
   const manifest = readJson(manifestPath);
   const toolPrefix = getFinbookToolPrefix(manifest);
-  const repoPath = path.resolve(path.dirname(manifestPath), manifest.tools[0].config.repoPath);
-  const sourceDbPath = path.resolve(repoPath, manifest.tools[0].config.dbPath);
+  const firstToolConfig = manifest.tools[0]?.config || {};
+  const repoPath = resolveRepoPath(manifestPath, firstToolConfig);
+  const sourceDbPath = resolveDbFile(repoPath, firstToolConfig);
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'finbook-workflow-probe-'));
   const tempDbPath = path.join(tempDir, 'finbook.json');
 

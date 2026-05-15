@@ -26,6 +26,10 @@ function resolveManifestPath(executorDir, manifestRef) {
   if (!manifestRef) return null;
   if (path.isAbsolute(manifestRef)) return manifestRef;
 
+  if (manifestRef.startsWith('.') || manifestRef.includes('/') || manifestRef.includes('\\')) {
+    return path.resolve(executorDir, manifestRef);
+  }
+
   const siblingManifestPath = path.resolve(executorDir, '..', 'mcp-server', 'manifests', manifestRef);
   return siblingManifestPath;
 }

@@ -7,6 +7,7 @@ async function notImplemented(args, tool) {
 }
 
 const HANDLERS = {
+  'finbook': handleFinbookTool,
   'finbook.api': handleFinbookTool,
   'teams.graph': handleTeamsGraph,
   'workiq.ask': askWorkiq,

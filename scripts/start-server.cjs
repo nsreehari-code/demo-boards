@@ -16,8 +16,8 @@ if (!fs.existsSync(demoServerPath)) {
   process.exit(1);
 }
 
-const boardLiveCardsCliJs = path.resolve(workspaceDir, 'node_modules', 'yaml-flow', 'board-live-cards-cli.js');
-const stepMachineCliPath = path.resolve(workspaceDir, 'node_modules', 'yaml-flow', 'step-machine-cli.js');
+const boardLiveCardsCliJs = path.resolve(workspaceDir, 'node_modules', 'yaml-flow', 'cli', 'node', 'board-live-cards-cli.js');
+const stepMachineCliPath = path.resolve(workspaceDir, 'node_modules', 'yaml-flow', 'cli', 'node', 'step-machine-cli.js');
 
 if (!fs.existsSync(boardLiveCardsCliJs)) {
   console.error(`[start-server] Missing ${boardLiveCardsCliJs}. Run \"npm install\" first.`);
@@ -35,7 +35,7 @@ const sharedEnv = {
 };
 
 console.log(`[start-server] board dir: ${boardDir}`);
-console.log('[start-server] backend:  http://127.0.0.1:7813');
+console.log('[start-server] backend:  http://127.0.0.1:7799');
 if (modeFlag === '--all') {
   console.log('[start-server] frontend: http://127.0.0.1:8000');
 }

@@ -194,7 +194,7 @@ async function closeAllSessions(sessionServers, sessionTransports) {
 
 async function startStreamableHttpServer(loaded) {
   const host = getArgValue('--host', '127.0.0.1');
-  const port = Number(getArgValue('--port', '7823'));
+  const port = Number(getArgValue('--port', '7801'));
   const endpoint = getArgValue('--endpoint', '/mcp');
   const sessionTransports = new Map();
   const sessionServers = new Map();

@@ -121,8 +121,10 @@ npm install
 Validate the current manifests without starting transport:
 
 ```bash
-npm run dry-run -- --manifest manifests/demo-boards.workiq.json
+npm run dry-run -- --manifest ../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json
 ```
+
+For Finbook, the host should consume the repo-owned executable manifest from `managed-truthsets/mcp-executable-manifest.json` directly instead of maintaining a copied host-local manifest.
 
 Start the hosted MCP server for WorkIQ:
 
@@ -130,7 +132,7 @@ Start the hosted MCP server for WorkIQ:
 npm run start:http
 ```
 
-That serves the demo WorkIQ manifest at `http://127.0.0.1:7823/mcp` by default.
+That serves the demo WorkIQ manifest at `http://127.0.0.1:7801/mcp` by default.
 
 Start a stdio MCP server for non-TTY tools:
 
@@ -142,6 +144,6 @@ That will intentionally fail if the selected manifest declares `requiresTerminal
 
 ## Next steps
 
-1. Add per-repo manifests for `fintech/data-repos/*` tools such as export/query/report.
+1. Add more repo-owned executable manifests for other `fintech/data-repos/*` tool surfaces.
 2. Decide whether local development runs one combined server instance or one process per repo/tool boundary.
 3. Add manifest-to-schema conversion if you want MCP-side input validation from JSON Schema rather than handler-level validation.
