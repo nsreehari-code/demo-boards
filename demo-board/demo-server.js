@@ -228,12 +228,40 @@ function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerPath,
 }
 
 // Pre-register configured boards in the server meta store
+const persistedBoardsConfigText = serverMetaStore.getText('boards-config.json');
+let persistedBoardsConfig = { boards: [{ id: 'default', label: 'Default Board' }] };
+if (persistedBoardsConfigText) {
+  try {
+    const parsedBoardsConfig = JSON.parse(persistedBoardsConfigText);
+    if (parsedBoardsConfig && Array.isArray(parsedBoardsConfig.boards)) {
+      persistedBoardsConfig = parsedBoardsConfig;
+    }
+  } catch {
+    persistedBoardsConfig = { boards: [{ id: 'default', label: 'Default Board' }] };
+  }
+}
+
+const persistedBoardsById = new Map(
+  (persistedBoardsConfig.boards || []).map((board) => [board?.id, board])
+);
+
 for (const [key, cfg] of boardConfigEntries) {
   const existing = serverMetaStore.getText(`boards/${key}.json`);
   if (!existing) {
     serverMetaStore.putText(`boards/${key}.json`, JSON.stringify({ id: key, label: cfg.label || key }));
   }
+
+  persistedBoardsById.set(key, {
+    ...(persistedBoardsById.get(key) || {}),
+    id: key,
+    label: cfg.label || key,
+  });
 }
+
+serverMetaStore.putText(
+  'boards-config.json',
+  JSON.stringify({ boards: Array.from(persistedBoardsById.values()) }, null, 2)
+);
 
 const runtime = createMultiBoardServerRuntime({
   apiBasePath,

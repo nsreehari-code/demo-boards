@@ -20,6 +20,15 @@
         "chatHandlerPath": "./demo-chat-handler.js"
       }
     },
+    "ingest1": {
+      "label": "Ingest 1",
+      "setupDir": "./ingest1/.board-ws",
+      "regular": {
+        "seedCardsDir": "./ingest1/cards",
+        "taskExecutorPath": "./demo-task-executor.js",
+        "chatHandlerPath": "./demo-chat-handler.js"
+      }
+    },
     "cpm": {
       "label": "CPM",
       "setupDir": "./cpm/.board-ws",
