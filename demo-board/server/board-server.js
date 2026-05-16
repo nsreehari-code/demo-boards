@@ -557,6 +557,9 @@ const server = http.createServer((req, res) => {
   const method = req.method || 'GET';
   const url = new URL(req.url || '/', 'http://localhost');
   const pathname = url.pathname;
+  const remoteAddress = req.socket?.remoteAddress || 'unknown';
+
+  console.log(`[board-server] ${method} ${pathname}${url.search} <- ${remoteAddress}`);
 
   if (method === 'OPTIONS') {
     res.writeHead(204, CORS_HEADERS);

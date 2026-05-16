@@ -5,105 +5,43 @@
     }
   }
 
-  function toBoardState(boardId, payload) {
-    var cardDefs = Array.isArray(payload.cardDefinitions) ? payload.cardDefinitions : [];
-    var runtimeById = payload.cardRuntimeById && typeof payload.cardRuntimeById === "object"
-      ? payload.cardRuntimeById
-      : {};
-    var chatsByCardId = payload.cardChatsByCardId && typeof payload.cardChatsByCardId === "object"
-      ? payload.cardChatsByCardId
-      : {};
-
-    var statusByName = {};
-    var statusCards = payload.statusSnapshot && payload.statusSnapshot.cards;
-    if (statusCards && typeof statusCards === "object") {
-      Object.keys(statusCards).forEach(function (key) {
-        var item = statusCards[key];
-        if (item && typeof item.name === "string") {
-          statusByName[item.name] = item;
-        }
-      });
+  function requireClient() {
+    var client = window.BoardLiveCardsClient;
+    if (!client) {
+      throw new Error("BoardLiveCardsClient is required");
     }
-
-    var modelsById = {};
-    var cardIds = [];
-
-    cardDefs.forEach(function (def) {
-      if (!def || !def.id) {
-        return;
-      }
-      var cardId = String(def.id);
-      var runtime = runtimeById[cardId] || {};
-      var defaultCardData = def.card_data && typeof def.card_data === "object" ? def.card_data : {};
-      var runtimeCardData = runtime.card_data && typeof runtime.card_data === "object" ? runtime.card_data : {};
-      modelsById[cardId] = {
-        id: cardId,
-        card: def,
-        card_data: {
-          ...defaultCardData,
-          ...runtimeCardData,
-        },
-        computed_values: runtime.computed_values && typeof runtime.computed_values === "object" ? runtime.computed_values : {},
-        runtime_state: statusByName[cardId] || {},
-        card_chats: chatsByCardId[cardId] && typeof chatsByCardId[cardId] === "object"
-          ? chatsByCardId[cardId]
-          : { messages: [], receiving: false },
-      };
-      cardIds.push(cardId);
-    });
-
-    return { boardId: boardId, cardIds: cardIds, modelsById: modelsById };
+    return client;
   }
 
-  function pickBoardState(sourceState, selectedIds) {
-    var ids = Array.isArray(selectedIds) ? selectedIds : [];
-    var idSet = new Set(ids.map(function (id) { return String(id); }));
-    var nextIds = sourceState.cardIds.filter(function (id) {
-      return idSet.has(String(id));
-    });
-
-    var nextModelsById = {};
-    nextIds.forEach(function (id) {
-      nextModelsById[id] = sourceState.modelsById[id];
-    });
-
-    return {
-      boardId: sourceState.boardId,
-      cardIds: nextIds,
-      modelsById: nextModelsById,
-    };
-  }
-
-  function subtractBoardState(sourceState, excludedIdsSet) {
-    var nextIds = sourceState.cardIds.filter(function (id) {
-      return !excludedIdsSet.has(String(id));
-    });
-
-    var nextModelsById = {};
-    nextIds.forEach(function (id) {
-      nextModelsById[id] = sourceState.modelsById[id];
-    });
-
-    return {
-      boardId: sourceState.boardId,
-      cardIds: nextIds,
-      modelsById: nextModelsById,
-    };
+  function withBoardId(boardId, state) {
+    if (state) {
+      state.boardId = String(boardId || state.boardId || "").trim();
+    }
+    return state;
   }
 
   async function derivePluginState(plugin, sourceState, context) {
+    var client = requireClient();
+
     if (typeof plugin.filter === "function") {
-      var selectedIds = sourceState.cardIds.filter(function (cardId) {
-        var model = sourceState.modelsById[cardId];
-        return !!plugin.filter(model, {
-          activeBoardId: context.activeBoardId,
-          sourceBoardId: context.sourceBoardId,
-          plugin: plugin,
-          sourceState: sourceState,
-        });
+      var selectedIds = [];
+      var nextState = client.deriveBoardState(sourceState, {
+        includeCard: function (model) {
+          var include = !!plugin.filter(model, {
+            activeBoardId: context.activeBoardId,
+            sourceBoardId: context.sourceBoardId,
+            plugin: plugin,
+            sourceState: sourceState,
+          });
+          if (include) {
+            selectedIds.push(String(model.id));
+          }
+          return include;
+        },
       });
+
       return {
-        state: pickBoardState(sourceState, selectedIds),
+        state: withBoardId(sourceState.boardId, nextState),
         selectedIds: selectedIds,
       };
     }
@@ -132,13 +70,13 @@
   async function init(MainBoardModule, pluginSpecs, options) {
     var opts = options || {};
     var plugins = Array.isArray(pluginSpecs) ? pluginSpecs : [];
-    var BoardRuntimeShared = window.BoardRuntimeShared || {};
+    var client = requireClient();
 
     if (!MainBoardModule || typeof MainBoardModule.init !== "function") {
       throw new Error("ClientUiWiring.init requires MainBoard module");
     }
 
-    if (!window.BoardLiveCardsClient || typeof window.BoardLiveCardsClient.defaultBoardPaths !== "function") {
+    if (typeof client.defaultBoardPaths !== "function") {
       throw new Error("BoardLiveCardsClient.defaultBoardPaths is required");
     }
 
@@ -174,7 +112,7 @@
     }
 
     function boardPaths(boardId) {
-      return window.BoardLiveCardsClient.defaultBoardPaths(boardId || state.activeBoardId);
+      return client.defaultBoardPaths(boardId || state.activeBoardId);
     }
 
     async function fetchServer(path, initReq) {
@@ -250,7 +188,7 @@
         throw new Error("Failed to init board snapshot for " + bid + " (" + res.status + ")");
       }
 
-      return toBoardState(bid, await res.json());
+      return withBoardId(bid, client.serverPayloadToBoardState(await res.json()));
     }
 
     async function mountPlugin(plugin, mainBoardState, consumedMainIds) {
@@ -316,12 +254,16 @@
       }
 
       mountElement.style.display = "block";
+      var session = await state.mainBoard.ensureRuntimeSession(sourceBoardId, {
+        state: sourceState,
+      });
       var runtime = null;
-      async function syncPluginRuntime() {
-        if (!runtime || typeof runtime.setState !== 'function') {
+      var runtimeSubscription = null;
+
+      async function updatePluginRuntime(nextSourceState) {
+        if (!runtime || typeof runtime.setState !== 'function' || !nextSourceState) {
           return;
         }
-        var nextSourceState = await loadBoardState(sourceBoardId);
         var nextDerived = await derivePluginState(plugin, nextSourceState, pluginContext);
         runtime.setState(nextDerived.state);
       }
@@ -339,48 +281,37 @@
         getServerOrigin: function () {
           return state.activeServerOrigin;
         },
-        onPatchState: async function (cardId, patch) {
-          await BoardRuntimeShared.patchCardState({
-            fetchServer: fetchServer,
-            boardPaths: function (boardId) {
-              return boardPaths(boardId || sourceBoardId);
-            },
-            boardId: sourceBoardId,
-            cardId: cardId,
-            patch: patch,
-          });
-          await syncPluginRuntime();
+        onPatchState: function (cardId, patch) {
+          return session.patchCardState(cardId, patch || {});
         },
-        onRefresh: async function (cardId) {
-          await BoardRuntimeShared.dispatchCardAction({
-            fetchServer: fetchServer,
-            boardPaths: function (boardId) {
-              return boardPaths(boardId || sourceBoardId);
-            },
-            boardId: sourceBoardId,
-            cardId: cardId,
-            actionType: 'refresh',
-            payload: {},
-          });
-          await syncPluginRuntime();
+        onRefresh: function (cardId) {
+          return session.patchCardState(cardId, {});
         },
-        onAction: async function (cardId, actionType, payload) {
-          await BoardRuntimeShared.dispatchCardAction({
-            fetchServer: fetchServer,
-            boardPaths: function (boardId) {
-              return boardPaths(boardId || sourceBoardId);
-            },
-            boardId: sourceBoardId,
-            cardId: cardId,
-            actionType: actionType,
-            payload: payload,
-          });
-          await syncPluginRuntime();
+        onAction: function (cardId, actionType, payload) {
+          return session.dispatchCardAction(cardId, actionType, payload || {});
         },
-        startReceivingChats: function () { return Promise.resolve(); },
-        stopReceivingChats: function () { return Promise.resolve(); },
+        startReceivingChats: function (cardId) {
+          return session.subscribeCardChats(cardId);
+        },
+        stopReceivingChats: function (cardId) {
+          return session.unsubscribeCardChats(cardId);
+        },
       });
-      state.pluginRuntimes.set(name, runtime || null);
+
+      runtimeSubscription = session.subscribe(function (nextSourceState) {
+        Promise.resolve(updatePluginRuntime(nextSourceState)).catch(function () {});
+      });
+
+      state.pluginRuntimes.set(name, {
+        dispose: function () {
+          if (typeof runtimeSubscription === 'function') {
+            runtimeSubscription();
+            runtimeSubscription = null;
+          }
+          disposeRuntime(runtime);
+          runtime = null;
+        },
+      });
     }
 
     async function syncPlugins(mainBoardState, consumedMainIds) {
@@ -395,7 +326,10 @@
 
       await syncPlugins(baseState, consumedMainIds);
 
-      var remainingState = subtractBoardState(baseState, consumedMainIds);
+      var remainingState = withBoardId(
+        baseState.boardId,
+        client.subtractBoardState(baseState, consumedMainIds)
+      );
       if (typeof state.mainBoard.mountState === "function") {
         await state.mainBoard.mountState(remainingState, state.activeBoardId);
       } else {

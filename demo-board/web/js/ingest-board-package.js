@@ -1,4 +1,12 @@
 (function () {
+  // App-specific ingest package for board-livecards.
+  //
+  // This file intentionally owns only ingest behavior:
+  // - ingest board theme and renderer registration
+  // - ingest card sorting rules
+  // - a thin mount API that targets a caller-provided DOM node
+  //
+  // Generic hydrated-state mounting lives in BoardLivecardsStatefulHost.
   var INGEST_RAIL_STATE_KEY = 'demo-board-ingest-rail-collapsed';
 
   function readIngestRailCollapsed() {
@@ -268,162 +276,34 @@
 
   function mountIngestBoard(options) {
     var mountOptions = options || {};
-    var rootElement = mountOptions.rootElement;
-    var BoardRuntimeShared = window.BoardRuntimeShared || {};
-    if (!rootElement) {
-      throw new Error('mountIngestBoard requires rootElement');
-    }
-    if (!mountOptions.state || !Array.isArray(mountOptions.state.cardIds) || !mountOptions.state.modelsById) {
-      rootElement.textContent = 'ingest board requires a hydrated state object.';
-      throw new Error('mountIngestBoard requires options.state');
+    var boardHost = window.BoardLivecardsStatefulHost;
+    if (!boardHost || typeof boardHost.mount !== 'function') {
+      throw new Error('BoardLivecardsStatefulHost.mount is required before ingest-board-package.js');
     }
 
-    var LiveCard = window.LiveCard;
-    if (!LiveCard) {
-      rootElement.textContent = 'LiveCard global not loaded.';
-      throw new Error('LiveCard global not loaded');
-    }
-
-    if (rootElement.__ingestBoardRuntime && typeof rootElement.__ingestBoardRuntime.dispose === 'function') {
-      rootElement.__ingestBoardRuntime.dispose();
-    }
-
-    var activeState = mountOptions.state;
-    var activeMode = mountOptions.mode || 'board';
-    var activeBoardView = null;
-
-    function fileUrlBase() {
-      if (typeof BoardRuntimeShared.buildFileUrlBase !== 'function') {
-        return null;
-      }
-      return BoardRuntimeShared.buildFileUrlBase({
-        boardId: mountOptions.boardId || (activeState && activeState.boardId),
-        boardPaths: mountOptions.boardPaths,
-        getServerOrigin: mountOptions.getServerOrigin,
-      });
-    }
-
-    function notifyBoardEngine() {
-      var engine = activeBoardView && activeBoardView.core ? activeBoardView.core.engine : null;
-      if (engine && typeof engine.onServerSseEvent === 'function') {
-        engine.onServerSseEvent();
-      } else if (engine && typeof engine.refreshOpenChatModal === 'function') {
-        engine.refreshOpenChatModal();
-      }
-    }
-
-    function setState(nextState) {
-      if (!nextState || typeof nextState !== 'object') {
-        return activeState;
-      }
-      activeState = nextState;
-      if (activeBoardView && typeof activeBoardView.setState === 'function') {
-        activeBoardView.setState(function () { return activeState; });
-      }
-      notifyBoardEngine();
-      return activeState;
-    }
-
-    function dispose() {
-      if (activeBoardView && typeof activeBoardView.destroy === 'function') {
-        activeBoardView.destroy();
-      }
-      activeBoardView = null;
-      activeState = null;
-      if (rootElement.__ingestBoardRuntime === runtimeClient) {
-        rootElement.__ingestBoardRuntime = null;
-      }
-    }
-
-    var engine = LiveCard.init({
-      resolve: function (cardId) {
-        return activeState && activeState.modelsById ? activeState.modelsById[cardId] : null;
-      },
-      chartLib: window.Chart || null,
-      fileUrlBase: fileUrlBase() || undefined,
-      markdown: window.marked ? function (value) { return window.marked.parse(value); } : null,
-      sanitize: window.DOMPurify ? function (value) { return window.DOMPurify.sanitize(value); } : null,
-      onPatchState: function (cardId, patch) {
-        if (typeof mountOptions.onPatchState === 'function') {
-          return mountOptions.onPatchState(cardId, patch || {});
-        }
-        return Promise.resolve();
-      },
-      onRefresh: function (cardId) {
-        if (typeof mountOptions.onRefresh === 'function') {
-          return mountOptions.onRefresh(cardId);
-        }
-        return Promise.resolve();
-      },
-      onAction: function (cardId, actionType, payload) {
-        if (typeof mountOptions.onAction === 'function') {
-          return mountOptions.onAction(cardId, actionType, payload || {});
-        }
-        return Promise.resolve();
-      },
-      startReceivingChats: function (cardId) {
-        if (typeof mountOptions.startReceivingChats === 'function') {
-          return mountOptions.startReceivingChats(cardId);
-        }
-        return Promise.resolve();
-      },
-      stopReceivingChats: function (cardId) {
-        if (typeof mountOptions.stopReceivingChats === 'function') {
-          return mountOptions.stopReceivingChats(cardId);
-        }
-        return Promise.resolve();
-      }
-    });
-
-    rootElement.innerHTML = '';
-    activeBoardView = LiveCard.Board(engine, rootElement, {
-      initialState: activeState,
+    return boardHost.mount({
+      rootElement: mountOptions.rootElement,
+      runtimeProperty: '__ingestBoardRuntime',
+      state: mountOptions.state,
+      boardId: mountOptions.boardId,
+      mode: mountOptions.mode || 'board',
+      canvas: mountOptions.canvas || { height: '100%', overflow: 'auto' },
+      boardPaths: mountOptions.boardPaths,
+      getServerOrigin: mountOptions.getServerOrigin,
       getNodeIds: function (state) {
         return sortBoardCardIds(state);
       },
       selectNode: function (state, cardId) {
         return state.modelsById[cardId];
       },
-      mode: activeMode,
-      canvas: mountOptions.canvas || { height: '100%', overflow: 'auto' },
       boardTheme: mountOptions.boardTheme || 'ingest',
-      boardRenderer: mountOptions.boardRenderer || 'ingest'
+      boardRenderer: mountOptions.boardRenderer || 'ingest',
+      onPatchState: mountOptions.onPatchState,
+      onRefresh: mountOptions.onRefresh,
+      onAction: mountOptions.onAction,
+      startReceivingChats: mountOptions.startReceivingChats,
+      stopReceivingChats: mountOptions.stopReceivingChats,
     });
-    notifyBoardEngine();
-
-    var runtimeClient = {
-      rootElement: rootElement,
-      dispose: dispose,
-      setState: setState,
-      getState: function () {
-        return activeState;
-      },
-      setMode: function (mode) {
-        activeMode = String(mode || 'board');
-        if (activeBoardView && activeBoardView.core && typeof activeBoardView.core.setMode === 'function') {
-          activeBoardView.core.setMode(activeMode);
-        }
-      },
-      autoLayout: function () {
-        if (activeBoardView && activeBoardView.core) {
-          if (typeof activeBoardView.core.setMode === 'function') {
-            activeBoardView.core.setMode('canvas');
-          }
-          if (typeof activeBoardView.core.autoLayout === 'function') {
-            activeBoardView.core.autoLayout();
-          }
-        }
-      },
-      setDevMode: function (enabled) {
-        if (activeBoardView && activeBoardView.core && typeof activeBoardView.core.setDevMode === 'function') {
-          activeBoardView.core.setDevMode(!!enabled);
-        }
-      }
-    };
-
-    rootElement.__ingestBoardRuntime = runtimeClient;
-    runtimeClient.ready = Promise.resolve(runtimeClient);
-    return runtimeClient;
   }
 
   function autoMountIngestBoards() {
@@ -441,8 +321,9 @@
     });
   }
 
-  window.IngestBoard = window.IngestBoard || {};
-  window.IngestBoard.mount = mountIngestBoard;
+  window.IngestBoardPackage = window.IngestBoardPackage || {};
+  window.IngestBoardPackage.mount = mountIngestBoard;
+  window.IngestBoard = window.IngestBoardPackage;
   window.mountIngestBoard = mountIngestBoard;
 
   if (document.readyState === 'loading') {

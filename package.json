@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "install:foundry": "pip install -r demo-board/scripts/foundry/requirements.txt",
+    "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt",
     "postinstall": "npm run install:foundry",
     "start": "node scripts/start-server.cjs demo-board --all",
     "backend": "node scripts/start-server.cjs demo-board --backend",
@@ -26,7 +26,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "latest",
     "better-sqlite3": "^12.9.0",
-    "yaml-flow": "^8.2.1"
+    "yaml-flow": "^8.2.5"
   },
   "devDependencies": {
     "http-server": "^14.1.1"
