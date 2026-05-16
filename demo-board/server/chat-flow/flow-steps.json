@@ -66,8 +66,8 @@
       },
       "transitions": {
         "success": "write_reply",
-        "failure": "cleanup_failure",
-        "error": "cleanup_failure"
+        "failure": "write_failure",
+        "error": "write_failure"
       }
     },
     "probe_assistant": {
@@ -88,8 +88,8 @@
       },
       "transitions": {
         "success": "write_reply",
-        "failure": "cleanup_failure",
-        "error": "cleanup_failure"
+        "failure": "write_failure",
+        "error": "write_failure"
       }
     },
     "write_reply": {
@@ -113,6 +113,30 @@
       },
       "transitions": {
         "success": "cleanup_success",
+        "failure": "write_failure",
+        "error": "write_failure"
+      }
+    },
+    "write_failure": {
+      "description": "Append a surfaced failure message via the HTTP chat API before clearing processing",
+      "expects_data": ["serverUrl", "apiBasePath", "cardId"],
+      "produces_data": ["failureText", "failureId"],
+      "input_validations": [
+        "$type(serverUrl) = \"string\" and $length(serverUrl) > 0",
+        "$type(apiBasePath) = \"string\" and $length(apiBasePath) > 0",
+        "$type(cardId) = \"string\" and $length(cardId) > 0"
+      ],
+      "handler": {
+        "type": "ref",
+        "howToRun": "local-node",
+        "whatToRun": {
+          "kind": "fs-path",
+          "value": "./server/chat-flow/chat-write-failure.js"
+        },
+        "meta": "chat-handler"
+      },
+      "transitions": {
+        "success": "cleanup_failure",
         "failure": "cleanup_failure",
         "error": "cleanup_failure"
       }

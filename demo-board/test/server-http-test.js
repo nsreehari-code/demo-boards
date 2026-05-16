@@ -84,6 +84,14 @@ const NS = {
   chatEvents: [],
 };
 
+function resetNs() {
+  NS.initialPayload = null;
+  NS.statusSummary = null;
+  NS.statusGeneration = 0;
+  NS.computedValues = {};
+  NS.chatEvents = [];
+}
+
 function applyFrame(payload) {
   if (payload && Array.isArray(payload.cardDefinitions)) {
     if (!NS.initialPayload && payload.cardDefinitions.length > 0) {
@@ -304,8 +312,10 @@ function httpUploadChatFile(url, fileName, content, contentType = 'text/plain; c
 }
 
 function startServer(port) {
+  const extraArgs = arguments[1]?.extraArgs || [];
+  const envPatch = arguments[1]?.env || {};
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [SERVER_SCRIPT], {
+    const proc = spawn(process.execPath, [SERVER_SCRIPT, ...extraArgs], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: {
@@ -314,6 +324,7 @@ function startServer(port) {
         DEMO_SETUP_DIR: SETUP_DIR,
         DEMO_BOARD_SETUP_ROOT: BOARD_SETUP_ROOT,
         DEMO_CARDS_PATTERN: CARD_PATTERN,
+        ...envPatch,
       },
     });
     let ready = false;
@@ -338,6 +349,27 @@ function startServer(port) {
   });
 }
 
+async function stopServer(proc) {
+  if (!proc) return;
+  if (proc.exitCode !== null) return;
+  proc.kill();
+  await new Promise((resolve) => proc.once('exit', resolve));
+}
+
+function startBoardSseWorker() {
+  const sseClientId = `server-http-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const sseUrl = `${BASE}/sse?clientId=${encodeURIComponent(sseClientId)}`;
+  const worker = new Worker(SSE_WORKER_SCRIPT, {
+    workerData: { sseUrl },
+  });
+  worker.on('message', (msg) => {
+    if (msg.type === 'frame') applyFrame(msg.payload);
+    else if (msg.type === 'error') console.error(`[sse-worker] ${msg.message}`);
+  });
+  worker.on('error', (err) => console.error(`[sse-worker] uncaught: ${err.message}`));
+  return worker;
+}
+
 // ---------------------------------------------------------------------------
 // Test sequence
 // ---------------------------------------------------------------------------
@@ -346,7 +378,7 @@ console.log('\n=== live board HTTP+SSE smoke test ===');
 console.log(`target: ${BASE}`);
 console.log(`card pattern: ${CARD_PATTERN}`);
 
-const serverProc = await startServer(PORT);
+let serverProc = await startServer(PORT);
 let sseWorker = null;
 let chatSseClient = null;
 let chatSseClientId = '';
@@ -366,16 +398,7 @@ try {
   console.log('[T0.1] init-board ok');
 
   console.log('\n=== T0 Step 2: start SSE worker ===');
-  const sseClientId = `server-http-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const sseUrl = `${BASE}/sse?clientId=${encodeURIComponent(sseClientId)}`;
-  sseWorker = new Worker(SSE_WORKER_SCRIPT, {
-    workerData: { sseUrl },
-  });
-  sseWorker.on('message', (msg) => {
-    if (msg.type === 'frame') applyFrame(msg.payload);
-    else if (msg.type === 'error') console.error(`[sse-worker] ${msg.message}`);
-  });
-  sseWorker.on('error', (err) => console.error(`[sse-worker] uncaught: ${err.message}`));
+  sseWorker = startBoardSseWorker();
 
   const initialPayload = await waitForInitialPayload();
   const cardCount = Array.isArray(initialPayload.cardDefinitions) ? initialPayload.cardDefinitions.length : 0;
@@ -681,6 +704,126 @@ try {
   }, 30_000, 'T3b processing clear');
   assert(!!t2bProcessingCleared, 'T3b processing clear not observed');
   console.log('[T3b] ok: upload protocol (system/user) and chat protocol (.processing/user/assistant/.processing clear) observed');
+
+  // ── T3c: assistant failure path clears processing and surfaces failure ──
+  console.log('\n=== T3c: assistant failure clears processing and surfaces error ===');
+
+  try {
+    await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/unsubscribe-sse`, { clientId: chatSseClientId });
+  } catch { /* ignore */ }
+  if (chatSseClient) {
+    chatSseClient.close();
+    chatSseClient = null;
+  }
+  chatSseClientId = '';
+  if (sseWorker) {
+    await sseWorker.terminate();
+    sseWorker = null;
+  }
+  await stopServer(serverProc);
+  serverProc = null;
+  resetNs();
+
+  const failureSetupDir = `${SETUP_DIR}-failure`;
+  const failureBoardSetupRoot = path.join(failureSetupDir, 'boards');
+  fs.rmSync(failureSetupDir, { recursive: true, force: true });
+
+  const failureFlowPath = path.join(failureSetupDir, 'chat-flow-failure.json');
+  const failureConfigPath = path.join(failureSetupDir, 'server-config.failure.json');
+  const baseConfig = JSON.parse(fs.readFileSync(path.join(BOARD_DIR, 'server-config.json'), 'utf-8'));
+  const failureFlow = JSON.parse(fs.readFileSync(path.join(BOARD_DIR, 'server', 'chat-flow', 'flow-steps.json'), 'utf-8'));
+  failureFlow.steps.copilot_assistant.handler.whatToRun.value = './server/chat-flow/does-not-exist.js';
+  fs.mkdirSync(path.dirname(failureFlowPath), { recursive: true });
+  fs.writeFileSync(failureFlowPath, JSON.stringify(failureFlow, null, 2) + '\n', 'utf-8');
+  baseConfig.boards[BOARD_ID].regular.chatHandlerFlowPath = failureFlowPath;
+  fs.writeFileSync(failureConfigPath, JSON.stringify(baseConfig, null, 2) + '\n', 'utf-8');
+
+  serverProc = await startServer(PORT, {
+    extraArgs: ['--config', failureConfigPath],
+    env: {
+      DEMO_SETUP_DIR: failureSetupDir,
+      DEMO_BOARD_SETUP_ROOT: failureBoardSetupRoot,
+    },
+  });
+
+  const t3cRegRes = await httpJson('POST', `http://127.0.0.1:${PORT}/api/boards`, { id: BOARD_ID, label: 'Live' });
+  assert(t3cRegRes.status === 200 || t3cRegRes.status === 201 || t3cRegRes.status === 409,
+    `T3c POST /api/boards returned ${t3cRegRes.status}: ${JSON.stringify(t3cRegRes.data)}`);
+
+  const t3cInitRes = await httpGet(`${BASE}/init-board`);
+  assert(t3cInitRes.status === 200, `T3c init-board returned ${t3cInitRes.status}`);
+
+  sseWorker = startBoardSseWorker();
+  await waitForInitialPayload();
+  await waitForAllCompleted(30_000, 'T3c initial completion');
+
+  chatSseClientId = `chat-proto-failure-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  chatSseClient = startSseClient(`${BASE}/sse?clientId=${encodeURIComponent(chatSseClientId)}`, (payload) => {
+    captureChatEvents(payload, CHAT_CARD_ID);
+  });
+  await new Promise((r) => setTimeout(r, 400));
+
+  const t3cSubRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/subscribe-sse`, { clientId: chatSseClientId });
+  assert(t3cSubRes.status === 200, `T3c chat subscribe returned ${t3cSubRes.status}`);
+
+  const t3cBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t3cBefore.status === 200, `T3c pre chats returned ${t3cBefore.status}`);
+  const t3cBeforeMessages = Array.isArray(t3cBefore.data?.messages) ? t3cBefore.data.messages : [];
+  const t3cBeforeCount = t3cBeforeMessages.length;
+  const t3cPrompt = `failure validation ${Date.now()}`;
+
+  const t3cSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+    actionType: 'chat-send',
+    payload: {
+      text: JSON.stringify({
+        prompt: t3cPrompt,
+        chatTimeoutMs: 20000,
+      }),
+    },
+  });
+  assert(t3cSendRes.status === 200, `T3c chat-send returned ${t3cSendRes.status}`);
+
+  const t3cUserOrProcessing = await waitForChatPredicate((events) => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const e = events[i];
+      if (e.messageCount >= t3cBeforeCount + 1 || e.processing === true) return e;
+    }
+    return false;
+  }, 30_000, 'T3c user/proc signal');
+  assert(!!t3cUserOrProcessing, 'T3c user/proc signal not observed');
+
+  const t3cFailureOnSse = await waitForChatPredicate((events) => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const e = events[i];
+      if (e.messageCount < t3cBeforeCount + 2) continue;
+      const last = e.messages[e.messages.length - 1];
+      if (last?.role === 'system' && /assistant request failed/i.test(String(last.text || ''))) return e;
+    }
+    return false;
+  }, 45_000, 'T3c surfaced failure message');
+  assert(!!t3cFailureOnSse, 'T3c surfaced failure message not observed on SSE');
+
+  const t3cProcessingCleared = await waitForChatPredicate((events) => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const e = events[i];
+      if (e.messageCount >= t3cBeforeCount + 2 && e.processing === false) return e;
+    }
+    return false;
+  }, 30_000, 'T3c processing clear');
+  assert(!!t3cProcessingCleared, 'T3c processing clear not observed');
+
+  const t3cAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t3cAfter.status === 200, `T3c post chats returned ${t3cAfter.status}`);
+  const t3cAfterMessages = Array.isArray(t3cAfter.data?.messages) ? t3cAfter.data.messages : [];
+  const t3cNewMessages = t3cAfterMessages.slice(t3cBeforeCount);
+  assert(t3cNewMessages.length >= 2, `T3c expected at least 2 new chat messages, got ${t3cNewMessages.length}`);
+  const t3cUser = t3cNewMessages.find((m) => m?.role === 'user');
+  const t3cFailureMsg = t3cNewMessages.find((m) => m?.role === 'system' && /assistant request failed/i.test(String(m?.text || '')));
+  const t3cAssistantMsg = t3cNewMessages.find((m) => m?.role === 'assistant');
+  assert(!!t3cUser && typeof t3cUser.id === 'string', 'T3c missing user chat message');
+  assert(!!t3cFailureMsg && typeof t3cFailureMsg.id === 'string', 'T3c missing surfaced failure chat message');
+  assert(!t3cAssistantMsg, 'T3c should not append an assistant message on handler failure');
+  console.log('[T3c] ok: failure surfaced via system chat message and processing cleared');
   }
 
   console.log('\n=== All smoke checks passed ===\n');
@@ -691,8 +834,7 @@ try {
     } catch { /* ignore */ }
   }
   if (chatSseClient) chatSseClient.close();
-  serverProc.kill();
-  await new Promise((r) => serverProc.on('exit', r));
+  await stopServer(serverProc);
   if (sseWorker) await sseWorker.terminate();
 
   // Clean up the test setup directory
