@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * scripts/sqlite/seed-cpmV2.cjs — Extend compliance.db with V2 historical data.
+ * seed-cpmV2.cjs — Extend compliance.db with V2 historical data.
  *
  * Adds historical eval_results rows for earlier run dates so the drift-trend
  * card has multiple data points to chart. Run AFTER seed-cpm.cjs.
  *
  * Usage:
- *   node scripts/sqlite/seed-cpmV2.cjs [--db <name>]
+ *   node seed-cpmV2.cjs [--db <name>]
  *
- * Default db: compliance.db (resolved via .retain/ directory).
+ * Default db: compliance.db (resolved via sqlite-handler/.retain directory).
  */
 
 const Database = require('better-sqlite3');

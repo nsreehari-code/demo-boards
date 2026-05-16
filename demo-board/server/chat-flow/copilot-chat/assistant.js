@@ -101,7 +101,14 @@ function buildPrompt(cId, history) {
 function runWrapper(prompt, sessionDir, workingDir) {
   const fallbackProjectRoot = chatFlowRoot ? path.resolve(chatFlowRoot, '..', '..') : process.cwd();
   const effectiveProjectRoot = projectRoot || fallbackProjectRoot;
-  const wrapperPath = path.resolve(effectiveProjectRoot, 'scripts', 'copilot', 'wrapper.py');
+  const wrapperPath = path.resolve(
+    effectiveProjectRoot,
+    'server',
+    'board-worker',
+    'source-def-flows',
+    'copilot-handler',
+    'copilot-wrapper.py',
+  );
   const python = process.platform === 'win32' ? 'python' : 'python3';
   const tmpBase = os.tmpdir();
   const ts = Date.now();

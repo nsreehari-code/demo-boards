@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * scripts/sqlite/seed-cpm.cjs — Create and seed the CPM compliance database.
+ * seed-cpm.cjs — Create and seed the CPM compliance database.
  *
  * Usage:
- *   node scripts/sqlite/seed-cpm.cjs [--db <path>]
+ *   node seed-cpm.cjs [--db <path>]
  *
- * Default db path: demo-board/scripts/sqlite/.retain/compliance.db (relative to demo-boards root).
+ * Default db path: sqlite-handler/.retain/compliance.db.
  */
 
 const Database = require('better-sqlite3');

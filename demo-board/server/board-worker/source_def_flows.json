@@ -295,7 +295,7 @@
         "strategy": "mock-db-lookup"
       },
       "manifest": {
-        "description": "Query a SQLite database via scripts/sqlite/query.cjs.",
+        "description": "Query a SQLite database via the sqlite handler's local query runner.",
         "inputSchema": {
           "sqlite": {
             "type": "object",

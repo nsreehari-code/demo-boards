@@ -28,39 +28,32 @@ import sys
 import time
 
 
-# ---------------------------------------------------------------------------
-# Sandboxed local file tools — only paths under allowed_dirs are accessible
-# ---------------------------------------------------------------------------
-
 def is_path_allowed(filepath, allowed_dirs):
-    """Check if filepath is under one of the allowed directories."""
     real = os.path.realpath(filepath)
     return any(real.startswith(os.path.realpath(d) + os.sep) or real == os.path.realpath(d)
                for d in allowed_dirs)
 
 
 def tool_read_file(arguments, allowed_dirs):
-    """Read a file's content. Returns text content or error string."""
     path = arguments.get("path", "")
     if not path:
         return json.dumps({"error": "path is required"})
     if not is_path_allowed(path, allowed_dirs):
-        return json.dumps({"error": f"access denied: path not in allowed directories"})
+        return json.dumps({"error": "access denied: path not in allowed directories"})
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read(512_000)  # cap at 512KB
+            content = f.read(512_000)
         return json.dumps({"path": path, "content": content})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 def tool_list_dir(arguments, allowed_dirs):
-    """List directory contents. Returns entries with type (file/dir)."""
     path = arguments.get("path", "")
     if not path:
         return json.dumps({"error": "path is required"})
     if not is_path_allowed(path, allowed_dirs):
-        return json.dumps({"error": f"access denied: path not in allowed directories"})
+        return json.dumps({"error": "access denied: path not in allowed directories"})
     try:
         entries = []
         for name in sorted(os.listdir(path)):
@@ -72,10 +65,6 @@ def tool_list_dir(arguments, allowed_dirs):
 
 
 def tool_patch_json_file(arguments, allowed_dirs):
-    """Patch a JSON file at a specific path. Reads the file, sets the value at
-    json_path (dot-separated, with [N] for array indices), writes back, then
-    validates the card schema. If validation fails, the original file is restored
-    and errors are returned so the agent can correct its patch."""
     filepath = arguments.get("path", "")
     json_path = arguments.get("json_path", "")
     value = arguments.get("value")
@@ -90,11 +79,9 @@ def tool_patch_json_file(arguments, allowed_dirs):
     except Exception as e:
         return json.dumps({"error": f"cannot read file: {e}"})
 
-    # Navigate json_path: supports dot-separated keys and [N] array indices
-    # e.g. "card_data.items[2].done" -> data["card_data"]["items"][2]["done"]
     import re
     segments = re.split(r'\.|(?=\[)', json_path)
-    segments = [s for s in segments if s]  # drop empty
+    segments = [s for s in segments if s]
     obj = data
     try:
         for seg in segments[:-1]:
@@ -103,7 +90,6 @@ def tool_patch_json_file(arguments, allowed_dirs):
                 obj = obj[int(m.group(1))]
             else:
                 obj = obj[seg]
-        # Set the final key/index
         last = segments[-1]
         m = re.match(r'^\[(\d+)\]$', last)
         if m:
@@ -119,10 +105,8 @@ def tool_patch_json_file(arguments, allowed_dirs):
     except Exception as e:
         return json.dumps({"error": f"cannot write file: {e}"})
 
-    # Validate the patched card against the live card schema
     validation = _validate_card(filepath)
     if not validation.get("ok", True):
-        # Restore original file content
         try:
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(original_content)
@@ -138,11 +122,10 @@ def tool_patch_json_file(arguments, allowed_dirs):
 
 
 def _validate_card(filepath):
-    """Run validate-card.cjs to check the card against validateLiveCardSchema."""
     import subprocess
     validate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "validate-card.cjs")
     if not os.path.exists(validate_script):
-        return {"ok": True, "errors": []}  # skip if script missing
+        return {"ok": True, "errors": []}
     try:
         result = subprocess.run(
             ["node", validate_script, filepath],
@@ -151,19 +134,18 @@ def _validate_card(filepath):
         )
         return json.loads(result.stdout.strip()) if result.stdout.strip() else {"ok": True, "errors": []}
     except Exception:
-        return {"ok": True, "errors": []}  # don't block on validation failure
+        return {"ok": True, "errors": []}
 
 
 def tool_read_pdf(arguments, allowed_dirs):
-    """Extract text from a PDF file. Returns page-by-page text content."""
     filepath = arguments.get("path", "")
-    pages = arguments.get("pages")  # optional: list of 0-based page numbers
+    pages = arguments.get("pages")
     if not filepath:
         return json.dumps({"error": "path is required"})
     if not is_path_allowed(filepath, allowed_dirs):
         return json.dumps({"error": "access denied: path not in allowed directories"})
     try:
-        import fitz  # PyMuPDF
+        import fitz
     except ImportError:
         return json.dumps({"error": "PyMuPDF not installed. Run: pip install PyMuPDF"})
     try:
@@ -177,7 +159,7 @@ def tool_read_pdf(arguments, allowed_dirs):
             text = doc[i].get_text()
             total_chars += len(text)
             result_pages.append({"page": i, "text": text})
-            if total_chars > 200_000:  # cap to stay well under 1MB API limit
+            if total_chars > 200_000:
                 result_pages.append({"page": "truncated", "text": f"... output truncated at {total_chars} chars. Use 'pages' parameter to read specific pages."})
                 break
         total_pages = len(doc)
@@ -195,12 +177,7 @@ TOOL_HANDLERS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Function tool definitions for the agent
-# ---------------------------------------------------------------------------
-
 def build_function_tools():
-    """Build FunctionToolDefinition objects for read_file and list_dir."""
     from azure.ai.agents.models import FunctionToolDefinition, FunctionDefinition
 
     return [
@@ -283,15 +260,7 @@ def build_function_tools():
     ]
 
 
-# ---------------------------------------------------------------------------
-# Run loop with tool call handling
-# ---------------------------------------------------------------------------
-
 def run_agent_with_tools(client, agent_id, user_prompt, allowed_dirs, max_iterations=10):
-    """
-    Create a thread, run the agent, and handle function tool calls in a loop.
-    Returns (thread_id, final_content_string).
-    """
     from azure.ai.agents.models import (
         AgentThreadCreationOptions,
         ThreadMessageOptions,
@@ -299,10 +268,8 @@ def run_agent_with_tools(client, agent_id, user_prompt, allowed_dirs, max_iterat
         ToolOutput,
     )
 
-    # Build tools list only if we have allowed dirs
     tools = build_function_tools() if allowed_dirs else []
 
-    # Describe available directories in the prompt if tools are active
     if allowed_dirs:
         dirs_desc = "\n".join(f"  - {d}" for d in allowed_dirs)
         user_prompt += (
@@ -310,7 +277,6 @@ def run_agent_with_tools(client, agent_id, user_prompt, allowed_dirs, max_iterat
             f"for browsing these directories:\n{dirs_desc}"
         )
 
-    # Create thread + start run
     run = client.create_thread_and_run(
         agent_id=agent_id,
         thread=AgentThreadCreationOptions(
@@ -320,9 +286,7 @@ def run_agent_with_tools(client, agent_id, user_prompt, allowed_dirs, max_iterat
     )
     thread_id = run.thread_id
 
-    # Poll and handle tool calls
     for _ in range(max_iterations):
-        # Wait for run to reach a terminal or action-required state
         while run.status in ("queued", "in_progress"):
             time.sleep(1)
             run = client.runs.get(thread_id=thread_id, run_id=run.id)
@@ -331,7 +295,6 @@ def run_agent_with_tools(client, agent_id, user_prompt, allowed_dirs, max_iterat
             break
 
         if run.status == "requires_action":
-            # Extract tool calls
             action = run.required_action
             tool_calls = action.submit_tool_outputs.tool_calls
             outputs = []
@@ -345,7 +308,6 @@ def run_agent_with_tools(client, agent_id, user_prompt, allowed_dirs, max_iterat
                     result = json.dumps({"error": f"unknown tool: {fn_name}"})
                 outputs.append(ToolOutput(tool_call_id=tc.id, output=result))
 
-            # Submit tool outputs and continue
             run = client.runs.submit_tool_outputs(
                 thread_id=thread_id,
                 run_id=run.id,
@@ -353,10 +315,8 @@ def run_agent_with_tools(client, agent_id, user_prompt, allowed_dirs, max_iterat
             )
             continue
 
-        # Any other terminal status (failed, cancelled, expired)
         break
 
-    # Get final assistant message
     content = ""
     if run.status == "completed":
         content_obj = client.messages.get_last_message_text_by_role(
@@ -392,23 +352,20 @@ def main():
         print("ERROR: prompt is required", file=sys.stderr)
         sys.exit(1)
 
-    # Import Azure libs (fail fast with clear message if missing)
     try:
         from azure.identity import DefaultAzureCredential
         from azure.ai.agents import AgentsClient
     except ImportError as e:
         print(
             f"ERROR: Missing required package: {e.name}. "
-            "Install with: pip install azure-identity azure-ai-projects azure-ai-agents",
+            "Install with: pip install -r server/board-worker/source-def-flows/foundry-handler/requirements.txt",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    # Authenticate via MI / az login
     credential = DefaultAzureCredential()
     client = AgentsClient(endpoint=endpoint, credential=credential)
 
-    # If result_shape is specified, append a JSON hint to the prompt
     user_prompt = prompt
     if result_shape:
         user_prompt += (
@@ -421,7 +378,6 @@ def main():
         client, agent_id, user_prompt, allowed_dirs
     )
 
-    # Clean up thread
     try:
         client.threads.delete(thread_id)
     except Exception:
@@ -431,7 +387,6 @@ def main():
         print(f"ERROR: Agent run {run.status}: {run.last_error}", file=sys.stderr)
         sys.exit(1)
 
-    # Try to parse as JSON
     result = content
     try:
         parsed = json.loads(content)

@@ -2,7 +2,7 @@
 """
 Copilot CLI wrapper for board task executor.
 
-Replaces copilot_wrapper.bat + copilot_wrapper_helper.ps1 with a single
+Replaces the older board-level Copilot wrapper scripts with a single
 cross-platform Python script.
 
 Responsibilities:
@@ -14,7 +14,7 @@ Responsibilities:
   - Logging (per-agent, rotated to last 50)
 
 Usage (called by demo-task-executor.js, not directly):
-  python scripts/copilot/wrapper.py \\
+    python server/board-worker/source-def-flows/copilot-handler/copilot-wrapper.py \\
     --output-file <path>     Result written here (JSON or raw text)
     --session-dir <path>     Persistent dir for session UUID
     --cwd <path>             Working directory for copilot

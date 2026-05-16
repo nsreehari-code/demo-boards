@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * scripts/sqlite/seed-optimus.cjs — Create and seed the OPTIMUS threat hunting database.
+ * seed-optimus.cjs — Create and seed the OPTIMUS threat hunting database.
  *
  * Usage:
- *   node scripts/sqlite/seed-optimus.cjs [--db <path>]
+ *   node seed-optimus.cjs [--db <path>]
  *
- * Default db path: demo-board/scripts/sqlite/.retain/optimus.db
+ * Default db path: sqlite-handler/.retain/optimus.db
  */
 
 const Database = require('better-sqlite3');

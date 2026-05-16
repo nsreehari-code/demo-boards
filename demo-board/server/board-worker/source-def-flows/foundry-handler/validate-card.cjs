@@ -16,9 +16,23 @@ if (!filePath) {
   process.exit(1);
 }
 
+function resolveBoardLiveCardsBin() {
+  try {
+    const yamlFlowPkg = require.resolve('yaml-flow/package.json');
+    const nodeModulesDir = path.dirname(path.dirname(yamlFlowPkg));
+    const binName = process.platform === 'win32' ? 'board-live-cards.cmd' : 'board-live-cards';
+    return path.join(nodeModulesDir, '.bin', binName);
+  } catch {
+    return null;
+  }
+}
+
 try {
   const cardJson = fs.readFileSync(filePath, 'utf-8');
-  const cliBin = path.join(__dirname, '..', '..', 'node_modules', '.bin', 'board-live-cards');
+  const cliBin = resolveBoardLiveCardsBin();
+  if (!cliBin) {
+    throw new Error('Cannot resolve board-live-cards CLI');
+  }
   const stdout = execFileSync(cliBin, ['validate-tmp-card'], {
     input: cardJson,
     encoding: 'utf-8',

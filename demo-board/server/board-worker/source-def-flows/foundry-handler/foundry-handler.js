@@ -3,13 +3,18 @@
 /**
  * foundry-handler.js — Azure AI Foundry Agent invocation via Managed Identity.
  *
- * Shells out to scripts/foundry/invoke.py (uses azure-identity + azure-ai-inference).
+ * Shells out to the local invoke.py helper (uses azure-identity + azure-ai-inference).
  * No API keys needed — uses DefaultAzureCredential (MI in prod, az login locally).
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const HANDLER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const FOUNDRY_CONFIG_FILE = path.join(HANDLER_DIR, 'foundry-config.json');
+const FOUNDRY_INVOKE_SCRIPT = path.join(HANDLER_DIR, 'invoke.py');
 
 function interpolate(template, args) {
   return String(template).replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key) => {
@@ -21,6 +26,14 @@ function interpolate(template, args) {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+}
+
+function loadFoundryConfig() {
+  try {
+    return readJson(FOUNDRY_CONFIG_FILE);
+  } catch {
+    return {};
+  }
 }
 
 const DEFAULT_PROMPT_CONTEXT = {
@@ -40,27 +53,20 @@ const DEFAULT_PROMPT_CONTEXT = {
 export async function execute(context) {
   const sourceDef = context?.sourceDef || {};
   const extra = context?.extra || {};
-  const executorDir = context?.executorDir || process.cwd();
   const promptContext = context?.promptContext || DEFAULT_PROMPT_CONTEXT;
+  const handlerConfig = loadFoundryConfig();
 
   const cfg = typeof sourceDef.foundry === 'object' ? sourceDef.foundry : {};
   if (!cfg.prompt_template) {
     return { result: 'failure', data: { error: 'foundry: prompt_template is required' }, error: 'missing prompt_template' };
   }
 
-  // Load defaults from server-config.json (endpoint + agent_id)
-  let foundryDefaults = {};
-  try {
-    const serverConfig = readJson(path.join(executorDir, 'server-config.json'));
-    foundryDefaults = serverConfig.foundry || {};
-  } catch {}
-
-  const endpoint = cfg.endpoint || foundryDefaults.endpoint;
-  const agentId  = cfg.agent_id || foundryDefaults.agent_id;
+  const endpoint = cfg.endpoint || handlerConfig.endpoint;
+  const agentId  = cfg.agent_id || handlerConfig.agent_id;
   if (!endpoint || !agentId) {
     return {
       result: 'failure',
-      data: { error: 'foundry: endpoint and agent_id must be set in source_def or server-config.json' },
+      data: { error: 'foundry: endpoint and agent_id must be set in source_def or foundry-config.json' },
       error: 'missing endpoint/agent_id',
     };
   }
@@ -90,10 +96,9 @@ export async function execute(context) {
   fs.writeFileSync(reqFile, JSON.stringify(invokeReq), 'utf-8');
 
   const python = process.platform === 'win32' ? 'python' : 'python3';
-  const invokePath = path.join(executorDir, 'scripts', 'foundry', 'invoke.py');
 
   try {
-    execFileSync(python, [invokePath, '--input', reqFile, '--output', resFile], {
+    execFileSync(python, [FOUNDRY_INVOKE_SCRIPT, '--input', reqFile, '--output', resFile], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 10 * 1024 * 1024,
