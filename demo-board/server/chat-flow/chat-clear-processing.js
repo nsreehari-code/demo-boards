@@ -1,13 +1,8 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs';
 import path from 'node:path';
-import {
-  createArtifactsStore,
-  createFsBoardPlatformAdapter,
-  parseRef,
-  serializeRef,
-} from 'yaml-flow/board-live-cards-node';
+import fs from 'node:fs';
+import { createFsBoardChatStorage } from 'yaml-flow/board-live-cards-node';
 
 function readJsonStdin() {
   try {
@@ -20,36 +15,25 @@ function readJsonStdin() {
   }
 }
 
-function resolveChatDir(extra) {
-  if (typeof extra.chatDir === 'string' && extra.chatDir.trim()) return extra.chatDir;
-  if (typeof extra.chatsBlobBasePath === 'string' && typeof extra.chatsKeyPrefix === 'string') {
-    const cardPart = String(extra.chatsKeyPrefix).split('/')[0];
-    return path.join(extra.chatsBlobBasePath, cardPart);
-  }
-  return '';
-}
-
-function resolveMarker(extra) {
-  const chatsRoot = typeof extra.chatsRoot === 'string' ? extra.chatsRoot : (typeof extra.chatsBlobBasePath === 'string' ? extra.chatsBlobBasePath : '');
-  const markerKey = typeof extra.chatProcessingMarkerKey === 'string' ? extra.chatProcessingMarkerKey.trim() : '';
-  const markerPath = typeof extra.processingMarkerPath === 'string' && extra.processingMarkerPath.trim()
-    ? extra.processingMarkerPath.trim()
-    : path.join(resolveChatDir(extra), '.processing');
-  return { chatsRoot, markerKey, markerPath };
-}
-
 const input = readJsonStdin();
-const { chatsRoot, markerKey, markerPath } = resolveMarker(input);
+const boardSetupRoot = typeof input.boardSetupRoot === 'string' ? input.boardSetupRoot : '';
+const boardRuntimeDir = typeof input.boardRuntimeDir === 'string' ? input.boardRuntimeDir : 'runtime';
+const cardId = typeof input.cardId === 'string' ? input.cardId : '';
 
 try {
-  if (markerKey && chatsRoot) {
-    const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: chatsRoot }));
-    const adapter = createFsBoardPlatformAdapter(baseRef, { suppressSpawn: true });
-    const artifacts = createArtifactsStore(adapter.blobStorage(''));
-    artifacts.remove(markerKey);
-  } else if (markerPath) {
-    fs.rmSync(markerPath, { force: true });
+  if (!boardSetupRoot || !cardId) {
+    process.stderr.write('chat-clear-processing requires boardSetupRoot and cardId\n');
+    process.exit(1);
   }
+
+  const boardDir = path.join(boardSetupRoot, boardRuntimeDir || 'runtime');
+  if (!fs.existsSync(boardDir)) {
+    process.stdout.write(JSON.stringify({ cleared: true, skipped: true }));
+    process.exit(0);
+  }
+
+  const chatStorage = createFsBoardChatStorage(boardDir);
+  chatStorage.setProcessing(cardId, false);
   process.stdout.write(JSON.stringify({ cleared: true }));
 } catch (err) {
   process.stderr.write((err instanceof Error ? err.message : String(err)) + '\n');

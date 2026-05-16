@@ -7,11 +7,13 @@
   },
   "steps": {
     "open_turn": {
-      "description": "Validate the chat invocation, resolve chat context, and create the processing marker",
-      "produces_data": ["boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "runtimeStatusDir", "cardsDir", "projectRoot", "chatFlowRoot", "userText", "chatsRoot", "cardPrefix", "chatDir", "chatsBlobBasePath", "chatsKeyPrefix", "lastChatFile", "serverUrl", "probe", "chatHandlerMode", "chatCopilotTimeoutMs", "chatTimeMs", "chatProcessingMarkerKey", "processingMarkerPath"],
+      "description": "Resolve the current user turn from the HTTP chat API and parse any chat envelope options",
+      "produces_data": ["boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "runtimeStatusDir", "cardsDir", "projectRoot", "chatFlowRoot", "userText", "serverUrl", "apiBasePath", "lastChatEntryId", "probe", "chatHandlerMode", "chatCopilotTimeoutMs", "chatTimeMs"],
       "input_validations": [
-        "$type(lastChatFile) = \"string\" and $length(lastChatFile) > 0",
-        "$type(chatDir) = \"string\" and $length(chatDir) > 0 or ($type(chatsBlobBasePath) = \"string\" and $length(chatsBlobBasePath) > 0 and $type(chatsKeyPrefix) = \"string\" and $length(chatsKeyPrefix) > 0)"
+        "$type(cardId) = \"string\" and $length(cardId) > 0",
+        "$type(serverUrl) = \"string\" and $length(serverUrl) > 0",
+        "$type(apiBasePath) = \"string\" and $length(apiBasePath) > 0",
+        "$type(lastChatEntryId) = \"string\" and $length(lastChatEntryId) > 0"
       ],
       "handler": {
         "type": "ref",
@@ -47,8 +49,8 @@
       }
     },
     "copilot_assistant": {
-      "description": "Run the Copilot-backed assistant logic to generate the reply",
-      "expects_data": ["userText", "boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "runtimeStatusDir", "cardsDir", "projectRoot", "chatFlowRoot", "chatDir", "chatsBlobBasePath", "lastChatFile", "serverUrl", "chatCopilotTimeoutMs"],
+      "description": "Run the Copilot-backed assistant logic to generate the reply from the HTTP chat history",
+      "expects_data": ["userText", "boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "runtimeStatusDir", "cardsDir", "projectRoot", "chatFlowRoot", "serverUrl", "apiBasePath", "lastChatEntryId", "chatCopilotTimeoutMs"],
       "produces_data": ["replyText"],
       "input_validations": [
         "$type(userText) = \"string\""
@@ -91,12 +93,13 @@
       }
     },
     "write_reply": {
-      "description": "Append the assistant reply to the chat store",
-      "expects_data": ["chatsRoot", "cardPrefix", "replyText"],
-      "produces_data": ["replyFile", "replyText"],
+      "description": "Append the assistant reply via the HTTP chat API and clear processing",
+      "expects_data": ["serverUrl", "apiBasePath", "cardId", "replyText"],
+      "produces_data": ["replyText", "replyId"],
       "input_validations": [
-        "$type(chatsRoot) = \"string\" and $length(chatsRoot) > 0",
-        "$type(cardPrefix) = \"string\" and $length(cardPrefix) > 0",
+        "$type(serverUrl) = \"string\" and $length(serverUrl) > 0",
+        "$type(apiBasePath) = \"string\" and $length(apiBasePath) > 0",
+        "$type(cardId) = \"string\" and $length(cardId) > 0",
         "$type(replyText) = \"string\""
       ],
       "handler": {

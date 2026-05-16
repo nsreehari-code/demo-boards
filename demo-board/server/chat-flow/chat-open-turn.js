@@ -1,13 +1,6 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
-import path from 'node:path';
-import {
-  createArtifactsStore,
-  createFsBoardPlatformAdapter,
-  parseRef,
-  serializeRef,
-} from 'yaml-flow/board-live-cards-node';
 
 function readJsonStdin() {
   try {
@@ -77,67 +70,7 @@ function parseChatEnvelope(raw) {
   }
 }
 
-function resolveChatDir(extra) {
-  if (typeof extra.chatDir === 'string' && extra.chatDir.trim()) return extra.chatDir;
-  if (typeof extra.chatsBlobBasePath === 'string' && typeof extra.chatsKeyPrefix === 'string') {
-    const cardPart = String(extra.chatsKeyPrefix).split('/')[0];
-    return path.join(extra.chatsBlobBasePath, cardPart);
-  }
-  return '';
-}
-
-function resolveChatStoreContext(extra, chatDir) {
-  if (typeof extra.chatsBlobBasePath === 'string' && typeof extra.chatsKeyPrefix === 'string') {
-    return {
-      chatsRoot: extra.chatsBlobBasePath,
-      cardPrefix: String(extra.chatsKeyPrefix).split('/')[0],
-    };
-  }
-  if (chatDir) {
-    return {
-      chatsRoot: path.dirname(chatDir),
-      cardPrefix: path.basename(chatDir),
-    };
-  }
-  return { chatsRoot: '', cardPrefix: '' };
-}
-
-function resolveProcessingMarker(extra, chatsRoot, cardPrefix, chatDir) {
-  const markerKey = typeof extra.chatProcessingMarkerKey === 'string' ? extra.chatProcessingMarkerKey.trim() : '';
-  if (markerKey) {
-    return {
-      markerKey,
-      markerPath: path.join(chatsRoot, markerKey),
-    };
-  }
-  if (chatDir) {
-    return {
-      markerKey: '',
-      markerPath: path.join(chatDir, '.processing'),
-    };
-  }
-  return { markerKey: '', markerPath: '' };
-}
-
-function createMarker(chatsRoot, markerKey, markerPath) {
-  const body = JSON.stringify({ status: 'processing', updated_at: new Date().toISOString() });
-  if (markerKey && chatsRoot) {
-    const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: chatsRoot }));
-    const adapter = createFsBoardPlatformAdapter(baseRef, { suppressSpawn: true });
-    const artifacts = createArtifactsStore(adapter.blobStorage(''));
-    artifacts.putText(markerKey, body, 'application/json; charset=utf-8');
-    return;
-  }
-  if (markerPath) {
-    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
-    fs.writeFileSync(markerPath, body, 'utf-8');
-  }
-}
-
 const extra = readJsonStdin();
-const chatDir = resolveChatDir(extra);
-const { chatsRoot, cardPrefix } = resolveChatStoreContext(extra, chatDir);
-const lastChatFile = typeof extra.lastChatFile === 'string' ? extra.lastChatFile : '';
 const boardId = typeof extra.boardId === 'string' ? extra.boardId : '';
 const cardId = typeof extra.cardId === 'string' ? extra.cardId : '';
 const boardSetupRoot = typeof extra.boardSetupRoot === 'string' ? extra.boardSetupRoot : '';
@@ -146,25 +79,42 @@ const runtimeStatusDir = typeof extra.runtimeStatusDir === 'string' ? extra.runt
 const cardsDir = typeof extra.cardsDir === 'string' ? extra.cardsDir : 'cards';
 const projectRoot = typeof extra.projectRoot === 'string' ? extra.projectRoot : '';
 const chatFlowRoot = typeof extra.chatFlowRoot === 'string' ? extra.chatFlowRoot : '';
-const chatsBlobBasePath = typeof extra.chatsBlobBasePath === 'string' ? extra.chatsBlobBasePath : chatsRoot;
-const chatsKeyPrefix = typeof extra.chatsKeyPrefix === 'string' ? extra.chatsKeyPrefix : `${cardPrefix}/chats`;
-const serverUrl = typeof extra.serverUrl === 'string' ? extra.serverUrl : '';
+const serverUrl = typeof extra.serverUrl === 'string' ? extra.serverUrl.replace(/\/$/, '') : '';
+const apiBasePath = typeof extra.apiBasePath === 'string' ? extra.apiBasePath : '/api/board';
+const lastChatEntryId = typeof extra.lastChatEntryId === 'string' ? extra.lastChatEntryId : '';
 
-if (!chatDir || !lastChatFile || !chatsRoot || !cardPrefix) {
-  process.stderr.write('chat-open-turn requires chatDir, lastChatFile, chatsRoot, and cardPrefix\n');
+if (!cardId || !serverUrl || !apiBasePath || !lastChatEntryId) {
+  process.stderr.write('chat-open-turn requires cardId, serverUrl, apiBasePath, and lastChatEntryId\n');
   process.exit(1);
 }
 
-const lastChatPath = path.join(chatDir, lastChatFile);
-let rawUserText = '';
+let messageText = '';
 try {
-  rawUserText = fs.readFileSync(lastChatPath, 'utf-8');
-} catch {
-  process.stderr.write('could not read last chat file\n');
+  const chatsUrl = `${serverUrl}${apiBasePath}/cards/${encodeURIComponent(cardId)}/chats`;
+  const res = await fetch(chatsUrl);
+  if (!res.ok) {
+    process.stderr.write(`chat-open-turn could not fetch chat history: HTTP ${res.status}\n`);
+    process.exit(1);
+  }
+  const data = await res.json();
+  const messages = Array.isArray(data?.messages) ? data.messages : [];
+  const currentUser = messages.find((message) =>
+    typeof message?.id === 'string'
+    && message.id === lastChatEntryId
+    && message.role === 'user'
+  );
+  messageText = typeof currentUser?.text === 'string' ? currentUser.text : '';
+} catch (err) {
+  process.stderr.write(`chat-open-turn could not fetch current user turn: ${err instanceof Error ? err.message : String(err)}\n`);
   process.exit(1);
 }
 
-const envelope = parseChatEnvelope(rawUserText);
+if (!messageText) {
+  process.stderr.write('chat-open-turn could not resolve user text for lastChatEntryId\n');
+  process.exit(1);
+}
+
+const envelope = parseChatEnvelope(messageText);
 const userText = envelope.userText;
 const probe = envelope.probe;
 const chatHandlerMode = envelope.chatHandlerMode;
@@ -173,14 +123,6 @@ const chatCopilotTimeoutMs = envelope.chatCopilotTimeoutMs
     ? Math.floor(Number(extra.chatCopilotTimeoutMs))
     : 300000);
 const chatTimeMs = envelope.chatTimeMs;
-
-const { markerKey, markerPath } = resolveProcessingMarker(extra, chatsRoot, cardPrefix, chatDir);
-try {
-  createMarker(chatsRoot, markerKey, markerPath);
-} catch (err) {
-  process.stderr.write((err instanceof Error ? err.message : String(err)) + '\n');
-  process.exit(1);
-}
 
 process.stdout.write(JSON.stringify({
   boardId,
@@ -192,17 +134,11 @@ process.stdout.write(JSON.stringify({
   projectRoot,
   chatFlowRoot,
   userText,
-  chatsRoot,
-  cardPrefix,
-  chatDir,
-  chatsBlobBasePath,
-  chatsKeyPrefix,
-  lastChatFile,
   serverUrl,
+  apiBasePath,
+  lastChatEntryId,
   probe,
   chatHandlerMode,
   chatCopilotTimeoutMs,
   chatTimeMs,
-  chatProcessingMarkerKey: markerKey,
-  processingMarkerPath: markerPath,
 }));

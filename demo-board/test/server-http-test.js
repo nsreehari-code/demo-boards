@@ -10,7 +10,7 @@
  * T1: PATCH holdings (+1 row) → verify recomputation (holdings +1, positions +1)
  *
  * Usage:
- *   node test/demo-http-test.js [--port 7799]
+ *   node test/server-http-test.js [--port 7799]
  */
 
 import { spawn } from 'node:child_process';
@@ -54,6 +54,10 @@ function resolveSetupDirRoot() {
   const configPath = path.join(BOARD_DIR, 'server-config.json');
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const boardSetupDir = cfg?.boards?.[BOARD_ID]?.setupDir;
+    if (typeof boardSetupDir === 'string' && boardSetupDir.trim()) {
+      return path.resolve(BOARD_DIR, boardSetupDir.trim());
+    }
     if (cfg && typeof cfg.setupDir === 'string' && cfg.setupDir.trim()) {
       return path.resolve(BOARD_DIR, cfg.setupDir.trim());
     }
@@ -398,9 +402,7 @@ try {
   console.log(`[T0] ok: ${t0Positions.length} positions computed`);
 
   // ── T1: PATCH holdings (+1 row), verify recomputation ──
-  // Temporarily disabled while file upload protocol tests are being reshaped.
-  if (false) {
-    console.log('\n=== T1: patch holdings (+1 row) ===');
+  console.log('\n=== T1: patch holdings (+1 row) ===');
 
   // Read current holdings from card store
   const portfolioCardRes = await httpGet(`${BASE}/cards/card-portfolio`);
@@ -442,10 +444,8 @@ try {
     `Expected holdings rows +1 (before=${t0HoldingsCount}, after=${afterHoldingsCount})`);
   assert(afterPositionsCount === t0PositionsCount + 1,
     `Expected positions rows +1 (before=${t0PositionsCount}, after=${afterPositionsCount})`);
-
-    console.log(`[T1] ok: holdings ${t0HoldingsCount}->${afterHoldingsCount}, ` +
-      `positions ${t0PositionsCount}->${afterPositionsCount}, added=${newTicker}`);
-  }
+  console.log(`[T1] ok: holdings ${t0HoldingsCount}->${afterHoldingsCount}, ` +
+    `positions ${t0PositionsCount}->${afterPositionsCount}, added=${newTicker}`);
 
   // ── T2: plain file upload API + card_data.files + download roundtrip ──
   console.log('\n=== T2: plain file upload -> card_data.files -> download ===');
@@ -549,12 +549,12 @@ try {
   assert(t2After.status === 200, `T3 post chats returned ${t2After.status}`);
   const t2AfterMessages = Array.isArray(t2After.data?.messages) ? t2After.data.messages : [];
   const t2NewMessages = t2AfterMessages.slice(t2BeforeCount);
-  assert(t2NewMessages.length >= 2, `T3 expected at least 2 new chat files, got ${t2NewMessages.length}`);
+  assert(t2NewMessages.length >= 2, `T3 expected at least 2 new chat messages, got ${t2NewMessages.length}`);
   const t2User = t2NewMessages.find((m) => m?.role === 'user');
   const t2AssistantMsg = t2NewMessages.find((m) => m?.role === 'assistant');
-  assert(!!t2User && /\d{3}_user\.txt$/i.test(String(t2User.stored_name || '')), 'T3 user file naming mismatch');
+  assert(!!t2User && typeof t2User.id === 'string', 'T3 user chat message missing id');
   assert(String(t2User?.text || '').includes(t2ProbePrompt), 'T3 user file text mismatch');
-  assert(!!t2AssistantMsg && /\d{3}_assistant\.txt$/i.test(String(t2AssistantMsg.stored_name || '')), 'T3 assistant file naming mismatch');
+  assert(!!t2AssistantMsg && typeof t2AssistantMsg.id === 'string', 'T3 assistant chat message missing id');
   assert(String(t2AssistantMsg?.text || '').includes(`Echo: ${t2ProbePrompt}`), 'T3 assistant echo file content mismatch');
   console.log('[T3] ok: probe lifecycle observed (processing/user any-order, assistant write, processing clear)');
 
@@ -571,7 +571,6 @@ try {
     payload: {
       text: JSON.stringify({
         prompt: t2aPrompt,
-        probe: false,
         chatTimeoutMs: 180000,
       }),
     },
@@ -593,9 +592,9 @@ try {
   assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
   const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
   const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
-  assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat files, got ${t2aNewMessages.length}`);
+  assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat messages, got ${t2aNewMessages.length}`);
   const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
-  assert(!!t2aAssistantMsg && /\d{3}_assistant\.txt$/i.test(String(t2aAssistantMsg.stored_name || '')), 'T3a assistant file naming mismatch');
+  assert(!!t2aAssistantMsg && typeof t2aAssistantMsg.id === 'string', 'T3a assistant chat message missing id');
   assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T3a assistant file content missing paris');
   console.log('[T3a] ok: non-probe response contains paris');
 
@@ -619,9 +618,9 @@ try {
   assert(t2bAfterUpload.status === 200, `T3b chats after upload returned ${t2bAfterUpload.status}`);
   const t2bUploadMessages = Array.isArray(t2bAfterUpload.data?.messages) ? t2bAfterUpload.data.messages : [];
   const t2bUploadNewMessages = t2bUploadMessages.slice(t2bBeforeCount);
-  const t2bUploadSystem = t2bUploadNewMessages.find((m) => m?.role === 'system' && /\d{3}_system\.txt$/i.test(String(m.stored_name || '')));
+  const t2bUploadSystem = t2bUploadNewMessages.find((m) => m?.role === 'system');
   assert(!!t2bUploadSystem, 'T3b upload protocol missing system chat file');
-  assert(String(t2bUploadSystem?.text || '').toLowerCase().includes('uploaded'), 'T3b upload system message does not describe uploaded file');
+  assert(String(t2bUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3b upload system message does not describe uploaded file');
 
   const t2bSendBaseline = t2bUploadMessages.length;
 
@@ -663,13 +662,14 @@ try {
   assert(t2bAfter.status === 200, `T3b post chats returned ${t2bAfter.status}`);
   const t2bAfterMessages = Array.isArray(t2bAfter.data?.messages) ? t2bAfter.data.messages : [];
   const t2bNewMessages = t2bAfterMessages.slice(t2bSendBaseline);
-  assert(t2bNewMessages.length >= 2, `T3b expected at least 2 chat files after send, got ${t2bNewMessages.length}`);
+  assert(t2bNewMessages.length >= 2, `T3b expected at least 2 chat messages after send, got ${t2bNewMessages.length}`);
 
-  const t2bUser = t2bNewMessages.find((m) => m?.role === 'user' && /\d{3}_user\.txt$/i.test(String(m.stored_name || '')));
-  const t2bAssistantMsg = t2bNewMessages.find((m) => m?.role === 'assistant' && /\d{3}_assistant\.txt$/i.test(String(m.stored_name || '')));
+  const t2bUser = t2bNewMessages.find((m) => m?.role === 'user');
+  const t2bAssistantMsg = t2bNewMessages.find((m) => m?.role === 'assistant');
 
-  assert(!!t2bUser, 'T3b missing user chat file notification');
-  assert(!!t2bAssistantMsg, 'T3b missing assistant chat file notification');
+  assert(!!t2bUser && typeof t2bUser.id === 'string', 'T3b missing user chat message notification');
+  assert(!!t2bAssistantMsg && typeof t2bAssistantMsg.id === 'string', 'T3b missing assistant chat message notification');
+  assert(Array.isArray(t2bUser?.files) && t2bUser.files.length === 1, 'T3b user chat message missing uploaded file metadata');
   assert(String(t2bAssistantMsg?.text || '').includes(`Echo: ${t2bPrompt}`), 'T3b assistant file content mismatch');
 
   const t2bProcessingCleared = await waitForChatPredicate((events) => {

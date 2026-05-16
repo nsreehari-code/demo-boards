@@ -1,56 +1,43 @@
 #!/usr/bin/env node
 
-import {
-  createArtifactsStore,
-  createChatArtifactsStore,
-  createFsBoardPlatformAdapter,
-  parseRef,
-  serializeRef,
-} from 'yaml-flow/board-live-cards-node';
+import fs from 'node:fs';
 
 function readJsonStdin() {
-  let raw = '';
-  process.stdin.setEncoding('utf-8');
-  return new Promise((resolve) => {
-    process.stdin.on('data', (chunk) => { raw += chunk; });
-    process.stdin.on('end', () => {
-      try {
-        const parsed = JSON.parse(raw || '{}');
-        resolve(parsed && typeof parsed === 'object' ? parsed : {});
-      } catch {
-        resolve({});
-      }
-    });
-  });
+  try {
+    const raw = fs.readFileSync(0, 'utf-8').trim();
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
-const input = await readJsonStdin();
-const chatsRoot = typeof input.chatsRoot === 'string' ? input.chatsRoot : '';
-const cardPrefix = typeof input.cardPrefix === 'string' ? input.cardPrefix : '';
+const input = readJsonStdin();
+const cardId = typeof input.cardId === 'string' ? input.cardId : '';
+const serverUrl = typeof input.serverUrl === 'string' ? input.serverUrl.replace(/\/$/, '') : '';
+const apiBasePath = typeof input.apiBasePath === 'string' ? input.apiBasePath : '/api/board';
 const replyText = typeof input.replyText === 'string' ? input.replyText : '';
 
-if (!chatsRoot || !cardPrefix) {
-  process.stderr.write('chat-write-assistant requires chatsRoot and cardPrefix\n');
+if (!cardId || !serverUrl) {
+  process.stderr.write('chat-write-assistant requires cardId and serverUrl\n');
   process.exit(1);
 }
 
 try {
-  const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: chatsRoot }));
-  const adapter = createFsBoardPlatformAdapter(baseRef, { suppressSpawn: true });
-  const artifacts = createArtifactsStore(adapter.blobStorage(''));
-  const chats = createChatArtifactsStore(artifacts, { indexFileName: '.index.json' });
-  const serial = chats.nextSerial(cardPrefix);
-  const storedName = `${String(serial).padStart(3, '0')}_assistant.txt`;
-
-  artifacts.putText(`${cardPrefix}/${storedName}`, replyText + '\n', 'text/plain; charset=utf-8');
-  chats.appendIndexRecord(cardPrefix, {
-    serial,
-    role: 'assistant',
-    stored_name: storedName,
-    path: `${cardPrefix}/chats/${storedName}`,
-    updated_at: new Date().toISOString(),
+  const postUrl = `${serverUrl}${apiBasePath}/cards/${encodeURIComponent(cardId)}/chats`;
+  const postRes = await fetch(postUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'assistant', text: replyText, files: [], done: true }),
   });
-  process.stdout.write(JSON.stringify({ replyFile: storedName, replyText }));
+  if (!postRes.ok) {
+    const err = await postRes.text();
+    process.stderr.write(`chat-write-assistant POST failed: ${err}\n`);
+    process.exit(1);
+  }
+  const postData = await postRes.json();
+  process.stdout.write(JSON.stringify({ replyId: postData?.id, replyText }));
 } catch (err) {
   process.stderr.write((err instanceof Error ? err.message : String(err)) + '\n');
   process.exit(1);
