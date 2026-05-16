@@ -19,7 +19,6 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import http from 'node:http';
 import fs from 'node:fs';
-import net from 'node:net';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,29 +28,26 @@ const portArg = cliArgs.indexOf('--port');
 const cliPort = portArg !== -1 ? parseInt(cliArgs[portArg + 1], 10) : NaN;
 const RUN_ID = `run-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 
-async function pickFreePort() {
-  return await new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const addr = server.address();
-      const port = addr && typeof addr === 'object' ? addr.port : 0;
-      server.close((err) => {
-        if (err) { reject(err); return; }
-        resolve(port);
-      });
-    });
-  });
-}
-
-const PORT = Number.isInteger(cliPort) && cliPort > 0 ? cliPort : await pickFreePort();
-
 const BOARD_ID = 'live';
-const BASE = `http://127.0.0.1:${PORT}/api/boards/${BOARD_ID}`;
 const SERVER_SCRIPT = path.resolve(__dirname, '..', 'demo-server.js');
 const SERVER_DIR = path.dirname(SERVER_SCRIPT);
 const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
 const CARD_PATTERN = 'cardT*';
+const CHAT_CARD_ID = 'card-portfolio';
+
+function resolveServerPort() {
+  if (Number.isInteger(cliPort) && cliPort > 0) return cliPort;
+  const configPath = path.join(SERVER_DIR, 'server-config.json');
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const configured = Number(cfg?.port);
+    if (Number.isInteger(configured) && configured > 0) return configured;
+  } catch { /* ignore */ }
+  return 7799;
+}
+
+const PORT = resolveServerPort();
+const BASE = `http://127.0.0.1:${PORT}/api/boards/${BOARD_ID}`;
 
 // Resolve and wipe the setup directory so each test run starts clean.
 function resolveSetupDirRoot() {
@@ -81,6 +77,7 @@ const NS = {
   statusSummary: null,
   statusGeneration: 0,
   computedValues: {},
+  chatEvents: [],
 };
 
 function applyFrame(payload) {
@@ -113,6 +110,69 @@ function applyFrame(payload) {
       if (n && n.kind === 'computed_values' && n.cardId) {
         NS.computedValues[n.cardId] = n.values;
       }
+    }
+  }
+}
+
+function normalizeSseChunkBuffer(buf, chunk) {
+  return (buf + chunk.replace(/\r\n/g, '\n'));
+}
+
+function parseSseBlocks(buffer) {
+  const payloads = [];
+  let buf = buffer;
+  while (true) {
+    const idx = buf.indexOf('\n\n');
+    if (idx === -1) break;
+    const block = buf.slice(0, idx);
+    buf = buf.slice(idx + 2);
+    const dataLines = [];
+    for (const line of block.split('\n')) {
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).replace(/^ /, ''));
+      }
+    }
+    const data = dataLines.join('\n');
+    if (!data) continue;
+    try {
+      payloads.push(JSON.parse(data));
+    } catch { /* ignore malformed */ }
+  }
+  return { payloads, remainder: buf };
+}
+
+function startSseClient(sseUrl, onPayload) {
+  const req = http.get(sseUrl, (res) => {
+    let buf = '';
+    res.setEncoding('utf-8');
+    res.on('data', (chunk) => {
+      buf = normalizeSseChunkBuffer(buf, chunk);
+      const parsed = parseSseBlocks(buf);
+      buf = parsed.remainder;
+      for (const payload of parsed.payloads) onPayload(payload);
+    });
+  });
+  req.on('error', () => {});
+  return {
+    close() {
+      try { req.destroy(); } catch { /* */ }
+    },
+  };
+}
+
+function captureChatEvents(payload, cardId) {
+  if (!payload || payload.kind !== 'notification-batch' || !Array.isArray(payload.notifications)) return;
+  for (const n of payload.notifications) {
+    if (n && n.kind === 'card_chats' && n.cardId === cardId) {
+      const messages = Array.isArray(n.messages) ? n.messages : [];
+      NS.chatEvents.push({
+        at: Date.now(),
+        cardId: n.cardId,
+        processing: !!n.processing,
+        receiving: !!n.receiving,
+        messageCount: messages.length,
+        messages,
+      });
     }
   }
 }
@@ -152,6 +212,9 @@ const waitForAllCompleted = (ms = 60_000, label = 'all completed') =>
     if (s && s.card_count > 0 && s.completed === s.card_count) return s;
     return false;
   }, ms, label);
+
+const waitForChatPredicate = (predicate, ms, label) =>
+  waitUntil(() => predicate(NS.chatEvents) || false, ms, label);
 
 function httpGet(url) {
   return new Promise((resolve, reject) => {
@@ -236,6 +299,8 @@ console.log(`card pattern: ${CARD_PATTERN}`);
 
 const serverProc = await startServer(PORT);
 let sseWorker = null;
+let chatSseClient = null;
+let chatSseClientId = '';
 
 try {
   // ── T0: init-board, SSE connect, wait for initial completion ──
@@ -335,8 +400,126 @@ try {
   console.log(`[T1] ok: holdings ${t0HoldingsCount}->${afterHoldingsCount}, ` +
     `positions ${t0PositionsCount}->${afterPositionsCount}, added=${newTicker}`);
 
+  // ── T2: probe chat protocol over API + SSE ──
+  console.log('\n=== T2: probe chat protocol (SSE lifecycle) ===');
+  chatSseClientId = `chat-proto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  chatSseClient = startSseClient(`${BASE}/sse?clientId=${encodeURIComponent(chatSseClientId)}`, (payload) => {
+    captureChatEvents(payload, CHAT_CARD_ID);
+  });
+  await new Promise((r) => setTimeout(r, 400));
+
+  const subRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/subscribe-sse`, { clientId: chatSseClientId });
+  assert(subRes.status === 200, `chat subscribe returned ${subRes.status}`);
+
+  const t2Before = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t2Before.status === 200, `T2 pre chats returned ${t2Before.status}`);
+  const t2BeforeMessages = Array.isArray(t2Before.data?.messages) ? t2Before.data.messages : [];
+  const t2BeforeCount = t2BeforeMessages.length;
+  const t2ProbePrompt = `Probe protocol validation ${Date.now()}`;
+
+  const t2SendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+    actionType: 'chat-send',
+    payload: {
+      text: JSON.stringify({
+        prompt: t2ProbePrompt,
+        probe: true,
+        chatTimeMs: 2200,
+        chatTimeoutMs: 20000,
+      }),
+    },
+  });
+  assert(t2SendRes.status === 200, `T2 chat-send returned ${t2SendRes.status}`);
+
+  const t2UserOrProcessing = await waitForChatPredicate((events) => {
+    const slice = events.filter((e) => e.messageCount >= t2BeforeCount + 1 || e.processing === true);
+    return slice.length > 0 ? slice[slice.length - 1] : false;
+  }, 30_000, 'T2 user/proc signal');
+  assert(!!t2UserOrProcessing, 'T2 missing user/proc signal');
+
+  const t2Assistant = await waitForChatPredicate((events) => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const e = events[i];
+      if (e.messageCount < t2BeforeCount + 2) continue;
+      const last = e.messages[e.messages.length - 1];
+      if (last?.role === 'assistant' && String(last.text || '').includes(`Echo: ${t2ProbePrompt}`)) {
+        return e;
+      }
+    }
+    return false;
+  }, 45_000, 'T2 assistant echo');
+  assert(!!t2Assistant, 'T2 assistant echo not observed on SSE');
+
+  const t2ProcessingCleared = await waitForChatPredicate((events) => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const e = events[i];
+      if (e.messageCount >= t2BeforeCount + 2 && e.processing === false) return e;
+    }
+    return false;
+  }, 30_000, 'T2 processing clear');
+  assert(!!t2ProcessingCleared, 'T2 processing clear not observed');
+
+  const t2After = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t2After.status === 200, `T2 post chats returned ${t2After.status}`);
+  const t2AfterMessages = Array.isArray(t2After.data?.messages) ? t2After.data.messages : [];
+  const t2NewMessages = t2AfterMessages.slice(t2BeforeCount);
+  assert(t2NewMessages.length >= 2, `T2 expected at least 2 new chat files, got ${t2NewMessages.length}`);
+  const t2User = t2NewMessages.find((m) => m?.role === 'user');
+  const t2AssistantMsg = t2NewMessages.find((m) => m?.role === 'assistant');
+  assert(!!t2User && /\d{3}_user\.txt$/i.test(String(t2User.stored_name || '')), 'T2 user file naming mismatch');
+  assert(String(t2User?.text || '').includes(t2ProbePrompt), 'T2 user file text mismatch');
+  assert(!!t2AssistantMsg && /\d{3}_assistant\.txt$/i.test(String(t2AssistantMsg.stored_name || '')), 'T2 assistant file naming mismatch');
+  assert(String(t2AssistantMsg?.text || '').includes(`Echo: ${t2ProbePrompt}`), 'T2 assistant echo file content mismatch');
+  console.log('[T2] ok: probe lifecycle observed (processing/user any-order, assistant write, processing clear)');
+
+  // ── T2a: non-probe chat protocol over API + SSE ──
+  console.log('\n=== T2a: non-probe chat protocol (expect paris) ===');
+  const t2aBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t2aBefore.status === 200, `T2a pre chats returned ${t2aBefore.status}`);
+  const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
+  const t2aBeforeCount = t2aBeforeMessages.length;
+  const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
+
+  const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+    actionType: 'chat-send',
+    payload: {
+      text: JSON.stringify({
+        prompt: t2aPrompt,
+        probe: false,
+        chatTimeoutMs: 180000,
+      }),
+    },
+  });
+  assert(t2aSendRes.status === 200, `T2a chat-send returned ${t2aSendRes.status}`);
+
+  const t2aAssistant = await waitForChatPredicate((events) => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const e = events[i];
+      if (e.messageCount < t2aBeforeCount + 2) continue;
+      const last = e.messages[e.messages.length - 1];
+      if (last?.role === 'assistant' && /paris/i.test(String(last.text || ''))) return e;
+    }
+    return false;
+  }, 240_000, 'T2a assistant response with paris');
+  assert(!!t2aAssistant, 'T2a assistant response with paris not observed on SSE');
+
+  const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t2aAfter.status === 200, `T2a post chats returned ${t2aAfter.status}`);
+  const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
+  const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
+  assert(t2aNewMessages.length >= 2, `T2a expected at least 2 new chat files, got ${t2aNewMessages.length}`);
+  const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
+  assert(!!t2aAssistantMsg && /\d{3}_assistant\.txt$/i.test(String(t2aAssistantMsg.stored_name || '')), 'T2a assistant file naming mismatch');
+  assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T2a assistant file content missing paris');
+  console.log('[T2a] ok: non-probe response contains paris');
+
   console.log('\n=== All smoke checks passed ===\n');
 } finally {
+  if (chatSseClientId) {
+    try {
+      await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/unsubscribe-sse`, { clientId: chatSseClientId });
+    } catch { /* ignore */ }
+  }
+  if (chatSseClient) chatSseClient.close();
   serverProc.kill();
   await new Promise((r) => serverProc.on('exit', r));
   if (sseWorker) await sseWorker.terminate();

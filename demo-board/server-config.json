@@ -1,5 +1,8 @@
 {
   "port": 7799,
+  "chatFlowTimeoutMs": 1800000,
+  "chatInvokeRefTimeoutMs": 1800000,
+  "chatCopilotTimeoutMs": 1800000,
   "serverMetaStoreRef": "b64:eyJraW5kIjoiZnMtcGF0aCIsInZhbHVlIjoiLi8uc2VydmVyLW1ldGEifQ",
   "foundry": {
     "endpoint": "https://sz-foundry.services.ai.azure.com/api/projects/sz-project",
@@ -12,7 +15,7 @@
       "regular": {
         "seedCardsDir": "./live/cards",
         "taskExecutorPath": "./demo-task-executor.js",
-        "chatHandlerPath": "./demo-chat-handler.js"
+        "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
     "ingest1": {
@@ -21,7 +24,7 @@
       "regular": {
         "seedCardsDir": "./ingest1/cards",
         "taskExecutorPath": "./demo-task-executor.js",
-        "chatHandlerPath": "./demo-chat-handler.js"
+        "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
     "cpm": {
@@ -30,7 +33,7 @@
       "regular": {
         "seedCardsDir": "./cpm/cards",
         "taskExecutorPath": "./demo-task-executor.js",
-        "chatHandlerPath": "./demo-chat-handler.js"
+        "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
     "cpmV2": {
@@ -39,7 +42,7 @@
       "regular": {
         "seedCardsDir": "./cpmV2/cards",
         "taskExecutorPath": "./demo-task-executor.js",
-        "chatHandlerPath": "./demo-chat-handler.js"
+        "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
     "optimus": {
@@ -48,7 +51,7 @@
       "regular": {
         "seedCardsDir": "./optimus/cards",
         "taskExecutorPath": "./demo-task-executor.js",
-        "chatHandlerPath": "./demo-chat-handler.js"
+        "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     }
   }

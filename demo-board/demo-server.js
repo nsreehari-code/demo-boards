@@ -15,17 +15,25 @@ import {
   createFsBoardPlatformAdapter,
   createNodeSpawnInvocationAdapter,
   createArtifactsStore,
-  executionRefFromScriptPath,
+  invokeRefSync,
   parseRef,
   serializeRef,
 } from 'yaml-flow/board-live-cards-node';
+import {
+  createStepMachineChatFlowRunner,
+} from 'yaml-flow/step-machine-public';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const cliArgs = process.argv.slice(2);
 
 function loadServerConfig() {
-  const configPath = path.join(__dirname, 'server-config.json');
+  const cliConfigIndex = cliArgs.indexOf('--config');
+  const cliConfigPath = cliConfigIndex !== -1 ? cliArgs[cliConfigIndex + 1] : '';
+  const configuredPath = String(cliConfigPath || process.env.DEMO_SERVER_CONFIG || 'server-config.json').trim();
+  const configPath = path.isAbsolute(configuredPath)
+    ? configuredPath
+    : path.join(__dirname, configuredPath);
   if (!fs.existsSync(configPath)) return {};
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
@@ -39,6 +47,69 @@ function loadServerConfig() {
 function resolveFromConfig(configValue) {
   if (typeof configValue !== 'string' || !configValue.trim()) return null;
   return path.resolve(__dirname, configValue);
+}
+
+function loadJsonFromConfig(configValue) {
+  const resolved = resolveFromConfig(configValue);
+  if (!resolved || !fs.existsSync(resolved)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(resolved, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTimeoutMs(value, fallback = null) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
+}
+
+function pickTimeoutMs(...values) {
+  for (const value of values) {
+    const n = normalizeTimeoutMs(value, null);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+function applyFlowTimeout(flow, timeoutMs) {
+  if (!flow || typeof flow !== 'object') return flow;
+  const normalized = normalizeTimeoutMs(timeoutMs, null);
+  if (normalized === null) return flow;
+  return {
+    ...flow,
+    settings: {
+      ...(flow.settings && typeof flow.settings === 'object' ? flow.settings : {}),
+      timeout_ms: normalized,
+    },
+  };
+}
+
+function buildChatHandlerFlowFromScript(scriptPath, timeoutMs = null) {
+  if (!scriptPath) return null;
+  const resolved = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(__dirname, scriptPath);
+  const resolvedTimeoutMs = normalizeTimeoutMs(timeoutMs, 300000);
+  return {
+    id: 'demo-chat-script-handler',
+    settings: { start_step: 'respond', max_total_steps: 5, timeout_ms: resolvedTimeoutMs },
+    steps: {
+      respond: {
+        description: 'Run the demo board chat responder from a script path',
+        handler: {
+          type: 'ref',
+          howToRun: 'local-node',
+          whatToRun: { kind: 'fs-path', value: resolved },
+          meta: 'chat-handler',
+        },
+        transitions: { success: 'completed', failure: 'failed' },
+      },
+    },
+    terminal_states: {
+      completed: { description: 'Chat response completed', return_intent: 'success', return_artifacts: false },
+      failed: { description: 'Chat response failed', return_intent: 'failure', return_artifacts: false },
+    },
+  };
 }
 
 function resolveKindRefFromConfig(configValue) {
@@ -58,10 +129,18 @@ function resolveKindRefFromConfig(configValue) {
 }
 
 const serverConfig = loadServerConfig();
+const configuredChatFlowTimeoutMs = normalizeTimeoutMs(serverConfig.chatFlowTimeoutMs, null);
+const configuredInvokeRefTimeoutMs = normalizeTimeoutMs(serverConfig.chatInvokeRefTimeoutMs, 300000);
+const configuredCopilotTimeoutMs = normalizeTimeoutMs(serverConfig.chatCopilotTimeoutMs, 300000);
 
 // Resolve top-level config defaults (used as fallbacks for per-board config)
 const configuredTaskExecutorPath = resolveFromConfig(serverConfig.taskExecutorPath);
 const configuredChatHandlerPath = resolveFromConfig(serverConfig.chatHandlerPath);
+const configuredFlowFromPath = loadJsonFromConfig(serverConfig.chatHandlerFlowPath);
+const configuredChatHandlerFlow = applyFlowTimeout(
+  configuredFlowFromPath || buildChatHandlerFlowFromScript(configuredChatHandlerPath, configuredChatFlowTimeoutMs),
+  configuredChatFlowTimeoutMs,
+);
 const configuredInferenceAdapterPath = resolveFromConfig(serverConfig.inferenceAdapterPath);
 const configuredStepMachineCliPath = resolveFromConfig(serverConfig.stepMachineCliPath);
 const configuredServerMetaStoreRef = resolveKindRefFromConfig(serverConfig.serverMetaStoreRef);
@@ -135,7 +214,11 @@ function namedPipePath(pipeName) {
 function makeExecutionRef(scriptPath, extra) {
   if (!scriptPath) return undefined;
   const resolved = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(process.cwd(), scriptPath);
-  return executionRefFromScriptPath(resolved, extra);
+  return {
+    howToRun: 'local-node',
+    whatToRun: serializeRef({ kind: 'fs-path', value: resolved }),
+    ...(extra !== undefined ? { meta: extra } : {}),
+  };
 }
 
 function createNamedPipeNotificationTransport() {
@@ -197,7 +280,7 @@ const logger = { info: console.log, warn: console.warn, error: console.error };
 const boardConfigEntries = serverConfig.boards ? Object.entries(serverConfig.boards) : [];
 const boardConfigMap = new Map(boardConfigEntries);
 
-function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerPath, infAdapterPath, boardId, executionExtra = {}) {
+function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, executionExtra = {}) {
   fs.mkdirSync(boardDir, { recursive: true });
   const runtimeCardsDir = path.join(path.dirname(boardDir), 'cards');
   const runtimeCardStoreDir = path.join(runtimeCardsDir, 'store');
@@ -221,7 +304,7 @@ function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerPath,
     outputsStoreRef: serializeRef({ kind: 'fs-path', value: path.join(path.dirname(boardDir), 'runtime-out', '.outputs') }),
     notifyRef: { kind: 'named-pipe', value: namedPipePath(notifyChannel) },
     taskExecutorRef: makeExecutionRef(taskExecPath, executionExtra),
-    chatHandlerRef: makeExecutionRef(chatHandlerPath),
+    chatHandlerFlow,
     inferenceAdapterRef: makeExecutionRef(infAdapterPath),
   };
 }
@@ -273,8 +356,18 @@ const runtime = createMultiBoardServerRuntime({
     const cardsDir = resolveFromConfig(regular.seedCardsDir) || (entry?.cardsDir ? path.resolve(entry.cardsDir) : null);
     const taskExecPath = resolveFromConfig(regular.taskExecutorPath) || (entry?.taskExecutorPath || configuredTaskExecutorPath);
     const chatHandlerPath = resolveFromConfig(regular.chatHandlerPath) || (entry?.chatHandlerPath || configuredChatHandlerPath);
+    const boardFlowTimeoutMs = configuredChatFlowTimeoutMs;
+    const chatHandlerFlow = applyFlowTimeout(
+      loadJsonFromConfig(regular.chatHandlerFlowPath)
+        || entry?.chatHandlerFlow
+        || buildChatHandlerFlowFromScript(chatHandlerPath, boardFlowTimeoutMs)
+        || configuredChatHandlerFlow,
+      boardFlowTimeoutMs,
+    );
     const infAdapterPath = resolveFromConfig(regular.inferenceAdapterPath) || (entry?.inferenceAdapterPath || configuredInferenceAdapterPath);
     const stepMachinePath = resolveFromConfig(regular.stepMachineCliPath || cfg?.stepMachineCliPath) || (entry?.stepMachineCliPath || configuredStepMachineCliPath);
+    const chatInvokeRefTimeoutMs = configuredInvokeRefTimeoutMs;
+    const chatCopilotTimeoutMs = configuredCopilotTimeoutMs;
 
     if (chatHandlerPath && !process.env.DEMO_CHAT_HANDLER_PATH) {
       process.env.DEMO_CHAT_HANDLER_PATH = chatHandlerPath;
@@ -287,17 +380,29 @@ const runtime = createMultiBoardServerRuntime({
     const boardRoot = boardSetupRootOverride
       ? path.resolve(boardSetupRootOverride, `board-${boardId}`)
       : (cfg?.setupDir ? path.resolve(__dirname, cfg.setupDir) : path.join(setupDir, `board-${boardId}`));
+    const chatFlowRoot = path.resolve(__dirname, 'server', 'chat-flow');
     fs.mkdirSync(boardRoot, { recursive: true });
     const boardDir = path.join(boardRoot, 'runtime');
     const runtimeCardsDir = path.join(boardRoot, 'cards');
+    const flowRunner = createStepMachineChatFlowRunner({
+      invokeRef: (ref, stepArgs) => invokeRefSync(ref, stepArgs, {
+        cliDir: __dirname,
+        cwd: __dirname,
+        label: 'demo-chat-flow',
+        timeoutMs: chatInvokeRefTimeoutMs,
+      }),
+    });
     const baseExecutionExtra = {
       boardSetupRoot: boardRoot,
+      projectRoot: __dirname,
+      chatFlowRoot,
       chatsBlobBasePath: path.join(runtimeCardsDir, 'chats'),
       serverUrl: `http://127.0.0.1:${PORT}`,
+      chatCopilotTimeoutMs,
       ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
     };
 
-    const baseCfg = buildBoardContextConfig('base', boardDir, taskExecPath, chatHandlerPath, infAdapterPath, boardId, baseExecutionExtra);
+    const baseCfg = buildBoardContextConfig('base', boardDir, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, baseExecutionExtra);
     const boards = [baseCfg];
 
     demoPrepSetup({ cardsDir, boardDir });
@@ -307,12 +412,16 @@ const runtime = createMultiBoardServerRuntime({
       boardId,
       boards,
       invocationAdapter,
+      chatFlowRunner: flowRunner,
       notificationTransport,
       logger,
       serverUrl: `http://127.0.0.1:${PORT}`,
       executionExtra: {
         boardSetupRoot: boardRoot,
+        projectRoot: __dirname,
+        chatFlowRoot,
         chatsBlobBasePath: path.join(runtimeCardsDir, 'chats'),
+        chatCopilotTimeoutMs,
         ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
       },
     });

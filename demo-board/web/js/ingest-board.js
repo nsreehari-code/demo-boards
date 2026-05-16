@@ -244,6 +244,24 @@
           id: 'ingest-chat-' + model.id,
           data: { fileAttach: true, placeholder: meta.chatPlaceholder || 'Type a message...' }
         });
+
+        var activeFiles = model && model.card_data && Array.isArray(model.card_data.files)
+          ? model.card_data.files.filter(Boolean)
+          : [];
+        if (activeFiles.length) {
+          var filesWrap = document.createElement('div');
+          filesWrap.className = 'lc-ingest-files mt-3';
+          var filesLabel = document.createElement('div');
+          filesLabel.className = 'lc-ingest-files-label';
+          filesLabel.textContent = meta.doneLabel || 'Attached files';
+          var filesContent = document.createElement('div');
+          filesWrap.appendChild(filesLabel);
+          filesWrap.appendChild(filesContent);
+          body.appendChild(filesWrap);
+          context.renderBuiltin(null, 'text', activeFiles, filesContent, {
+            data: { format: 'file-links', cardId: model.id }
+          });
+        }
       }
     });
   })();
