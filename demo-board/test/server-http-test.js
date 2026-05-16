@@ -721,6 +721,100 @@ try {
   assert(!!t2bProcessingCleared, 'T3b processing clear not observed');
   console.log('[T3b] ok: upload protocol (system/user) and chat protocol (.processing/user/assistant/.processing clear) observed');
 
+  // ── T3f: non-probe chat + file upload protocol over API + SSE ──
+  console.log('\n=== T3f: non-probe chat with file upload protocol ===');
+  const t3fBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t3fBefore.status === 200, `T3f pre chats returned ${t3fBefore.status}`);
+  const t3fBeforeMessages = Array.isArray(t3fBefore.data?.messages) ? t3fBefore.data.messages : [];
+  const t3fBeforeCount = t3fBeforeMessages.length;
+
+  const t3fUploadRes = await httpUploadChatFile(
+    `${BASE}/cards/${CHAT_CARD_ID}/files?inChat=true`,
+    't3f-question.txt',
+    [
+      'Assistant smoke-test reference file.',
+      'Question: what is the capital of japan?',
+      'Response format: reply in lower case using one word only.',
+    ].join('\n'),
+  );
+  assert(t3fUploadRes.status === 200, `T3f file upload returned ${t3fUploadRes.status}`);
+  const t3fUploadedFile = t3fUploadRes.data?.file;
+  assert(t3fUploadedFile && typeof t3fUploadedFile === 'object', 'T3f upload response missing file metadata');
+
+  const t3fAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t3fAfterUpload.status === 200, `T3f chats after upload returned ${t3fAfterUpload.status}`);
+  const t3fUploadMessages = Array.isArray(t3fAfterUpload.data?.messages) ? t3fAfterUpload.data.messages : [];
+  const t3fUploadNewMessages = t3fUploadMessages.slice(t3fBeforeCount);
+  const t3fUploadSystem = t3fUploadNewMessages.find((message) => message?.role === 'system');
+  assert(!!t3fUploadSystem, 'T3f upload protocol missing system chat file');
+  assert(String(t3fUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3f upload system message does not describe uploaded file');
+
+  const t3fSendBaseline = t3fUploadMessages.length;
+  const t3fPrompt = [
+    'Use the attached file as the primary context.',
+    'It contains the geography question and the required answer format.',
+    'Answer the question from the attached file only.',
+    'The question is about the capital of japan.',
+    'Return only the lower-case one-word answer with no commentary or markup.',
+  ].join(' ');
+
+  const t3fSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+    actionType: 'chat-send',
+    payload: {
+      text: JSON.stringify({
+        prompt: t3fPrompt,
+        chatTimeoutMs: 180000,
+      }),
+      files: [t3fUploadedFile],
+    },
+  });
+  assert(t3fSendRes.status === 200, `T3f chat-send returned ${t3fSendRes.status}`);
+
+  const t3fUserOrProcessing = await waitForChatPredicate((events) => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      if (event.messageCount >= t3fSendBaseline + 1 || event.processing === true) return event;
+    }
+    return false;
+  }, 45_000, 'T3f user/proc signal');
+  assert(!!t3fUserOrProcessing, 'T3f user/proc signal not observed');
+
+  const t3fAssistantOnSse = await waitForChatPredicate((events) => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      if (event.messageCount < t3fSendBaseline + 2) continue;
+      const last = event.messages[event.messages.length - 1];
+      if (last?.role === 'assistant' && /tokyo/i.test(String(last.text || ''))) return event;
+    }
+    return false;
+  }, 240_000, 'T3f assistant response with tokyo');
+  assert(!!t3fAssistantOnSse, 'T3f assistant response with tokyo not observed on SSE');
+
+  const t3fAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t3fAfter.status === 200, `T3f post chats returned ${t3fAfter.status}`);
+  const t3fAfterMessages = Array.isArray(t3fAfter.data?.messages) ? t3fAfter.data.messages : [];
+  const t3fNewMessages = t3fAfterMessages.slice(t3fSendBaseline);
+  assert(t3fNewMessages.length >= 2, `T3f expected at least 2 chat messages after send, got ${t3fNewMessages.length}`);
+
+  const t3fUser = t3fNewMessages.find((message) => message?.role === 'user');
+  const t3fAssistantMsg = [...t3fNewMessages].reverse().find((message) => message?.role === 'assistant');
+
+  assert(!!t3fUser && typeof t3fUser.id === 'string', 'T3f missing user chat message notification');
+  assert(Array.isArray(t3fUser?.files) && t3fUser.files.length === 1, 'T3f user chat message missing uploaded file metadata');
+  assert(!!t3fAssistantMsg && typeof t3fAssistantMsg.id === 'string', 'T3f missing assistant chat message notification');
+  assert(/tokyo/i.test(String(t3fAssistantMsg?.text || '')), 'T3f assistant response missing tokyo');
+  assert(!String(t3fAssistantMsg?.text || '').includes('Echo:'), 'T3f assistant response should not be the probe echo path');
+
+  const t3fProcessingCleared = await waitForChatPredicate((events) => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      if (event.messageCount >= t3fSendBaseline + 2 && event.processing === false) return event;
+    }
+    return false;
+  }, 30_000, 'T3f processing clear');
+  assert(!!t3fProcessingCleared, 'T3f processing clear not observed');
+  console.log('[T3f] ok: upload protocol (system/user) and non-probe assistant response observed with processing clear');
+
   // ── T3d: unsubscribe/resubscribe chat SSE notifications ──
   console.log('\n=== T3d: unsubscribe/resubscribe SSE behavior ===');
 
