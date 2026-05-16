@@ -2,7 +2,7 @@
 /**
  * demo-http-test.js
  *
- * Smoke test for demo-board/demo-server.js over HTTP + SSE.
+ * Smoke test for demo-board/server/board-server.js over HTTP + SSE.
  * Targets the 'live' board with --cards-pattern cardT* to load only the 3
  * test cards (cardT-portfolio, cardT-market-prices, cardT-portfolio-value).
  *
@@ -29,15 +29,15 @@ const cliPort = portArg !== -1 ? parseInt(cliArgs[portArg + 1], 10) : NaN;
 const RUN_ID = `run-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 
 const BOARD_ID = 'live';
-const SERVER_SCRIPT = path.resolve(__dirname, '..', 'demo-server.js');
-const SERVER_DIR = path.dirname(SERVER_SCRIPT);
+const BOARD_DIR = path.resolve(__dirname, '..');
+const SERVER_SCRIPT = path.resolve(BOARD_DIR, 'server', 'board-server.js');
 const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
 const CARD_PATTERN = 'cardT*';
 const CHAT_CARD_ID = 'card-portfolio';
 
 function resolveServerPort() {
   if (Number.isInteger(cliPort) && cliPort > 0) return cliPort;
-  const configPath = path.join(SERVER_DIR, 'server-config.json');
+  const configPath = path.join(BOARD_DIR, 'server-config.json');
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     const configured = Number(cfg?.port);
@@ -51,14 +51,14 @@ const BASE = `http://127.0.0.1:${PORT}/api/boards/${BOARD_ID}`;
 
 // Resolve and wipe the setup directory so each test run starts clean.
 function resolveSetupDirRoot() {
-  const configPath = path.join(SERVER_DIR, 'server-config.json');
+  const configPath = path.join(BOARD_DIR, 'server-config.json');
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     if (cfg && typeof cfg.setupDir === 'string' && cfg.setupDir.trim()) {
-      return path.resolve(SERVER_DIR, cfg.setupDir.trim());
+      return path.resolve(BOARD_DIR, cfg.setupDir.trim());
     }
   } catch { /* ignore */ }
-  return path.join(SERVER_DIR, '.demo-setup');
+  return path.join(BOARD_DIR, '.demo-setup');
 }
 
 const SETUP_DIR = path.join(resolveSetupDirRoot(), RUN_ID);

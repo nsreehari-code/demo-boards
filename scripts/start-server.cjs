@@ -9,10 +9,10 @@ const args = process.argv.slice(2);
 const modeFlag = args.find(a => a === '--all' || a === '--backend') || '--backend';
 const boardDirArg = args.find(a => !a.startsWith('--')) || 'default-board';
 const boardDir = path.resolve(workspaceDir, boardDirArg);
-const demoServerPath = path.join(boardDir, 'demo-server.js');
+const boardServerPath = path.join(boardDir, 'server', 'board-server.js');
 
-if (!fs.existsSync(demoServerPath)) {
-  console.error(`[start-server] Missing ${demoServerPath}. Run \"npm run copy-example-board\" first.`);
+if (!fs.existsSync(boardServerPath)) {
+  console.error(`[start-server] Missing ${boardServerPath}. Run "npm run copy-example-board" first.`);
   process.exit(1);
 }
 
@@ -40,7 +40,7 @@ if (modeFlag === '--all') {
   console.log('[start-server] frontend: http://127.0.0.1:8000');
 }
 
-const backend = spawn(process.execPath, [demoServerPath], {
+const backend = spawn(process.execPath, [boardServerPath], {
   cwd: boardDir,
   env: sharedEnv,
   stdio: 'inherit',

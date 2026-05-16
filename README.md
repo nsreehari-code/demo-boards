@@ -48,7 +48,8 @@ demo-boards/
       cards/              <- source cards (git-tracked)
       gandalf-cards/      <- source gandalf cards (git-tracked)
       board-default/      <- runtime state (gitignored)
-    demo-server.js
+    server/
+      board-server.js
     demo-server-config.json
     demo-task-executor.js
     demo-chat-handler.js

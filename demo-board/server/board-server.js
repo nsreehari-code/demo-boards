@@ -24,16 +24,18 @@ import {
 } from 'yaml-flow/step-machine-public';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const SERVER_DIR = path.dirname(__filename);
+const BOARD_ROOT = path.resolve(SERVER_DIR, '..');
 const cliArgs = process.argv.slice(2);
+const SERVER_CONFIG = path.join(BOARD_ROOT, 'server-config.json');
 
 function loadServerConfig() {
   const cliConfigIndex = cliArgs.indexOf('--config');
   const cliConfigPath = cliConfigIndex !== -1 ? cliArgs[cliConfigIndex + 1] : '';
-  const configuredPath = String(cliConfigPath || process.env.DEMO_SERVER_CONFIG || 'server-config.json').trim();
-  const configPath = path.isAbsolute(configuredPath)
-    ? configuredPath
-    : path.join(__dirname, configuredPath);
+  const configuredPath = String(cliConfigPath || '').trim();
+  const configPath = configuredPath
+    ? (path.isAbsolute(configuredPath) ? configuredPath : path.join(BOARD_ROOT, configuredPath))
+    : SERVER_CONFIG;
   if (!fs.existsSync(configPath)) return {};
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
@@ -46,7 +48,7 @@ function loadServerConfig() {
 
 function resolveFromConfig(configValue) {
   if (typeof configValue !== 'string' || !configValue.trim()) return null;
-  return path.resolve(__dirname, configValue);
+  return path.resolve(BOARD_ROOT, configValue);
 }
 
 function loadJsonFromConfig(configValue) {
@@ -88,7 +90,7 @@ function applyFlowTimeout(flow, timeoutMs) {
 
 function buildChatHandlerFlowFromScript(scriptPath, timeoutMs = null) {
   if (!scriptPath) return null;
-  const resolved = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(__dirname, scriptPath);
+  const resolved = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(BOARD_ROOT, scriptPath);
   const resolvedTimeoutMs = normalizeTimeoutMs(timeoutMs, 300000);
   return {
     id: 'demo-chat-script-handler',
@@ -121,7 +123,7 @@ function resolveKindRefFromConfig(configValue) {
     if (parsed.kind !== 'fs-path') return trimmed;
     const rawPath = parsed.value.trim();
     if (!rawPath) return null;
-    const resolved = path.isAbsolute(rawPath) ? rawPath : path.resolve(__dirname, rawPath);
+    const resolved = path.isAbsolute(rawPath) ? rawPath : path.resolve(BOARD_ROOT, rawPath);
     return serializeRef({ kind: 'fs-path', value: resolved });
   } catch {
     return trimmed;
@@ -171,7 +173,7 @@ const CORS_HEADERS = {
 // ---------------------------------------------------------------------------
 
 const setupDir = path.resolve(
-  process.env.DEMO_SETUP_DIR || path.join(__dirname, '.demo-setup'),
+  process.env.DEMO_SETUP_DIR || path.join(BOARD_ROOT, '.demo-setup'),
 );
 fs.mkdirSync(setupDir, { recursive: true });
 
@@ -379,22 +381,22 @@ const runtime = createMultiBoardServerRuntime({
     const boardSetupRootOverride = (process.env.DEMO_BOARD_SETUP_ROOT || '').trim();
     const boardRoot = boardSetupRootOverride
       ? path.resolve(boardSetupRootOverride, `board-${boardId}`)
-      : (cfg?.setupDir ? path.resolve(__dirname, cfg.setupDir) : path.join(setupDir, `board-${boardId}`));
-    const chatFlowRoot = path.resolve(__dirname, 'server', 'chat-flow');
+      : (cfg?.setupDir ? path.resolve(BOARD_ROOT, cfg.setupDir) : path.join(setupDir, `board-${boardId}`));
+    const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
     fs.mkdirSync(boardRoot, { recursive: true });
     const boardDir = path.join(boardRoot, 'runtime');
     const runtimeCardsDir = path.join(boardRoot, 'cards');
     const flowRunner = createStepMachineChatFlowRunner({
       invokeRef: (ref, stepArgs) => invokeRefSync(ref, stepArgs, {
-        cliDir: __dirname,
-        cwd: __dirname,
+        cliDir: BOARD_ROOT,
+        cwd: BOARD_ROOT,
         label: 'demo-chat-flow',
         timeoutMs: chatInvokeRefTimeoutMs,
       }),
     });
     const baseExecutionExtra = {
       boardSetupRoot: boardRoot,
-      projectRoot: __dirname,
+      projectRoot: BOARD_ROOT,
       chatFlowRoot,
       chatsBlobBasePath: path.join(runtimeCardsDir, 'chats'),
       serverUrl: `http://127.0.0.1:${PORT}`,
@@ -418,7 +420,7 @@ const runtime = createMultiBoardServerRuntime({
       serverUrl: `http://127.0.0.1:${PORT}`,
       executionExtra: {
         boardSetupRoot: boardRoot,
-        projectRoot: __dirname,
+        projectRoot: BOARD_ROOT,
         chatFlowRoot,
         chatsBlobBasePath: path.join(runtimeCardsDir, 'chats'),
         chatCopilotTimeoutMs,
@@ -485,18 +487,21 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[demo-server] listening on http://127.0.0.1:${PORT}`);
-  console.log(`[demo-server] setup dir: ${setupDir}`);
-  console.log(`[demo-server] server-meta store: ${serverMetaRef}`);
-  console.log('[demo-server] endpoints:');
+  console.log(`[board-server] listening on http://127.0.0.1:${PORT}`);
+  console.log(`[board-server] setup dir: ${setupDir}`);
+  console.log(`[board-server] server-meta store: ${serverMetaRef}`);
+  console.log('[board-server] endpoints:');
   console.log(`  GET  ${apiBasePath}                          <- list boards`);
   console.log(`  POST ${apiBasePath}  {id, label?}            <- register board`);
   console.log(`  GET  ${apiBasePath}/:boardId/init-board`);
   console.log(`  GET  ${apiBasePath}/:boardId/sse`);
   console.log(`  GET  ${apiBasePath}/:boardId/board-status`);
+  console.log(`  GET  ${apiBasePath}/:boardId/cards/:id`);
   console.log(`  PATCH ${apiBasePath}/:boardId/cards/:id`);
-  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/actions`);
+  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/actions   <- card actions, including chat-send`);
   console.log(`  POST ${apiBasePath}/:boardId/cards/:id/files`);
   console.log(`  GET  ${apiBasePath}/:boardId/cards/:id/files/:idx`);
   console.log(`  GET  ${apiBasePath}/:boardId/cards/:id/chats`);
+  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/chats/subscribe-sse`);
+  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/chats/unsubscribe-sse`);
 });
