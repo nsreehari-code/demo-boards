@@ -1,53 +1,50 @@
 #!/usr/bin/env node
 
 /**
- * demo-task-executor.js — Simple mock source executor for example-board.
+ * task-executor.js — Registry-driven source executor for the demo board worker.
  *
- * Subcommands:
- *   run-source-fetch        — fetch data for one source entry
- *   describe-capabilities   — print supported source kinds + schemas to stdout (JSON)
+ * Supported subcommands:
+ *   run-source-fetch         — execute one source_def via its registered flow
+ *   describe-capabilities    — emit registry-derived kinds, schemas, and probe info as JSON
+ *   validate-source-def      — validate one source_def against registry rules from stdin
+ *   probe-source-preflight   — perform a lightweight preflight for one source_def from stdin
  *
  * Runtime invocation shapes used by board-live-cards:
  *   run-source-fetch --in-ref <b64ref> --out-ref <b64ref> [--err-ref <b64ref>] [--extra <base64json>]
- *   validate-source-def    <stdin: source JSON>
- *   probe-source-preflight <stdin: source JSON> [--extra <base64json>]
+ *   validate-source-def       <stdin: source JSON>
+ *   probe-source-preflight    <stdin: source JSON> [--extra <base64json>]
  *
- * --in payload (source definition):
+ * Payload read from --in-ref (raw source definition or { source_def, callback } envelope):
  *   {
- *     "bindTo":  "token_name",
+ *     "bindTo": "token_name",
  *     "outputFile": "relative/path.json",
- *     "cwd":     "<card directory>",           // injected by CLI
- *     "boardDir":"<board runtime directory>",   // injected by CLI
- *     "_projections":   { "refKey": <resolvedValue> }, // named projections from card_data/requires,
- *                                               // declared in source_defs[].projections and resolved
- *                                               // by the engine before invoking the executor
- *     // ...plus any custom fields authored on the source entry (bindTo, outputFile, projections, etc.)
+ *     "_projections": { "refKey": <resolvedValue> },
+ *     // ...plus the authored fields used by the resolved registry kind
  *   }
  *
- * --extra (decoded):
+ * Output written to --out-ref:
+ *   - JSON result produced by the resolved source flow when the flow does not
+ *     write directly to the destination blob itself.
+ *
+ * Error text written to --err-ref when provided:
+ *   - Plain-text failure details for fetch-time errors before process exit.
+ *
+ * Decoded --extra context (optional; schema comes from source_def_flows.json.extraSchema):
  *   {
- *     "boardSetupRoot":   "<abs path>",        // board root (parent of runtime/, surface/, runtime-out/)
- *     "boardId":          "<board id>",        // e.g. "default"
- *     "boardRuntimeDir":  "<relative>",        // e.g. "runtime"
- *     "runtimeStatusDir": "<relative>",        // e.g. "runtime-out"
- *     "cardsDir":         "<relative>",        // e.g. "surface/tmp-cards"
- *     "serverUrl":        "<base url>",        // optional; e.g. "http://127.0.0.1:7799"
- *     "boardLiveCardsCliJs":"<abs path>",      // optional; path to board-live-cards-cli.js
- *     "stepMachineCliPath":"<abs path>"        // optional; path to step-machine-cli.js
+ *     "boardSetupRoot": "<abs path>",
+ *     "boardId": "<board id>",
+ *     "boardRuntimeDir": "<relative>",
+ *     "runtimeStatusDir": "<relative>",
+ *     "cardsDir": "<relative>",
+ *     "serverUrl": "<base url>",
+ *     "boardLiveCardsCliJs": "<abs path>",
+ *     "stepMachineCliPath": "<abs path>"
  *   }
  *
- * Supported source kinds (based on custom fields in --in):
- *   - { mock: "key" }              → look up key in MOCK_DB (hardcoded below)
- *   - { copilot: { prompt_template, args? } }  → call Copilot CLI with interpolated prompt
- *   - { prompt_template: "..." }   → shorthand copilot call (top-level template)
- *   - { mcp: { tool, manifest?, server?, input? } } → call an MCP tool via stdio or hosted transport
- *   - { "urls": { url, method?, headers?, args?, cacheTimeout?, projectionList? }, tickersFrom? }
- *       → URL fetch via {{key}} interpolation from _projections. When projectionList is set,
- *         the flow fans out over _projections[projectionList] and returns an array of responses.
- *   A real executor could also handle: graphapi, mail, incidentdb, script, etc.
- *
- * urls notes:
- *   - Results cached in os.tmpdir()/demo-executor-cache/ per URL (default 1 hour, override via cacheTimeout)
+ * Source kinds are resolved from source_def_flows.json in resolveOrder.
+ * See that registry for the current set of advertised kinds and capabilities.
+ * Flow execution is generic here; kind-specific behavior lives in the registry
+ * and in per-kind flow/handler modules under source-def-flows/.
  */
 
 import fs from 'node:fs';
@@ -60,24 +57,8 @@ import { invokeExecutionRef } from 'yaml-flow/board-live-cards-node';
 const WORKER_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(WORKER_DIR, '..', '..');
 const SOURCE_DEF_FLOWS_FILE = path.join(WORKER_DIR, 'source_def_flows.json');
-
-// ---------------------------------------------------------------------------
-// Mock data — used when a source has { mock: "key" }.
-// Edit these values to change the demo data without needing a mock.db file.
-// ---------------------------------------------------------------------------
-const MOCK_DB = {
-  quotes: {
-    quoteResponse: {
-      result: [
-        { symbol: 'AAPL',  shortName: 'Apple Inc.',      regularMarketPrice: 198.15, regularMarketChange:  2.15, regularMarketChangePercent:  1.10 },
-        { symbol: 'MSFT',  shortName: 'Microsoft Corp.', regularMarketPrice: 415.32, regularMarketChange: -1.23, regularMarketChangePercent: -0.30 },
-        { symbol: 'GOOGL', shortName: 'Alphabet Inc.',   regularMarketPrice: 174.89, regularMarketChange:  0.89, regularMarketChangePercent:  0.51 },
-        { symbol: 'TSLA',  shortName: 'Tesla Inc.',      regularMarketPrice: 247.12, regularMarketChange:  5.43, regularMarketChangePercent:  2.25 },
-      ],
-      error: null,
-    },
-  },
-};
+const EXECUTOR_NAME = 'board-worker';
+const LOG_PREFIX = `[${EXECUTOR_NAME}]`;
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -89,7 +70,7 @@ function fail(msg, errFile) {
       fs.writeFileSync(errFile, msg);
     } catch {}
   }
-  console.error(`[demo-task-executor] ${msg}`);
+  console.error(`${LOG_PREFIX} ${msg}`);
   process.exit(1);
 }
 
@@ -192,6 +173,9 @@ async function executeStepMachineSourceFlow(context) {
 async function resolveAndExecuteSourceFlow(sourceDef, extra, refs = {}) {
   const registry = loadSourceDefFlowsConfig();
   const kind = resolveSourceKind(sourceDef, registry);
+  const mockDb = kind === 'mock'
+    ? (await import(pathToFileURL(path.join(WORKER_DIR, 'source-def-flows', 'mock-handler', 'mock-db.js')).href)).MOCK_DB
+    : undefined;
   const flowResult = await executeStepMachineSourceFlow({
     kind,
     registry,
@@ -200,7 +184,7 @@ async function resolveAndExecuteSourceFlow(sourceDef, extra, refs = {}) {
     inRef: refs.inRef,
     outRef: refs.outRef,
     errRef: refs.errRef,
-    mockDb: MOCK_DB,
+    ...(mockDb ? { mockDb } : {}),
   });
   return { kind, flowResult };
 }
@@ -218,7 +202,7 @@ async function runSourceFetchSubcommand(argv) {
   let extra = {};
   if (extraB64) {
     try { extra = JSON.parse(Buffer.from(extraB64, 'base64').toString('utf-8')); }
-    catch { console.warn('[demo-task-executor] bad --extra base64, ignoring'); }
+    catch { console.warn(`${LOG_PREFIX} bad --extra base64, ignoring`); }
   }
 
   if (!inRefStr || !outRefStr) {
@@ -241,7 +225,7 @@ async function runSourceFetchSubcommand(argv) {
   // Local error reporter — writes to errStorage and calls back to board if callback present.
   const failRef = (msg, callback) => {
     if (errStorage && errRef) { try { errStorage.write(errRef.value, msg); } catch {} }
-    console.error(`[demo-task-executor] ${msg}`);
+    console.error(`${LOG_PREFIX} ${msg}`);
     if (callback) { try { reportFailed(callback, msg); } catch {} }
     process.exit(1);
   };
@@ -290,7 +274,7 @@ async function runSourceFetchSubcommand(argv) {
     try {
       reportComplete(callback, outRef);
     } catch (err) {
-      console.error(`[demo-task-executor] reportComplete failed: ${String(err && err.message || err)}`);
+      console.error(`${LOG_PREFIX} reportComplete failed: ${String(err && err.message || err)}`);
       process.exit(1);
     }
   }
@@ -399,7 +383,7 @@ function validateSourceDefSubcommand() {
   }
 
   if (!rawInput) {
-    console.error('[demo-task-executor] Usage: validate-source-def < source.json');
+    console.error(`${LOG_PREFIX} Usage: validate-source-def < source.json`);
     process.exit(1);
   }
 
@@ -452,7 +436,7 @@ function describeCapabilities() {
   );
   const payload = {
     version: registry?.version || '1.0',
-    executor: registry?.executor || 'demo-task-executor',
+    executor: registry?.executor || EXECUTOR_NAME,
     subcommands: Array.isArray(registry?.subcommands)
       ? registry.subcommands
       : ['run-source-fetch', 'probe-source-preflight', 'describe-capabilities', 'validate-source-def'],
@@ -481,11 +465,11 @@ async function main() {
     return;
   }
 
-  console.warn(`[demo-task-executor] Unknown subcommand: ${sub}`);
+  console.warn(`${LOG_PREFIX} Unknown subcommand: ${sub}`);
   process.exit(0);
 }
 
 main().catch(err => {
-  console.error(`[demo-task-executor] fatal: ${err && err.message || err}`);
+  console.error(`${LOG_PREFIX} fatal: ${err && err.message || err}`);
   process.exit(1);
 });

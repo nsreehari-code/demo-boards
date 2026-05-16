@@ -172,7 +172,7 @@ export async function execute(context) {
 
     const { Client } = await importClientModules();
     const client = new Client(
-      { name: 'demo-task-executor', version: '1.0.0' },
+      { name: 'board-worker', version: '1.0.0' },
       { capabilities: {} },
     );
     const transport = await createTransport(connection, extra);

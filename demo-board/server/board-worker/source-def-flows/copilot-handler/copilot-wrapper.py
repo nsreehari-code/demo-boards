@@ -13,7 +13,7 @@ Responsibilities:
   - Agentic retry: if first response isn't valid JSON, retry with correction prompt
   - Logging (per-agent, rotated to last 50)
 
-Usage (called by demo-task-executor.js, not directly):
+Usage (called by the board-worker task executor, not directly):
     python server/board-worker/source-def-flows/copilot-handler/copilot-wrapper.py \\
     --output-file <path>     Result written here (JSON or raw text)
     --session-dir <path>     Persistent dir for session UUID

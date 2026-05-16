@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "description": "Self-contained source-def registry for demo-task-executor runtimes.",
-  "executor": "demo-task-executor",
+  "description": "Self-contained source-def registry for board-worker runtimes.",
+  "executor": "board-worker",
   "subcommands": [
     "run-source-fetch",
     "describe-capabilities",
