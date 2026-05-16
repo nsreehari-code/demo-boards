@@ -118,7 +118,16 @@
       "flow": "./source-def-flows/copilot.flow.json",
       "validate": [
         {
-          "condition": "copilot-or-prompt",
+          "anyOf": [
+            {
+              "field": "copilot",
+              "type": "object"
+            },
+            {
+              "field": "prompt_template",
+              "type": "string"
+            }
+          ],
           "message": "copilot must be an object, or prompt_template must be a top-level string."
         }
       ],

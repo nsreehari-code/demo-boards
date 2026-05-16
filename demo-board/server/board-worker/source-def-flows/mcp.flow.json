@@ -1,17 +1,17 @@
 {
-  "id": "demo-source-foundry",
+  "id": "demo-source-mcp",
   "settings": {
     "start_step": "execute",
     "max_total_steps": 8,
-    "timeout_ms": 300000
+    "timeout_ms": 180000
   },
   "steps": {
     "execute": {
-      "description": "Execute Foundry agent source def",
+      "description": "Execute MCP source def",
       "handler": {
         "type": "ref",
         "howToRun": "demo-local-module",
-        "whatToRun": { "kind": "fs-path", "value": "./source-def-handlers/foundry-handler.js" }
+        "whatToRun": { "kind": "fs-path", "value": "./source-def-flows/mcp-handler/mcp-handler.js" }
       },
       "transitions": {
         "success": "completed",
@@ -21,13 +21,14 @@
   },
   "terminal_states": {
     "completed": {
-      "description": "Foundry source succeeded",
+      "description": "MCP source succeeded",
       "return_intent": "success",
       "return_artifacts": ["resultValue", "wroteOutputDirectly"]
     },
     "failed": {
-      "description": "Foundry source failed",
-      "return_intent": "failure"
+      "description": "MCP source failed",
+      "return_intent": "failure",
+      "return_artifacts": ["error"]
     }
   }
 }

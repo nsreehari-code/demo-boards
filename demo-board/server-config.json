@@ -14,7 +14,7 @@
       "setupDir": "./live/.board-ws",
       "regular": {
         "seedCardsDir": "./live/cards",
-        "taskExecutorPath": "./demo-task-executor.js",
+        "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
@@ -23,7 +23,7 @@
       "setupDir": "./ingest1/.board-ws",
       "regular": {
         "seedCardsDir": "./ingest1/cards",
-        "taskExecutorPath": "./demo-task-executor.js",
+        "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
@@ -32,7 +32,7 @@
       "setupDir": "./cpm/.board-ws",
       "regular": {
         "seedCardsDir": "./cpm/cards",
-        "taskExecutorPath": "./demo-task-executor.js",
+        "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
@@ -41,7 +41,7 @@
       "setupDir": "./cpmV2/.board-ws",
       "regular": {
         "seedCardsDir": "./cpmV2/cards",
-        "taskExecutorPath": "./demo-task-executor.js",
+        "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
@@ -50,7 +50,7 @@
       "setupDir": "./optimus/.board-ws",
       "regular": {
         "seedCardsDir": "./optimus/cards",
-        "taskExecutorPath": "./demo-task-executor.js",
+        "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     }

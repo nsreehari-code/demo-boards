@@ -3,6 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const HANDLER_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 function interpolate(template, args) {
   return String(template).replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key) => {
@@ -43,7 +46,7 @@ function resolvePrompt(sourceDef, promptContext) {
 }
 
 function runCopilot(prompt, sourceDef, executorDir, extra) {
-  const wrapperPath = path.join(executorDir, 'scripts', 'copilot', 'wrapper.py');
+  const wrapperPath = path.join(HANDLER_DIR, 'copilot-wrapper.py');
   const python = process.platform === 'win32' ? 'python' : 'python3';
 
   if (fs.existsSync(wrapperPath)) {
