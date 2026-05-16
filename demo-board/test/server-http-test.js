@@ -228,6 +228,22 @@ const waitForAllCompleted = (ms = 60_000, label = 'all completed') =>
 const waitForChatPredicate = (predicate, ms, label) =>
   waitUntil(() => predicate(NS.chatEvents) || false, ms, label);
 
+async function waitForChatHistory(cardId, predicate, timeoutMs, label) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const res = await httpGet(`${BASE}/cards/${cardId}/chats`);
+    if (res.status === 200) {
+      const messages = Array.isArray(res.data?.messages) ? res.data.messages : [];
+      const result = predicate(messages);
+      if (result !== undefined && result !== null && result !== false) {
+        return result;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`Timeout (${timeoutMs}ms) waiting for: ${label}`);
+}
+
 function httpGet(url) {
   return new Promise((resolve, reject) => {
     http.get(url, (res) => {
@@ -704,6 +720,84 @@ try {
   }, 30_000, 'T3b processing clear');
   assert(!!t2bProcessingCleared, 'T3b processing clear not observed');
   console.log('[T3b] ok: upload protocol (system/user) and chat protocol (.processing/user/assistant/.processing clear) observed');
+
+  // ── T3d: unsubscribe/resubscribe chat SSE notifications ──
+  console.log('\n=== T3d: unsubscribe/resubscribe SSE behavior ===');
+
+  const t3dUnsubRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/unsubscribe-sse`, { clientId: chatSseClientId });
+  assert(t3dUnsubRes.status === 200, `T3d chat unsubscribe returned ${t3dUnsubRes.status}`);
+
+  const t3dSilentBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t3dSilentBefore.status === 200, `T3d silent pre chats returned ${t3dSilentBefore.status}`);
+  const t3dSilentBeforeMessages = Array.isArray(t3dSilentBefore.data?.messages) ? t3dSilentBefore.data.messages : [];
+  const t3dSilentBeforeCount = t3dSilentBeforeMessages.length;
+  const t3dSilentEventCount = NS.chatEvents.length;
+  const t3dSilentPrompt = `unsubscribe silence validation ${Date.now()}`;
+
+  const t3dSilentSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+    actionType: 'chat-send',
+    payload: {
+      text: JSON.stringify({
+        prompt: t3dSilentPrompt,
+        probe: true,
+        chatTimeMs: 2200,
+        chatTimeoutMs: 20000,
+      }),
+    },
+  });
+  assert(t3dSilentSendRes.status === 200, `T3d silent chat-send returned ${t3dSilentSendRes.status}`);
+
+  const t3dSilentAfterMessages = await waitForChatHistory(
+    CHAT_CARD_ID,
+    (messages) => {
+      if (messages.length < t3dSilentBeforeCount + 2) return false;
+      const newMessages = messages.slice(t3dSilentBeforeCount);
+      const assistantMsg = newMessages.find((message) =>
+        message?.role === 'assistant' && String(message.text || '').includes(`Echo: ${t3dSilentPrompt}`));
+      return assistantMsg ? { messages, assistantMsg } : false;
+    },
+    45_000,
+    'T3d silent chat completion via HTTP history',
+  );
+  assert(!!t3dSilentAfterMessages.assistantMsg, 'T3d silent chat assistant response missing from HTTP history');
+  assert(NS.chatEvents.length === t3dSilentEventCount,
+    `T3d expected no chat SSE notifications while unsubscribed (before=${t3dSilentEventCount}, after=${NS.chatEvents.length})`);
+
+  const t3dResubRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/subscribe-sse`, { clientId: chatSseClientId });
+  assert(t3dResubRes.status === 200, `T3d chat resubscribe returned ${t3dResubRes.status}`);
+
+  const t3dLiveBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  assert(t3dLiveBefore.status === 200, `T3d live pre chats returned ${t3dLiveBefore.status}`);
+  const t3dLiveBeforeMessages = Array.isArray(t3dLiveBefore.data?.messages) ? t3dLiveBefore.data.messages : [];
+  const t3dLiveBeforeCount = t3dLiveBeforeMessages.length;
+  const t3dLivePrompt = `resubscribe resume validation ${Date.now()}`;
+
+  const t3dLiveSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+    actionType: 'chat-send',
+    payload: {
+      text: JSON.stringify({
+        prompt: t3dLivePrompt,
+        probe: true,
+        chatTimeMs: 2200,
+        chatTimeoutMs: 20000,
+      }),
+    },
+  });
+  assert(t3dLiveSendRes.status === 200, `T3d live chat-send returned ${t3dLiveSendRes.status}`);
+
+  const t3dLiveAssistant = await waitForChatPredicate((events) => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      if (event.messageCount < t3dLiveBeforeCount + 2) continue;
+      const last = event.messages[event.messages.length - 1];
+      if (last?.role === 'assistant' && String(last.text || '').includes(`Echo: ${t3dLivePrompt}`)) {
+        return event;
+      }
+    }
+    return false;
+  }, 45_000, 'T3d resumed assistant echo on SSE');
+  assert(!!t3dLiveAssistant, 'T3d assistant echo not observed after resubscribe');
+  console.log('[T3d] ok: unsubscribed client stayed silent and resubscribed client resumed chat notifications');
 
   // ── T3c: assistant failure path clears processing and surfaces failure ──
   console.log('\n=== T3c: assistant failure clears processing and surfaces error ===');
