@@ -3,11 +3,18 @@
   "chatFlowTimeoutMs": 1800000,
   "chatInvokeRefTimeoutMs": 1800000,
   "chatCopilotTimeoutMs": 1800000,
-  "serverMetaStoreRef": "b64:eyJraW5kIjoiZnMtcGF0aCIsInZhbHVlIjoiLi8uc2VydmVyLW1ldGEifQ",
   "boards": {
     "finbook": {
       "label": "Finbook",
-      "setupDir": "../../data-repos-V2/case-workspace",
+      "setup": {
+        "setupRoot": "../data-repos-VX/case-workspace",
+        "cardStore": "cards/store",
+        "artifactsStore": "cards/files",
+        "boardRuntime": "runtime",
+        "boardOutputsStore": "board-outputs",
+        "chatStore": "cards/chats",
+        "scratchStore": "scratch"
+      },
       "regular": {
         "seedCardsDir": "./finbook/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",

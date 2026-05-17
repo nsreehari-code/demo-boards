@@ -28,9 +28,13 @@
         "type": "string",
         "description": "Relative path to runtime-out dir."
       },
-      "cardsDir": {
+      "artifactsStore": {
         "type": "string",
-        "description": "Relative path to cards dir."
+        "description": "Relative path to artifacts store dir."
+      },
+      "scratchStore": {
+        "type": "string",
+        "description": "Relative path to scratch workspace dir."
       },
       "serverUrl": {
         "type": "string",

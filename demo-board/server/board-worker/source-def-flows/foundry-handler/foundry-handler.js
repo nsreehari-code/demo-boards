@@ -79,7 +79,7 @@ export async function execute(context) {
   if (extra.boardSetupRoot) {
     if (extra.boardRuntimeDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.boardRuntimeDir));
     if (extra.runtimeStatusDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.runtimeStatusDir));
-    if (extra.cardsDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.cardsDir));
+    if (extra.artifactsStore) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.artifactsStore));
   }
 
   const invokeReq = {

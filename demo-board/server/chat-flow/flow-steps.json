@@ -8,7 +8,7 @@
   "steps": {
     "read_chats": {
       "description": "Read chats from runtime storage via chat-store-cli and pass them through the flow",
-      "expects_data": ["boardSetupRoot", "boardRuntimeDir", "cardId"],
+      "expects_data": ["boardSetupRoot", "chatStore", "cardId"],
       "produces_data": ["chatMessages"],
       "input_validations": [
         "$type(boardSetupRoot) = \"string\" and $length(boardSetupRoot) > 0",
@@ -23,7 +23,7 @@
         },
         "meta": "chat-handler",
         "argsMassaging": {
-          "stdinTemplate": "{ 'command': 'read-all', 'boardDir': boardSetupRoot & '/' & boardRuntimeDir, 'cardId': cardId }"
+          "stdinTemplate": "{ 'command': 'read-all', 'boardDir': boardSetupRoot & '/' & chatStore, 'cardId': cardId }"
         },
         "outputTransforms": {
           "dataTemplate": "{ 'chatMessages': output.data.records }"
@@ -37,7 +37,7 @@
     },
     "open_turn": {
       "description": "Resolve the current user turn from flow-provided chat messages and parse any chat envelope options",
-      "produces_data": ["boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "runtimeStatusDir", "cardsDir", "projectRoot", "chatFlowRoot", "chatMessages", "userText", "lastChatEntryId", "probe", "chatHandlerMode", "chatCopilotTimeoutMs"],
+      "produces_data": ["boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "chatStore", "runtimeStatusDir", "artifactsStore", "scratchStore", "projectRoot", "chatFlowRoot", "chatMessages", "userText", "lastChatEntryId", "probe", "chatHandlerMode", "chatCopilotTimeoutMs"],
       "input_validations": [
         "$type(cardId) = \"string\" and $length(cardId) > 0",
         "$type(chatMessages) = \"array\"",
@@ -51,8 +51,10 @@
           "data.cardId = $type(expects_data.cardId) = \"string\" ? expects_data.cardId : \"\"",
           "data.boardSetupRoot = $type(expects_data.boardSetupRoot) = \"string\" ? expects_data.boardSetupRoot : \"\"",
           "data.boardRuntimeDir = ($type(expects_data.boardRuntimeDir) = \"string\" and $length(expects_data.boardRuntimeDir) > 0) ? expects_data.boardRuntimeDir : \"runtime\"",
+          "data.chatStore = ($type(expects_data.chatStore) = \"string\" and $length(expects_data.chatStore) > 0) ? expects_data.chatStore : data.boardRuntimeDir",
           "data.runtimeStatusDir = ($type(expects_data.runtimeStatusDir) = \"string\" and $length(expects_data.runtimeStatusDir) > 0) ? expects_data.runtimeStatusDir : \"runtime-out\"",
-          "data.cardsDir = ($type(expects_data.cardsDir) = \"string\" and $length(expects_data.cardsDir) > 0) ? expects_data.cardsDir : \"cards\"",
+          "data.artifactsStore = ($type(expects_data.artifactsStore) = \"string\" and $length(expects_data.artifactsStore) > 0) ? expects_data.artifactsStore : \"cards\"",
+          "data.scratchStore = ($type(expects_data.scratchStore) = \"string\" and $length(expects_data.scratchStore) > 0) ? expects_data.scratchStore : \"scratch\"",
           "data.projectRoot = $type(expects_data.projectRoot) = \"string\" ? expects_data.projectRoot : \"\"",
           "data.chatFlowRoot = $type(expects_data.chatFlowRoot) = \"string\" ? expects_data.chatFlowRoot : \"\"",
           "data.chatMessages = expects_data.chatMessages",
@@ -106,7 +108,7 @@
         },
         "meta": "chat-handler",
         "argsMassaging": {
-          "stdinTemplate": "{ 'boardDir': boardSetupRoot & '/' & boardRuntimeDir, 'cardId': cardId, 'commands': [{ 'command': 'append', 'role': 'system', 'text': 'in-progress', 'files': [] }] }"
+          "stdinTemplate": "{ 'boardDir': boardSetupRoot & '/' & chatStore, 'cardId': cardId, 'commands': [{ 'command': 'append', 'role': 'system', 'text': 'in-progress', 'files': [] }] }"
         }
       },
       "transitions": {
@@ -117,7 +119,7 @@
     },
     "copilot_assistant": {
       "description": "Run the Copilot-backed assistant logic to generate the reply from the resolved chat history",
-      "expects_data": ["userText", "chatMessages", "boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "runtimeStatusDir", "cardsDir", "projectRoot", "chatFlowRoot", "chatCopilotTimeoutMs"],
+      "expects_data": ["userText", "chatMessages", "boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "runtimeStatusDir", "artifactsStore", "scratchStore", "projectRoot", "chatFlowRoot", "chatCopilotTimeoutMs"],
       "produces_data": ["replyText"],
       "input_validations": [
         "$type(userText) = \"string\"",
@@ -132,7 +134,7 @@
         },
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/copilot-chat/assistant.js'"],
-          "stdinTemplate": "{ 'cardId': cardId, 'boardSetupRoot': boardSetupRoot, 'boardRuntimeDir': boardRuntimeDir, 'runtimeStatusDir': runtimeStatusDir, 'cardsDir': cardsDir, 'chatMessages': chatMessages, 'userText': userText, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs }"
+          "stdinTemplate": "{ 'cardId': cardId, 'boardSetupRoot': boardSetupRoot, 'boardRuntimeDir': boardRuntimeDir, 'runtimeStatusDir': runtimeStatusDir, 'artifactsStore': artifactsStore, 'scratchStore': scratchStore, 'chatMessages': chatMessages, 'userText': userText, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs }"
         },
         "meta": "chat-handler"
       },
@@ -164,7 +166,7 @@
     },
     "write_reply": {
       "description": "Append the assistant reply and clear processing via one chat-store-cli command envelope",
-      "expects_data": ["boardSetupRoot", "boardRuntimeDir", "cardId", "replyText"],
+      "expects_data": ["boardSetupRoot", "chatStore", "cardId", "replyText"],
       "produces_data": ["replyId"],
       "input_validations": [
         "$type(boardSetupRoot) = \"string\" and $length(boardSetupRoot) > 0",
@@ -180,7 +182,7 @@
         },
         "meta": "chat-handler",
         "argsMassaging": {
-          "stdinTemplate": "{ 'boardDir': boardSetupRoot & '/' & boardRuntimeDir, 'cardId': cardId, 'commands': [{ 'command': 'append', 'role': 'assistant', 'text': replyText, 'files': [] }, { 'command': 'set-processing', 'active': false }] }"
+          "stdinTemplate": "{ 'boardDir': boardSetupRoot & '/' & chatStore, 'cardId': cardId, 'commands': [{ 'command': 'append', 'role': 'assistant', 'text': replyText, 'files': [] }, { 'command': 'set-processing', 'active': false }] }"
         },
         "outputTransforms": {
           "dataTemplate": "{ 'replyId': output.data.results[0].data.id }"
@@ -194,7 +196,7 @@
     },
     "cleanup_failure": {
       "description": "Write a failure system message and clear processing via one chat-store-cli command envelope",
-      "expects_data": ["boardSetupRoot", "boardRuntimeDir", "cardId"],
+      "expects_data": ["boardSetupRoot", "chatStore", "cardId"],
       "input_validations": [
         "$type(boardSetupRoot) = \"string\" and $length(boardSetupRoot) > 0",
         "$type(cardId) = \"string\" and $length(cardId) > 0"
@@ -208,7 +210,7 @@
         },
         "meta": "chat-handler",
         "argsMassaging": {
-          "stdinTemplate": "{ 'boardDir': boardSetupRoot & '/' & boardRuntimeDir, 'cardId': cardId, 'commands': [{ 'command': 'append', 'role': 'system', 'text': 'AI response failed - the assistant could not generate a reply. Check server configuration and logs.', 'files': [] }, { 'command': 'set-processing', 'active': false }] }"
+          "stdinTemplate": "{ 'boardDir': boardSetupRoot & '/' & chatStore, 'cardId': cardId, 'commands': [{ 'command': 'append', 'role': 'system', 'text': 'AI response failed - the assistant could not generate a reply. Check server configuration and logs.', 'files': [] }, { 'command': 'set-processing', 'active': false }] }"
         }
       },
       "transitions": {

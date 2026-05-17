@@ -35,7 +35,8 @@
  *     "boardId": "<board id>",
  *     "boardRuntimeDir": "<relative>",
  *     "runtimeStatusDir": "<relative>",
- *     "cardsDir": "<relative>",
+ *     "artifactsStore": "<relative>",
+ *     "scratchStore": "<relative>",
  *     "serverUrl": "<base url>",
  *     "boardLiveCardsCliJs": "<abs path>",
  *     "stepMachineCliPath": "<abs path>"

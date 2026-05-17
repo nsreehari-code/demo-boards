@@ -54,7 +54,9 @@ function runCopilot(prompt, sourceDef, executorDir, extra) {
     const outFile = `${tmpBase}.out.json`;
     const promptFile = `${tmpBase}.prompt.txt`;
     const sessionDir = path.join(
-      extra?.boardSetupRoot || (process.env.TEMP || process.cwd()),
+      (extra?.boardSetupRoot && extra?.scratchStore)
+        ? path.resolve(extra.boardSetupRoot, extra.scratchStore)
+        : (extra?.boardSetupRoot || (process.env.TEMP || process.cwd())),
       'copilot-sessions',
       String(sourceDef?.bindTo || 'default').replace(/[^a-zA-Z0-9_-]/g, '_'),
     );
@@ -69,14 +71,14 @@ function runCopilot(prompt, sourceDef, executorDir, extra) {
     }
 
     // Copilot sandbox: cwd = card's surface dir; --add-dir for cards, runtime, runtime-out.
-    const copilotCwd = extra?.cardsDir
-      ? path.resolve(extra.boardSetupRoot, extra.cardsDir)
+    const copilotCwd = extra?.artifactsStore
+      ? path.resolve(extra.boardSetupRoot, extra.artifactsStore)
       : (extra?.boardSetupRoot || process.cwd());
     const addDirs = [];
     if (extra?.boardSetupRoot) {
       if (extra.boardRuntimeDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.boardRuntimeDir));
       if (extra.runtimeStatusDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.runtimeStatusDir));
-      if (extra.cardsDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.cardsDir));
+      if (extra.artifactsStore) addDirs.push(path.resolve(extra.boardSetupRoot, extra.artifactsStore));
     }
 
     const pyArgs = [

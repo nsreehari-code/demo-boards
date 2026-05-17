@@ -54,6 +54,50 @@ function resolveFromConfig(configValue) {
   return path.resolve(BOARD_ROOT, configValue);
 }
 
+function normalizeSetupPath(configValue, fallbackValue) {
+  if (typeof configValue !== 'string') return fallbackValue;
+  const normalized = configValue.trim();
+  return normalized || fallbackValue;
+}
+
+function resolveSetupPath(setupRoot, configValue, fallbackValue) {
+  const normalized = normalizeSetupPath(configValue, fallbackValue);
+  return path.isAbsolute(normalized) ? normalized : path.resolve(setupRoot, normalized);
+}
+
+function resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride) {
+  const legacySetupRoot = cfg?.setupDir
+    ? path.resolve(BOARD_ROOT, cfg.setupDir)
+    : path.join(setupDir, `board-${boardId}`);
+  const setupCfg = cfg?.setup && typeof cfg.setup === 'object' ? cfg.setup : {};
+  const setupRoot = boardSetupRootOverride
+    ? path.resolve(boardSetupRootOverride, `board-${boardId}`)
+    : (resolveFromConfig(setupCfg.setupRoot) || legacySetupRoot);
+
+  const boardRuntime = normalizeSetupPath(setupCfg.boardRuntime, 'runtime');
+  const boardOutputsStore = normalizeSetupPath(setupCfg.boardOutputsStore, 'runtime-out');
+  const cardStore = normalizeSetupPath(setupCfg.cardStore, path.join('cards', 'store'));
+  const artifactsStore = normalizeSetupPath(setupCfg.artifactsStore, 'cards');
+  const chatStore = normalizeSetupPath(setupCfg.chatStore, 'runtime');
+  const scratchStore = normalizeSetupPath(setupCfg.scratchStore, 'scratch');
+
+  return {
+    setupRoot,
+    boardRuntime,
+    boardOutputsStore,
+    cardStore,
+    artifactsStore,
+    chatStore,
+    scratchStore,
+    boardRuntimePath: resolveSetupPath(setupRoot, setupCfg.boardRuntime, 'runtime'),
+    boardOutputsStorePath: resolveSetupPath(setupRoot, setupCfg.boardOutputsStore, 'runtime-out'),
+    cardStorePath: resolveSetupPath(setupRoot, setupCfg.cardStore, path.join('cards', 'store')),
+    artifactsStorePath: resolveSetupPath(setupRoot, setupCfg.artifactsStore, 'cards'),
+    chatStorePath: resolveSetupPath(setupRoot, setupCfg.chatStore, 'runtime'),
+    scratchStorePath: resolveSetupPath(setupRoot, setupCfg.scratchStore, 'scratch'),
+  };
+}
+
 function loadJsonFromConfig(configValue) {
   const resolved = resolveFromConfig(configValue);
   if (!resolved || !fs.existsSync(resolved)) return null;
@@ -117,22 +161,6 @@ function buildChatHandlerFlowFromScript(scriptPath, timeoutMs = null) {
   };
 }
 
-function resolveKindRefFromConfig(configValue) {
-  if (typeof configValue !== 'string' || !configValue.trim()) return null;
-  const trimmed = configValue.trim();
-  if (!trimmed.startsWith('b64:')) return trimmed;
-  try {
-    const parsed = parseRef(trimmed);
-    if (parsed.kind !== 'fs-path') return trimmed;
-    const rawPath = parsed.value.trim();
-    if (!rawPath) return null;
-    const resolved = path.isAbsolute(rawPath) ? rawPath : path.resolve(BOARD_ROOT, rawPath);
-    return serializeRef({ kind: 'fs-path', value: resolved });
-  } catch {
-    return trimmed;
-  }
-}
-
 const serverConfig = loadServerConfig();
 const configuredChatFlowTimeoutMs = normalizeTimeoutMs(serverConfig.chatFlowTimeoutMs, null);
 const configuredInvokeRefTimeoutMs = normalizeTimeoutMs(serverConfig.chatInvokeRefTimeoutMs, 300000);
@@ -148,7 +176,6 @@ const configuredChatHandlerFlow = applyFlowTimeout(
 );
 const configuredInferenceAdapterPath = resolveFromConfig(serverConfig.inferenceAdapterPath);
 const configuredStepMachineCliPath = resolveFromConfig(serverConfig.stepMachineCliPath);
-const configuredServerMetaStoreRef = resolveKindRefFromConfig(serverConfig.serverMetaStoreRef);
 
 if (!process.env.DEMO_STEP_MACHINE_CLI_PATH && configuredStepMachineCliPath) {
   process.env.DEMO_STEP_MACHINE_CLI_PATH = configuredStepMachineCliPath;
@@ -262,15 +289,28 @@ function createNamedPipeNotificationTransport() {
   };
 }
 
+function createConfigBackedServerMetaStore(entries) {
+  const store = new Map();
+  const boards = entries.map(([id, cfg]) => ({ id, label: cfg?.label || id }));
+  store.set('boards-config.json', JSON.stringify({ boards }, null, 2));
+  for (const [id, cfg] of entries) {
+    store.set(`boards/${id}.json`, JSON.stringify({ id, label: cfg?.label || id }));
+  }
+  return {
+    getText(key) {
+      return store.has(key) ? store.get(key) : null;
+    },
+    putText(key, text) {
+      store.set(key, text);
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Server meta store (multi-board registry)
 // ---------------------------------------------------------------------------
 
-const serverMetaRef = process.env.DEMO_SERVER_META_STORE_REF || configuredServerMetaStoreRef || serializeRef({ kind: 'fs-path', value: setupDir });
-const serverMetaAdapter = createFsBoardPlatformAdapter(
-  parseRef(serverMetaRef), { suppressSpawn: true },
-);
-const serverMetaStore = createArtifactsStore(serverMetaAdapter.blobStorage('server-meta'));
+const serverMetaStore = createConfigBackedServerMetaStore(serverConfig.boards ? Object.entries(serverConfig.boards) : []);
 
 // ---------------------------------------------------------------------------
 // Build multi-board runtime
@@ -285,20 +325,22 @@ const logger = { info: console.log, warn: console.warn, error: console.error };
 const boardConfigEntries = serverConfig.boards ? Object.entries(serverConfig.boards) : [];
 const boardConfigMap = new Map(boardConfigEntries);
 
-function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, executionExtra = {}) {
-  fs.mkdirSync(boardDir, { recursive: true });
-  const runtimeCardsDir = path.join(path.dirname(boardDir), 'cards');
-  const runtimeCardStoreDir = path.join(runtimeCardsDir, 'store');
-  fs.mkdirSync(runtimeCardStoreDir, { recursive: true });
+function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, executionExtra = {}) {
+  fs.mkdirSync(boardSetupPaths.boardRuntimePath, { recursive: true });
+  fs.mkdirSync(boardSetupPaths.cardStorePath, { recursive: true });
+  fs.mkdirSync(boardSetupPaths.artifactsStorePath, { recursive: true });
+  fs.mkdirSync(boardSetupPaths.boardOutputsStorePath, { recursive: true });
+  fs.mkdirSync(boardSetupPaths.chatStorePath, { recursive: true });
+  fs.mkdirSync(boardSetupPaths.scratchStorePath, { recursive: true });
 
   const notifyChannel = `yaml-flow-server-${label}-${boardId}-${process.pid}`;
-  const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardDir }));
+  const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath }));
   const boardAdapter = createFsBoardPlatformAdapter(baseRef, { notifyChannel });
   boardAdapter.requestProcessAccumulated = () => {};
 
-  const artifactsRef = parseRef(serializeRef({ kind: 'fs-path', value: runtimeCardsDir }));
+  const artifactsRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath }));
   const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, { suppressSpawn: true });
-  const cardStoreRef = serializeRef({ kind: 'fs-path', value: runtimeCardStoreDir });
+  const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
 
   return {
     label,
@@ -306,49 +348,13 @@ function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerFlow,
     artifactsAdapter,
     baseRef,
     cardStoreRef,
-    outputsStoreRef: serializeRef({ kind: 'fs-path', value: path.join(path.dirname(boardDir), 'runtime-out', '.outputs') }),
+    outputsStoreRef: serializeRef({ kind: 'fs-path', value: path.join(boardSetupPaths.boardOutputsStorePath, '.outputs') }),
     notifyRef: { kind: 'named-pipe', value: namedPipePath(notifyChannel) },
     taskExecutorRef: makeExecutionRef(taskExecPath, executionExtra),
     chatHandlerFlow,
     inferenceAdapterRef: makeExecutionRef(infAdapterPath),
   };
 }
-
-// Pre-register configured boards in the server meta store
-const persistedBoardsConfigText = serverMetaStore.getText('boards-config.json');
-let persistedBoardsConfig = { boards: [] };
-if (persistedBoardsConfigText) {
-  try {
-    const parsedBoardsConfig = JSON.parse(persistedBoardsConfigText);
-    if (parsedBoardsConfig && Array.isArray(parsedBoardsConfig.boards)) {
-      persistedBoardsConfig = parsedBoardsConfig;
-    }
-  } catch {
-    persistedBoardsConfig = { boards: [] };
-  }
-}
-
-const persistedBoardsById = new Map(
-  (persistedBoardsConfig.boards || []).map((board) => [board?.id, board])
-);
-
-for (const [key, cfg] of boardConfigEntries) {
-  const existing = serverMetaStore.getText(`boards/${key}.json`);
-  if (!existing) {
-    serverMetaStore.putText(`boards/${key}.json`, JSON.stringify({ id: key, label: cfg.label || key }));
-  }
-
-  persistedBoardsById.set(key, {
-    ...(persistedBoardsById.get(key) || {}),
-    id: key,
-    label: cfg.label || key,
-  });
-}
-
-serverMetaStore.putText(
-  'boards-config.json',
-  JSON.stringify({ boards: Array.from(persistedBoardsById.values()) }, null, 2)
-);
 
 /**
  * Thin wrapper around the shared execution-ref invoker that pins the board
@@ -371,7 +377,7 @@ const runtime = createMultiBoardServerRuntime({
     const cfg = boardConfigMap.get(boardId);
     const regular = cfg?.regular || {};
 
-    const cardsDir = resolveFromConfig(regular.seedCardsDir) || (entry?.cardsDir ? path.resolve(entry.cardsDir) : null);
+    const cardsDir = resolveFromConfig(regular.seedCardsDir);
     const taskExecPath = resolveFromConfig(regular.taskExecutorPath) || (entry?.taskExecutorPath || configuredTaskExecutorPath);
     const chatHandlerPath = resolveFromConfig(regular.chatHandlerPath) || (entry?.chatHandlerPath || configuredChatHandlerPath);
     const boardFlowTimeoutMs = configuredChatFlowTimeoutMs;
@@ -395,12 +401,9 @@ const runtime = createMultiBoardServerRuntime({
     }
 
     const boardSetupRootOverride = (process.env.DEMO_BOARD_SETUP_ROOT || '').trim();
-    const boardRoot = boardSetupRootOverride
-      ? path.resolve(boardSetupRootOverride, `board-${boardId}`)
-      : (cfg?.setupDir ? path.resolve(BOARD_ROOT, cfg.setupDir) : path.join(setupDir, `board-${boardId}`));
+    const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
-    fs.mkdirSync(boardRoot, { recursive: true });
-    const boardDir = path.join(boardRoot, 'runtime');
+    fs.mkdirSync(boardSetupPaths.setupRoot, { recursive: true });
     const flowRunner = createStepMachineChatFlowRunner({
       invokeRef: (ref, stepArgs) => invokeExecutionRefAsync(ref, stepArgs, {
         cliDir: BOARD_ROOT,
@@ -409,10 +412,12 @@ const runtime = createMultiBoardServerRuntime({
       }),
     });
     const baseExecutionExtra = {
-      boardSetupRoot: boardRoot,
-      boardRuntimeDir: 'runtime',
-      runtimeStatusDir: 'runtime-out',
-      cardsDir: 'cards',
+      boardSetupRoot: boardSetupPaths.setupRoot,
+      boardRuntimeDir: boardSetupPaths.boardRuntime,
+      chatStore: boardSetupPaths.chatStore,
+      runtimeStatusDir: boardSetupPaths.boardOutputsStore,
+      artifactsStore: boardSetupPaths.artifactsStore,
+      scratchStore: boardSetupPaths.scratchStore,
       projectRoot: BOARD_ROOT,
       chatFlowRoot,
       serverUrl: `http://127.0.0.1:${PORT}`,
@@ -420,12 +425,12 @@ const runtime = createMultiBoardServerRuntime({
       ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
     };
 
-    const baseCfg = buildBoardContextConfig('base', boardDir, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, baseExecutionExtra);
+    const baseCfg = buildBoardContextConfig('base', boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, baseExecutionExtra);
     const boards = [baseCfg];
 
-    demoPrepSetup({ cardsDir, boardDir });
+    demoPrepSetup({ cardsDir, boardDir: boardSetupPaths.boardRuntimePath });
 
-    const chatStorage = createFsBoardChatStorage(boardDir);
+    const chatStorage = createFsBoardChatStorage(boardSetupPaths.chatStorePath);
 
     const singleBoardRuntime = createSingleBoardServerRuntime({
       apiBasePath: `${apiBasePath}/${boardId}`,
@@ -438,10 +443,12 @@ const runtime = createMultiBoardServerRuntime({
       logger,
       serverUrl: `http://127.0.0.1:${PORT}`,
       executionExtra: {
-        boardSetupRoot: boardRoot,
-        boardRuntimeDir: 'runtime',
-        runtimeStatusDir: 'runtime-out',
-        cardsDir: 'cards',
+        boardSetupRoot: boardSetupPaths.setupRoot,
+        boardRuntimeDir: boardSetupPaths.boardRuntime,
+        chatStore: boardSetupPaths.chatStore,
+        runtimeStatusDir: boardSetupPaths.boardOutputsStore,
+        artifactsStore: boardSetupPaths.artifactsStore,
+        scratchStore: boardSetupPaths.scratchStore,
         projectRoot: BOARD_ROOT,
         chatFlowRoot,
         chatCopilotTimeoutMs,
@@ -513,7 +520,6 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[board-server] listening on http://127.0.0.1:${PORT}`);
   console.log(`[board-server] setup dir: ${setupDir}`);
-  console.log(`[board-server] server-meta store: ${serverMetaRef}`);
   console.log('[board-server] endpoints:');
   console.log(`  GET  ${apiBasePath}                          <- list boards`);
   console.log(`  POST ${apiBasePath}  {id, label?}            <- register board`);

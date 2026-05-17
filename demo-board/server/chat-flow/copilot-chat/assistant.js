@@ -27,7 +27,7 @@ const {
   boardSetupRoot = '',
   boardRuntimeDir = '',
   runtimeStatusDir = '',
-  cardsDir = '',
+  artifactsStore = '',
   chatMessages: rawChatMessages = [],
   userText = 'what is two plus two?',
   chatCopilotTimeoutMs: rawChatCopilotTimeoutMs = 300000,
@@ -40,7 +40,7 @@ const chatCopilotTimeoutMs = Number.isFinite(Number(rawChatCopilotTimeoutMs)) &&
 
 
 function buildPrompt(cId, historyDump, currentUserText) {
-  const cardSetupDirRel = path.join(cardsDir, cId).replace(/\\/g, '/');
+  const cardSetupDirRel = path.join(artifactsStore, cId).replace(/\\/g, '/');
   const runtimeDirRel = boardRuntimeDir;
   const statusDirRel = runtimeStatusDir;
 
