@@ -142,6 +142,8 @@
         session: runtimeSession,
         initialMode: state.mode,
         canvas: state.canvas,
+        boardPaths: boardPaths,
+        getServerOrigin: getServerOrigin,
       });
 
       runtime.mountBoard({
@@ -175,6 +177,8 @@
         session: runtimeSession,
         initialMode: state.mode,
         canvas: state.canvas,
+        boardPaths: boardPaths,
+        getServerOrigin: getServerOrigin,
         includeCard: function (model) {
           return !!model && allowedIds.has(String(model.id));
         },
