@@ -15,7 +15,7 @@
       "bindTo": "sarala_income",
       "outputFile": "card-finbook-income-sarala.json",
       "mcp": {
-        "manifest": "../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json",
+        "server": "finbook",
         "tool": "finbook.run_report",
         "input": {
           "account": "Sarala",
@@ -28,7 +28,7 @@
       "bindTo": "hari_income",
       "outputFile": "card-finbook-income-hari.json",
       "mcp": {
-        "manifest": "../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json",
+        "server": "finbook",
         "tool": "finbook.run_report",
         "input": {
           "account": "Hari",
@@ -41,7 +41,7 @@
       "bindTo": "z_income",
       "outputFile": "card-finbook-income-z.json",
       "mcp": {
-        "manifest": "../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json",
+        "server": "finbook",
         "tool": "finbook.run_report",
         "input": {
           "account": "Z",

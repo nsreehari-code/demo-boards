@@ -148,6 +148,9 @@ export async function execute(context) {
   if (!cfg.tool || typeof cfg.tool !== 'string') {
     return { result: 'failure', data: { error: 'mcp.tool is required' }, error: 'missing tool' };
   }
+  if (!cfg.server) {
+    return { result: 'failure', data: { error: 'mcp.server is required (string registry name or inline connection object)' }, error: 'missing server' };
+  }
 
   const interpolationContext = {
     ...(sourceDef._projections || {}),
@@ -155,9 +158,31 @@ export async function execute(context) {
   };
 
   try {
+    // Resolve server: string → look up in mcp-server/registry.json; object → use inline
+    let resolvedManifestRef = null;
+    let resolvedServerOverride = typeof cfg.server === 'object' ? cfg.server : null;
+
+    if (typeof cfg.server === 'string') {
+      const fs = await import('node:fs');
+      const registryPath = path.resolve(executorDir, '..', 'mcp-server', 'registry.json');
+      let registry;
+      try {
+        registry = JSON.parse(fs.default.readFileSync(registryPath, 'utf8'));
+      } catch (err) {
+        throw new Error(`Cannot read MCP server registry (${registryPath}): ${String(err?.message || err)}`);
+      }
+      const entry = registry?.servers?.[cfg.server];
+      if (!entry) {
+        throw new Error(`MCP server "${cfg.server}" not found in registry (${registryPath})`);
+      }
+      if (entry.manifest) resolvedManifestRef = entry.manifest;
+      if (entry.connection) resolvedServerOverride = entry.connection;
+    }
+
     let manifestConnection = null;
-    if (cfg.manifest) {
-      const manifestPath = resolveManifestPath(executorDir, cfg.manifest);
+    if (resolvedManifestRef) {
+      const mcpServerDir = path.resolve(executorDir, '..', 'mcp-server');
+      const manifestPath = resolveManifestPath(mcpServerDir, resolvedManifestRef);
       const { loadManifest } = await importManifestLoader(executorDir);
       const loaded = loadManifest(manifestPath);
       manifestConnection = loaded.manifest.connection || null;
@@ -167,7 +192,7 @@ export async function execute(context) {
       }
     }
 
-    const connection = resolveConnection(manifestConnection, cfg.server);
+    const connection = resolveConnection(manifestConnection, resolvedServerOverride);
     const toolArguments = interpolateValue(cfg.input && typeof cfg.input === 'object' ? cfg.input : {}, interpolationContext);
 
     const { Client } = await importClientModules();

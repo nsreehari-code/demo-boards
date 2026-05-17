@@ -3,6 +3,9 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -306,10 +309,38 @@ async function startStreamableHttpServer(loaded) {
   process.stdout.write(`[mcp-server] streamable-http listening on http://${host}:${port}${endpoint}\n`);
 }
 
+function loadManifestPathsFromRegistry() {
+  const mcpServerDir = path.resolve(fileURLToPath(import.meta.url), '..', '..');
+  const registryPath = path.resolve(mcpServerDir, 'registry.json');
+  const manifestsDir = path.resolve(mcpServerDir, 'manifests');
+  let registry;
+  try {
+    registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+  } catch {
+    process.stderr.write('[mcp-server] No registry.json found, starting with no manifests\n');
+    return [];
+  }
+  const servers = registry?.servers || {};
+  return Object.values(servers)
+    .filter(entry => entry.manifest)
+    .map(entry => {
+      const ref = entry.manifest;
+      if (path.isAbsolute(ref)) return ref;
+      if (ref.startsWith('.') || ref.includes('/') || ref.includes('\\')) {
+        return path.resolve(mcpServerDir, ref);
+      }
+      return path.resolve(manifestsDir, ref);
+    });
+}
+
 async function main() {
-  const manifestPaths = getArgValues('--manifest');
+  let manifestPaths = getArgValues('--manifest');
   const transportName = getArgValue('--transport', 'stdio');
   const dryRun = hasFlag('--dry-run');
+
+  if (manifestPaths.length === 0) {
+    manifestPaths = loadManifestPathsFromRegistry();
+  }
 
   const loaded = loadManifests(manifestPaths);
   validateTransportCompatibility(loaded.tools, transportName);

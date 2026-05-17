@@ -6,7 +6,7 @@
   "description": "Manifest-driven MCP server scaffold for demo-boards and related data repos.",
   "scripts": {
     "start": "node src/index.js",
-    "start:http": "node src/index.js --manifest manifests/demo-boards.workiq.json --manifest manifests/demo-boards.graph.json --manifest ../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json --transport streamable-http",
+    "start:http": "node src/index.js --transport streamable-http",
     "start:stdio": "node src/index.js --transport stdio",
     "dry-run": "node src/index.js --dry-run --transport streamable-http",
     "probe:finbook-workflows": "node scripts/probe-finbook-workflow-tools.js"

@@ -18,7 +18,7 @@
         "channel_id": "card_data.channel_id"
       },
       "mcp": {
-        "manifest": "demo-boards.graph.json",
+        "server": "graph",
         "tool": "teams.graph",
         "input": {
           "action": "read-channel",

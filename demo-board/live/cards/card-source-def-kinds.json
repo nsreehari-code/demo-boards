@@ -54,9 +54,9 @@
       },
       {
         "kind": "mcp",
-        "description": "Invoke an MCP tool via a manifest-selected or explicitly configured MCP server.",
-        "required_fields": "mcp.tool (string)",
-        "notes": "Optional: mcp.manifest, mcp.server, mcp.input, mcp.args. Use this for hosted integrations such as Teams Graph and WorkIQ."
+        "description": "Invoke an MCP tool via a named server from the registry or an inline connection config.",
+        "required_fields": "mcp.tool (string), mcp.server (string registry name or inline connection object)",
+        "notes": "mcp.server as a string looks up mcp-server/registry.json. As an object, provide transport/url/command directly. Optional: mcp.input, mcp.args. Use this for hosted integrations such as Teams Graph and WorkIQ."
       }
     ],
     "common_source_def_fields": {

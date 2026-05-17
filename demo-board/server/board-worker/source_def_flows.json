@@ -174,7 +174,7 @@
         "field": "mcp"
       },
       "manifest": {
-        "description": "Invoke an MCP tool via a manifest-selected or explicitly configured MCP server.",
+        "description": "Invoke an MCP tool via a named server registry entry or an inline connection config.",
         "inputSchema": {
           "mcp": {
             "type": "object",
@@ -184,13 +184,10 @@
                 "type": "string",
                 "required": true
               },
-              "manifest": {
-                "type": "string",
-                "required": false
-              },
               "server": {
-                "type": "object",
-                "required": false
+                "type": "string|object",
+                "required": true,
+                "description": "String: logical server name from mcp-server/registry.json. Object: inline connection config (transport, url/command, etc.)."
               },
               "input": {
                 "type": "object",

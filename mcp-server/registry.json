@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "finbook": {
+      "manifest": "../data-repos-V2/managed-truthsets/mcp-executable-manifest.json"
+    },
+    "workiq": {
+      "manifest": "demo-boards.workiq.json"
+    },
+    "graph": {
+      "manifest": "demo-boards.graph.json"
+    }
+  }
+}

@@ -124,7 +124,8 @@
             BoardModule: window.IngestBoardPackage,
             mountElement: document.getElementById('ingestBoardRoot'),
             shouldMount: function (ctx) {
-              return ctx.activeBoardId === 'live';
+              var firstBoard = Object.keys(((ctx.serverConfig || {}).boards) || {})[0];
+              return ctx.activeBoardId === firstBoard;
             },
             filter: function (model) {
               return !!(model && model.card && model.card.meta && model.card.meta.ingest === true);
