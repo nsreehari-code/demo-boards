@@ -196,6 +196,42 @@
         head.appendChild(stateLabel);
         var body = document.createElement('div');
         body.className = 'lc-ingest-body';
+        var errorEl = document.createElement('div');
+        errorEl.className = 'lc-ingest-error';
+        errorEl.style.display = 'none';
+        var chatHost = document.createElement('div');
+        var doneFilesWrap = document.createElement('div');
+        doneFilesWrap.className = 'lc-ingest-files';
+        doneFilesWrap.style.display = 'none';
+        var doneFilesLabel = document.createElement('div');
+        doneFilesLabel.className = 'lc-ingest-files-label';
+        var doneFilesContent = document.createElement('div');
+        doneFilesWrap.appendChild(doneFilesLabel);
+        doneFilesWrap.appendChild(doneFilesContent);
+        var activeFilesWrap = document.createElement('div');
+        activeFilesWrap.className = 'lc-ingest-files mt-3';
+        activeFilesWrap.style.display = 'none';
+        var activeFilesLabel = document.createElement('div');
+        activeFilesLabel.className = 'lc-ingest-files-label';
+        var activeFilesContent = document.createElement('div');
+        activeFilesWrap.appendChild(activeFilesLabel);
+        activeFilesWrap.appendChild(activeFilesContent);
+        body.appendChild(errorEl);
+        body.appendChild(chatHost);
+        body.appendChild(doneFilesWrap);
+        body.appendChild(activeFilesWrap);
+        wrap.__ingestRefs = {
+          errorEl: errorEl,
+          chatHost: chatHost,
+          doneFilesWrap: doneFilesWrap,
+          doneFilesLabel: doneFilesLabel,
+          doneFilesContent: doneFilesContent,
+          activeFilesWrap: activeFilesWrap,
+          activeFilesLabel: activeFilesLabel,
+          activeFilesContent: activeFilesContent,
+          chatSubscribed: false,
+          lastPhase: ''
+        };
         wrap.appendChild(head);
         wrap.appendChild(body);
         return wrap;
@@ -206,49 +242,53 @@
         var stateField = meta.ingestStateField || meta.ingest_state_field || 'X';
         var state = String(model && model.card_data && model.card_data[stateField] || 'active').toLowerCase();
         var body = shell && shell.querySelector ? shell.querySelector('.lc-ingest-body') : null;
-        if (!body) {
+        var refs = shell && shell.__ingestRefs ? shell.__ingestRefs : null;
+        if (!body || !refs) {
           return;
         }
         shell.className = 'lc-ingest-shell lc-ingest-shell-' + state;
         var stateEl = shell.querySelector('.lc-ingest-shell-state');
         if (stateEl) stateEl.textContent = state;
-        body.innerHTML = '';
+        refs.errorEl.style.display = 'none';
+        refs.doneFilesWrap.style.display = 'none';
+        refs.activeFilesWrap.style.display = 'none';
+        refs.chatHost.style.display = 'none';
 
         if (model && model.card_data && model.card_data.status === 'error' && model.card_data.error) {
-          var errEl = document.createElement('div');
-          errEl.className = 'lc-ingest-error';
-          errEl.textContent = model.card_data.error;
-          body.appendChild(errEl);
+          refs.errorEl.textContent = model.card_data.error;
+          refs.errorEl.style.display = '';
         }
 
         if (state === 'done') {
-          Promise.resolve(context.stopReceivingChats()).catch(function () {});
-          var filesWrap = document.createElement('div');
-          filesWrap.className = 'lc-ingest-files';
-          var label = document.createElement('div');
-          label.className = 'lc-ingest-files-label';
-          label.textContent = meta.doneLabel || 'Uploaded files';
-          var content = document.createElement('div');
-          filesWrap.appendChild(label);
-          filesWrap.appendChild(content);
-          body.appendChild(filesWrap);
+          if (refs.chatSubscribed) {
+            Promise.resolve(context.stopReceivingChats(model.id)).catch(function () {});
+          }
+          refs.chatSubscribed = false;
+          refs.doneFilesLabel.textContent = meta.doneLabel || 'Uploaded files';
+          refs.doneFilesContent.innerHTML = '';
+          refs.doneFilesWrap.style.display = '';
           context.renderBuiltin(null, 'text',
             model && model.card_data && Array.isArray(model.card_data.files) ? model.card_data.files : [],
-            content,
+            refs.doneFilesContent,
             { data: { format: 'file-links', cardId: model.id } }
           );
+          refs.lastPhase = state;
           return;
         }
 
-        var host = document.createElement('div');
-        body.appendChild(host);
+        refs.chatHost.style.display = '';
         var chatState = context && context.chatState && typeof context.chatState === 'object'
           ? context.chatState
           : { receiving: false, messages: [] };
-        if (!chatState.receiving) {
-          Promise.resolve(context.startReceivingChats()).catch(function () {});
+        if (chatState.receiving) {
+          refs.chatSubscribed = true;
+        } else if (!refs.chatSubscribed) {
+          refs.chatSubscribed = true;
+          Promise.resolve(context.startReceivingChats(model.id)).catch(function () {
+            refs.chatSubscribed = false;
+          });
         }
-        context.renderBuiltin(null, 'chat', getChatMessages(model, context), host, {
+        context.renderBuiltin(null, 'chat', getChatMessages(model, context), refs.chatHost, {
           id: 'ingest-chat-' + model.id,
           data: { fileAttach: true, placeholder: meta.chatPlaceholder || 'Type a message...' }
         });
@@ -257,19 +297,14 @@
           ? model.card_data.files.filter(Boolean)
           : [];
         if (activeFiles.length) {
-          var filesWrap = document.createElement('div');
-          filesWrap.className = 'lc-ingest-files mt-3';
-          var filesLabel = document.createElement('div');
-          filesLabel.className = 'lc-ingest-files-label';
-          filesLabel.textContent = meta.doneLabel || 'Attached files';
-          var filesContent = document.createElement('div');
-          filesWrap.appendChild(filesLabel);
-          filesWrap.appendChild(filesContent);
-          body.appendChild(filesWrap);
-          context.renderBuiltin(null, 'text', activeFiles, filesContent, {
+          refs.activeFilesLabel.textContent = meta.doneLabel || 'Attached files';
+          refs.activeFilesContent.innerHTML = '';
+          refs.activeFilesWrap.style.display = '';
+          context.renderBuiltin(null, 'text', activeFiles, refs.activeFilesContent, {
             data: { format: 'file-links', cardId: model.id }
           });
         }
+        refs.lastPhase = state;
       }
     });
   })();

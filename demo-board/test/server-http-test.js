@@ -13,12 +13,17 @@
  *   node test/server-http-test.js [--port 7799]
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import http from 'node:http';
+import net from 'node:net';
 import fs from 'node:fs';
+import os from 'node:os';
+
+const ECHO_PROBE_MARKER = '__probe__echo__probe__';
+const PROBE_IN_PROGRESS_TEXT = 'in-progress';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +31,18 @@ const __dirname = path.dirname(__filename);
 const cliArgs = process.argv.slice(2);
 const portArg = cliArgs.indexOf('--port');
 const cliPort = portArg !== -1 ? parseInt(cliArgs[portArg + 1], 10) : NaN;
+const skipT1 = cliArgs.includes('--skip-t1');
+const skipT2 = cliArgs.includes('--skip-t2');
+const skipT3 = cliArgs.includes('--skip-t3');
+function isCopilotAvailable() {
+  try {
+    const r = spawnSync('copilot', ['--version'], { timeout: 5_000, stdio: 'ignore', windowsHide: true });
+    return !r.error;
+  } catch { return false; }
+}
+
+const skipT3a = cliArgs.includes('--skip-t3a') || !isCopilotAvailable();
+const skipT3b = cliArgs.includes('--skip-t3b');
 const RUN_ID = `run-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 
 const BOARD_ID = 'live';
@@ -35,34 +52,28 @@ const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
 const CARD_PATTERN = 'cardT*';
 const CHAT_CARD_ID = 'card-portfolio';
 
-function resolveServerPort() {
-  if (Number.isInteger(cliPort) && cliPort > 0) return cliPort;
-  const configPath = path.join(BOARD_DIR, 'server-config.json');
-  try {
-    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    const configured = Number(cfg?.port);
-    if (Number.isInteger(configured) && configured > 0) return configured;
-  } catch { /* ignore */ }
-  return 7799;
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = /** @type {import('node:net').AddressInfo} */ (srv.address());
+      srv.close(() => resolve(addr.port));
+    });
+    srv.on('error', reject);
+  });
 }
 
-const PORT = resolveServerPort();
+async function resolveServerPort() {
+  if (Number.isInteger(cliPort) && cliPort > 0) return cliPort;
+  return findFreePort();
+}
+
+const PORT = await resolveServerPort();
 const BASE = `http://127.0.0.1:${PORT}/api/boards/${BOARD_ID}`;
 
-// Resolve and wipe the setup directory so each test run starts clean.
+// Always use a system temp directory so parallel runs and vitest don't collide.
 function resolveSetupDirRoot() {
-  const configPath = path.join(BOARD_DIR, 'server-config.json');
-  try {
-    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    const boardSetupDir = cfg?.boards?.[BOARD_ID]?.setupDir;
-    if (typeof boardSetupDir === 'string' && boardSetupDir.trim()) {
-      return path.resolve(BOARD_DIR, boardSetupDir.trim());
-    }
-    if (cfg && typeof cfg.setupDir === 'string' && cfg.setupDir.trim()) {
-      return path.resolve(BOARD_DIR, cfg.setupDir.trim());
-    }
-  } catch { /* ignore */ }
-  return path.join(BOARD_DIR, '.demo-setup');
+  return os.tmpdir();
 }
 
 const SETUP_DIR = path.join(resolveSetupDirRoot(), RUN_ID);
@@ -83,14 +94,6 @@ const NS = {
   computedValues: {},
   chatEvents: [],
 };
-
-function resetNs() {
-  NS.initialPayload = null;
-  NS.statusSummary = null;
-  NS.statusGeneration = 0;
-  NS.computedValues = {};
-  NS.chatEvents = [];
-}
 
 function applyFrame(payload) {
   if (payload && Array.isArray(payload.cardDefinitions)) {
@@ -228,20 +231,47 @@ const waitForAllCompleted = (ms = 60_000, label = 'all completed') =>
 const waitForChatPredicate = (predicate, ms, label) =>
   waitUntil(() => predicate(NS.chatEvents) || false, ms, label);
 
-async function waitForChatHistory(cardId, predicate, timeoutMs, label) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() <= deadline) {
-    const res = await httpGet(`${BASE}/cards/${cardId}/chats`);
-    if (res.status === 200) {
-      const messages = Array.isArray(res.data?.messages) ? res.data.messages : [];
-      const result = predicate(messages);
-      if (result !== undefined && result !== null && result !== false) {
-        return result;
-      }
+function deriveProbeLifecycleMilestones(events, opts) {
+  const milestones = [];
+  let prevMessageCount = Number(opts.beforeCount || 0);
+  let prevProcessing = Boolean(opts.beforeProcessing);
+  const prompt = String(opts.prompt || '');
+  const inProgressText = String(opts.inProgressText || PROBE_IN_PROGRESS_TEXT);
+
+  for (const event of events) {
+    const messages = Array.isArray(event?.messages) ? event.messages : [];
+    const nextMessageCount = Number(event?.messageCount || messages.length || 0);
+    const newMessages = nextMessageCount > prevMessageCount
+      ? messages.slice(prevMessageCount, nextMessageCount)
+      : [];
+
+    for (const message of newMessages) {
+      const role = String(message?.role || '');
+      const text = String(message?.text || '');
+      if (role === 'user' && text.includes(prompt)) milestones.push('user');
+      else if (role === 'system' && text.trim().toLowerCase() === inProgressText) milestones.push('in-progress');
+      else if (role === 'assistant' && text.includes(`Echo: ${prompt}`)) milestones.push('assistant');
     }
-    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const processing = Boolean(event?.processing);
+    if (processing !== prevProcessing) milestones.push(processing ? 'processing-true' : 'processing-false');
+
+    prevMessageCount = nextMessageCount;
+    prevProcessing = processing;
   }
-  throw new Error(`Timeout (${timeoutMs}ms) waiting for: ${label}`);
+
+  return milestones;
+}
+
+function matchOrderedProbeLifecycle(events, opts) {
+  const milestones = deriveProbeLifecycleMilestones(events, opts);
+  if (milestones.length !== 5) return false;
+  const firstPair = milestones.slice(0, 2);
+  const lastPair = milestones.slice(3, 5);
+  const firstOk = firstPair.includes('user') && firstPair.includes('processing-true');
+  const middleOk = milestones[2] === 'in-progress';
+  const lastOk = lastPair.includes('assistant') && lastPair.includes('processing-false');
+  return (firstOk && middleOk && lastOk) ? { milestones } : false;
 }
 
 function httpGet(url) {
@@ -328,10 +358,8 @@ function httpUploadChatFile(url, fileName, content, contentType = 'text/plain; c
 }
 
 function startServer(port) {
-  const extraArgs = arguments[1]?.extraArgs || [];
-  const envPatch = arguments[1]?.env || {};
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [SERVER_SCRIPT, ...extraArgs], {
+    const proc = spawn(process.execPath, [SERVER_SCRIPT], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: {
@@ -340,7 +368,6 @@ function startServer(port) {
         DEMO_SETUP_DIR: SETUP_DIR,
         DEMO_BOARD_SETUP_ROOT: BOARD_SETUP_ROOT,
         DEMO_CARDS_PATTERN: CARD_PATTERN,
-        ...envPatch,
       },
     });
     let ready = false;
@@ -365,27 +392,6 @@ function startServer(port) {
   });
 }
 
-async function stopServer(proc) {
-  if (!proc) return;
-  if (proc.exitCode !== null) return;
-  proc.kill();
-  await new Promise((resolve) => proc.once('exit', resolve));
-}
-
-function startBoardSseWorker() {
-  const sseClientId = `server-http-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const sseUrl = `${BASE}/sse?clientId=${encodeURIComponent(sseClientId)}`;
-  const worker = new Worker(SSE_WORKER_SCRIPT, {
-    workerData: { sseUrl },
-  });
-  worker.on('message', (msg) => {
-    if (msg.type === 'frame') applyFrame(msg.payload);
-    else if (msg.type === 'error') console.error(`[sse-worker] ${msg.message}`);
-  });
-  worker.on('error', (err) => console.error(`[sse-worker] uncaught: ${err.message}`));
-  return worker;
-}
-
 // ---------------------------------------------------------------------------
 // Test sequence
 // ---------------------------------------------------------------------------
@@ -394,7 +400,7 @@ console.log('\n=== live board HTTP+SSE smoke test ===');
 console.log(`target: ${BASE}`);
 console.log(`card pattern: ${CARD_PATTERN}`);
 
-let serverProc = await startServer(PORT);
+const serverProc = await startServer(PORT);
 let sseWorker = null;
 let chatSseClient = null;
 let chatSseClientId = '';
@@ -414,7 +420,16 @@ try {
   console.log('[T0.1] init-board ok');
 
   console.log('\n=== T0 Step 2: start SSE worker ===');
-  sseWorker = startBoardSseWorker();
+  const sseClientId = `server-http-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const sseUrl = `${BASE}/sse?clientId=${encodeURIComponent(sseClientId)}`;
+  sseWorker = new Worker(SSE_WORKER_SCRIPT, {
+    workerData: { sseUrl },
+  });
+  sseWorker.on('message', (msg) => {
+    if (msg.type === 'frame') applyFrame(msg.payload);
+    else if (msg.type === 'error') console.error(`[sse-worker] ${msg.message}`);
+  });
+  sseWorker.on('error', (err) => console.error(`[sse-worker] uncaught: ${err.message}`));
 
   const initialPayload = await waitForInitialPayload();
   const cardCount = Array.isArray(initialPayload.cardDefinitions) ? initialPayload.cardDefinitions.length : 0;
@@ -441,7 +456,10 @@ try {
   console.log(`[T0] ok: ${t0Positions.length} positions computed`);
 
   // ── T1: PATCH holdings (+1 row), verify recomputation ──
-  console.log('\n=== T1: patch holdings (+1 row) ===');
+  if (skipT1) {
+    console.log('\n=== T1: skipped (--skip-t1) ===');
+  } else {
+    console.log('\n=== T1: patch holdings (+1 row) ===');
 
   // Read current holdings from card store
   const portfolioCardRes = await httpGet(`${BASE}/cards/card-portfolio`);
@@ -485,49 +503,57 @@ try {
     `Expected positions rows +1 (before=${t0PositionsCount}, after=${afterPositionsCount})`);
   console.log(`[T1] ok: holdings ${t0HoldingsCount}->${afterHoldingsCount}, ` +
     `positions ${t0PositionsCount}->${afterPositionsCount}, added=${newTicker}`);
+  }
 
   // ── T2: plain file upload API + card_data.files + download roundtrip ──
-  console.log('\n=== T2: plain file upload -> card_data.files -> download ===');
-  const t2CardBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}`);
-  assert(t2CardBefore.status === 200, `T2 pre card read returned ${t2CardBefore.status}`);
-  const t2FilesBefore = Array.isArray(t2CardBefore.data?.card_data?.files)
-    ? t2CardBefore.data.card_data.files
-    : [];
-  const t2BeforeCount = t2FilesBefore.length;
+  if (skipT2) {
+    console.log('\n=== T2: skipped (--skip-t2) ===');
+  } else {
+    console.log('\n=== T2: plain file upload -> card_data.files -> download ===');
+    const t2CardBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}`);
+    assert(t2CardBefore.status === 200, `T2 pre card read returned ${t2CardBefore.status}`);
+    const t2FilesBefore = Array.isArray(t2CardBefore.data?.card_data?.files)
+      ? t2CardBefore.data.card_data.files
+      : [];
+    const t2BeforeCount = t2FilesBefore.length;
 
-  const t2UploadText = `plain-file-upload-${Date.now()}`;
-  const t2UploadName = 't2-upload.txt';
-  const t2UploadRes = await httpUploadChatFile(
-    `${BASE}/cards/${CHAT_CARD_ID}/files`,
-    t2UploadName,
-    t2UploadText,
-  );
-  assert(t2UploadRes.status === 200, `T2 file upload returned ${t2UploadRes.status}`);
-  const t2UploadedFile = t2UploadRes.data?.file;
-  assert(t2UploadedFile && typeof t2UploadedFile === 'object', 'T2 upload response missing file metadata');
-  assert(String(t2UploadedFile?.name || '') === t2UploadName, 'T2 uploaded file name mismatch');
+    const t2UploadText = `plain-file-upload-${Date.now()}`;
+    const t2UploadName = 't2-upload.txt';
+    const t2UploadRes = await httpUploadChatFile(
+      `${BASE}/cards/${CHAT_CARD_ID}/files`,
+      t2UploadName,
+      t2UploadText,
+    );
+    assert(t2UploadRes.status === 200, `T2 file upload returned ${t2UploadRes.status}`);
+    const t2UploadedFile = t2UploadRes.data?.file;
+    assert(t2UploadedFile && typeof t2UploadedFile === 'object', 'T2 upload response missing file metadata');
+    assert(String(t2UploadedFile?.name || '') === t2UploadName, 'T2 uploaded file name mismatch');
 
-  const t2CardAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}`);
-  assert(t2CardAfter.status === 200, `T2 post card read returned ${t2CardAfter.status}`);
-  const t2FilesAfter = Array.isArray(t2CardAfter.data?.card_data?.files)
-    ? t2CardAfter.data.card_data.files
-    : [];
-  assert(t2FilesAfter.length === t2BeforeCount + 1, `T2 expected files +1 (before=${t2BeforeCount}, after=${t2FilesAfter.length})`);
+    const t2CardAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}`);
+    assert(t2CardAfter.status === 200, `T2 post card read returned ${t2CardAfter.status}`);
+    const t2FilesAfter = Array.isArray(t2CardAfter.data?.card_data?.files)
+      ? t2CardAfter.data.card_data.files
+      : [];
+    assert(t2FilesAfter.length === t2BeforeCount + 1, `T2 expected files +1 (before=${t2BeforeCount}, after=${t2FilesAfter.length})`);
 
-  const t2FileIndex = t2FilesAfter.findIndex((f) => String(f?.stored_name || '') === String(t2UploadedFile?.stored_name || ''));
-  assert(t2FileIndex >= 0, 'T2 uploaded file metadata not found in card_data.files');
+    const t2FileIndex = t2FilesAfter.findIndex((f) => String(f?.stored_name || '') === String(t2UploadedFile?.stored_name || ''));
+    assert(t2FileIndex >= 0, 'T2 uploaded file metadata not found in card_data.files');
 
-  const t2DownloadRes = await httpGetRaw(
-    `${BASE}/cards/${CHAT_CARD_ID}/files/${t2FileIndex}?sn=${encodeURIComponent(String(t2UploadedFile?.stored_name || ''))}`,
-  );
-  assert(t2DownloadRes.status === 200, `T2 file download returned ${t2DownloadRes.status}`);
-  const t2DownloadedText = t2DownloadRes.body.toString('utf-8');
-  assert(t2DownloadedText === t2UploadText, 'T2 downloaded content mismatch');
-  console.log('[T2] ok: card_data.files updated and file download endpoint returned exact bytes');
+    const t2DownloadRes = await httpGetRaw(
+      `${BASE}/cards/${CHAT_CARD_ID}/files/${t2FileIndex}?sn=${encodeURIComponent(String(t2UploadedFile?.stored_name || ''))}`,
+    );
+    assert(t2DownloadRes.status === 200, `T2 file download returned ${t2DownloadRes.status}`);
+    const t2DownloadedText = t2DownloadRes.body.toString('utf-8');
+    assert(t2DownloadedText === t2UploadText, 'T2 downloaded content mismatch');
+    console.log('[T2] ok: card_data.files updated and file download endpoint returned exact bytes');
+  }
 
   // ── T3*: chat protocol over API + SSE ──
   {
-    console.log('\n=== T3: probe chat protocol (SSE lifecycle) ===');
+    if (skipT3) {
+      console.log('\n=== T3: skipped (--skip-t3) ===');
+    } else {
+    console.log(`\n[${new Date().toISOString()}] === T3: probe chat protocol (SSE lifecycle) ===`);
   chatSseClientId = `chat-proto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   chatSseClient = startSseClient(`${BASE}/sse?clientId=${encodeURIComponent(chatSseClientId)}`, (payload) => {
     captureChatEvents(payload, CHAT_CARD_ID);
@@ -541,477 +567,156 @@ try {
   assert(t2Before.status === 200, `T3 pre chats returned ${t2Before.status}`);
   const t2BeforeMessages = Array.isArray(t2Before.data?.messages) ? t2Before.data.messages : [];
   const t2BeforeCount = t2BeforeMessages.length;
+  const t2EventStart = NS.chatEvents.length;
   const t2ProbePrompt = `Probe protocol validation ${Date.now()}`;
 
   const t2SendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
     actionType: 'chat-send',
     payload: {
-      text: JSON.stringify({
-        prompt: t2ProbePrompt,
-        probe: true,
-        chatTimeMs: 2200,
-        chatTimeoutMs: 20000,
-      }),
+      text: `${ECHO_PROBE_MARKER}${t2ProbePrompt}${ECHO_PROBE_MARKER}`,
     },
   });
   assert(t2SendRes.status === 200, `T3 chat-send returned ${t2SendRes.status}`);
 
-  const t2UserOrProcessing = await waitForChatPredicate((events) => {
-    const slice = events.filter((e) => e.messageCount >= t2BeforeCount + 1 || e.processing === true);
-    return slice.length > 0 ? slice[slice.length - 1] : false;
-  }, 30_000, 'T3 user/proc signal');
-  assert(!!t2UserOrProcessing, 'T3 missing user/proc signal');
-
-  const t2Assistant = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const e = events[i];
-      if (e.messageCount < t2BeforeCount + 2) continue;
-      const last = e.messages[e.messages.length - 1];
-      if (last?.role === 'assistant' && String(last.text || '').includes(`Echo: ${t2ProbePrompt}`)) {
-        return e;
-      }
-    }
-    return false;
-  }, 45_000, 'T3 assistant echo');
-  assert(!!t2Assistant, 'T3 assistant echo not observed on SSE');
-
-  const t2ProcessingCleared = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const e = events[i];
-      if (e.messageCount >= t2BeforeCount + 2 && e.processing === false) return e;
-    }
-    return false;
-  }, 30_000, 'T3 processing clear');
-  assert(!!t2ProcessingCleared, 'T3 processing clear not observed');
+  const t2Lifecycle = await waitForChatPredicate((events) => {
+    return matchOrderedProbeLifecycle(events.slice(t2EventStart), {
+      beforeCount: t2BeforeCount,
+      beforeProcessing: false,
+      prompt: t2ProbePrompt,
+      inProgressText: PROBE_IN_PROGRESS_TEXT,
+    });
+  }, 45_000, 'T3 ordered lifecycle');
+  assert(!!t2Lifecycle, 'T3 ordered lifecycle not observed');
 
   const t2After = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
   assert(t2After.status === 200, `T3 post chats returned ${t2After.status}`);
   const t2AfterMessages = Array.isArray(t2After.data?.messages) ? t2After.data.messages : [];
   const t2NewMessages = t2AfterMessages.slice(t2BeforeCount);
-  assert(t2NewMessages.length >= 2, `T3 expected at least 2 new chat messages, got ${t2NewMessages.length}`);
+  assert(t2NewMessages.length >= 3, `T3 expected at least 3 new chat messages, got ${t2NewMessages.length}`);
   const t2User = t2NewMessages.find((m) => m?.role === 'user');
+  const t2InProgress = t2NewMessages.find((m) => m?.role === 'system' && String(m?.text || '').trim().toLowerCase() === PROBE_IN_PROGRESS_TEXT);
   const t2AssistantMsg = t2NewMessages.find((m) => m?.role === 'assistant');
   assert(!!t2User && typeof t2User.id === 'string', 'T3 user chat message missing id');
   assert(String(t2User?.text || '').includes(t2ProbePrompt), 'T3 user file text mismatch');
+  assert(!!t2InProgress && typeof t2InProgress.id === 'string', 'T3 in-progress system message missing id');
   assert(!!t2AssistantMsg && typeof t2AssistantMsg.id === 'string', 'T3 assistant chat message missing id');
   assert(String(t2AssistantMsg?.text || '').includes(`Echo: ${t2ProbePrompt}`), 'T3 assistant echo file content mismatch');
-  console.log('[T3] ok: probe lifecycle observed (processing/user any-order, assistant write, processing clear)');
+  console.log(`[${new Date().toISOString()}] [T3] ok: ordered probe lifecycle observed (user+processing, in-progress, assistant+processing clear)`);
+    }
 
   // ── T3a: non-probe chat protocol over API + SSE ──
-  console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');
-  const t2aBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t2aBefore.status === 200, `T3a pre chats returned ${t2aBefore.status}`);
-  const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
-  const t2aBeforeCount = t2aBeforeMessages.length;
-  const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
+  // Disabled in the public example unless explicitly requested — requires a
+  // configured Azure Foundry endpoint and agent_id in server-config.json.
+  if (skipT3a) {
+    console.log('\n=== T3a: skipped (--skip-t3a) ===');
+  } else {
+    console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');
+    const t2aBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2aBefore.status === 200, `T3a pre chats returned ${t2aBefore.status}`);
+    const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
+    const t2aBeforeCount = t2aBeforeMessages.length;
+    const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
 
-  const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-    actionType: 'chat-send',
-    payload: {
-      text: JSON.stringify({
-        prompt: t2aPrompt,
-        chatTimeoutMs: 180000,
-      }),
-    },
-  });
-  assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
+    const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+      actionType: 'chat-send',
+      payload: {
+        text: JSON.stringify({
+          prompt: t2aPrompt,
+          chatTimeoutMs: 180000,
+        }),
+      },
+    });
+    assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
 
-  const t2aAssistant = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const e = events[i];
-      if (e.messageCount < t2aBeforeCount + 2) continue;
-      const last = e.messages[e.messages.length - 1];
-      if (last?.role === 'assistant' && /paris/i.test(String(last.text || ''))) return e;
-    }
-    return false;
-  }, 240_000, 'T3a assistant response with paris');
-  assert(!!t2aAssistant, 'T3a assistant response with paris not observed on SSE');
+    const t2aAssistant = await waitForChatPredicate((events) => {
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        const e = events[i];
+        if (e.messageCount < t2aBeforeCount + 2) continue;
+        const last = e.messages[e.messages.length - 1];
+        if (last?.role === 'assistant' && /paris/i.test(String(last.text || ''))) return e;
+      }
+      return false;
+    }, 240_000, 'T3a assistant response with paris');
+    assert(!!t2aAssistant, 'T3a assistant response with paris not observed on SSE');
 
-  const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
-  const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
-  const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
-  assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat messages, got ${t2aNewMessages.length}`);
-  const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
-  assert(!!t2aAssistantMsg && typeof t2aAssistantMsg.id === 'string', 'T3a assistant chat message missing id');
-  assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T3a assistant file content missing paris');
-  console.log('[T3a] ok: non-probe response contains paris');
+    const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
+    const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
+    const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
+    assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat messages, got ${t2aNewMessages.length}`);
+    const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
+    assert(!!t2aAssistantMsg && typeof t2aAssistantMsg.id === 'string', 'T3a assistant chat message missing id');
+    assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T3a assistant file content missing paris');
+    console.log('[T3a] ok: non-probe response contains paris');
+  }
 
   // ── T3b: probe-echo chat + file upload protocol over API + SSE ──
-  console.log('\n=== T3b: probe-echo chat with file upload protocol ===');
-  const t2bBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t2bBefore.status === 200, `T3b pre chats returned ${t2bBefore.status}`);
-  const t2bBeforeMessages = Array.isArray(t2bBefore.data?.messages) ? t2bBefore.data.messages : [];
-  const t2bBeforeCount = t2bBeforeMessages.length;
+  if (skipT3b) {
+    console.log('\n=== T3b: skipped (--skip-t3b) ===');
+  } else {
+    console.log('\n=== T3b: probe-echo chat with file upload protocol ===');
+    const t2bBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2bBefore.status === 200, `T3b pre chats returned ${t2bBefore.status}`);
+    const t2bBeforeMessages = Array.isArray(t2bBefore.data?.messages) ? t2bBefore.data.messages : [];
+    const t2bBeforeCount = t2bBeforeMessages.length;
 
-  const t2bUploadRes = await httpUploadChatFile(
-    `${BASE}/cards/${CHAT_CARD_ID}/files?inChat=true`,
-    'q1.txt',
-    'what is the capital of japan',
-  );
-  assert(t2bUploadRes.status === 200, `T3b file upload returned ${t2bUploadRes.status}`);
-  const uploadedFile = t2bUploadRes.data?.file;
-  assert(uploadedFile && typeof uploadedFile === 'object', 'T3b upload response missing file metadata');
+    const t2bUploadRes = await httpUploadChatFile(
+      `${BASE}/cards/${CHAT_CARD_ID}/files?inChat=true`,
+      'q1.txt',
+      'what is the capital of japan',
+    );
+    assert(t2bUploadRes.status === 200, `T3b file upload returned ${t2bUploadRes.status}`);
+    const uploadedFile = t2bUploadRes.data?.file;
+    assert(uploadedFile && typeof uploadedFile === 'object', 'T3b upload response missing file metadata');
 
-  const t2bAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t2bAfterUpload.status === 200, `T3b chats after upload returned ${t2bAfterUpload.status}`);
-  const t2bUploadMessages = Array.isArray(t2bAfterUpload.data?.messages) ? t2bAfterUpload.data.messages : [];
-  const t2bUploadNewMessages = t2bUploadMessages.slice(t2bBeforeCount);
-  const t2bUploadSystem = t2bUploadNewMessages.find((m) => m?.role === 'system');
-  assert(!!t2bUploadSystem, 'T3b upload protocol missing system chat file');
-  assert(String(t2bUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3b upload system message does not describe uploaded file');
+    const t2bAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2bAfterUpload.status === 200, `T3b chats after upload returned ${t2bAfterUpload.status}`);
+    const t2bUploadMessages = Array.isArray(t2bAfterUpload.data?.messages) ? t2bAfterUpload.data.messages : [];
+    const t2bUploadNewMessages = t2bUploadMessages.slice(t2bBeforeCount);
+    const t2bUploadSystem = t2bUploadNewMessages.find((m) => m?.role === 'system');
+    assert(!!t2bUploadSystem, 'T3b upload protocol missing system chat file');
+    assert(String(t2bUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3b upload system message does not describe uploaded file');
 
-  const t2bSendBaseline = t2bUploadMessages.length;
+    const t2bSendBaseline = t2bUploadMessages.length;
+    const t2bEventStart = NS.chatEvents.length;
 
-  const t2bPrompt = `probe echo file-upload validation ${Date.now()}`;
-  const t2bSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-    actionType: 'chat-send',
-    payload: {
-      text: JSON.stringify({
+    const t2bPrompt = `probe echo file-upload validation ${Date.now()}`;
+    const t2bSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+      actionType: 'chat-send',
+      payload: {
+        text: `${ECHO_PROBE_MARKER}${t2bPrompt}${ECHO_PROBE_MARKER}`,
+        files: [uploadedFile],
+      },
+    });
+    assert(t2bSendRes.status === 200, `T3b chat-send returned ${t2bSendRes.status}`);
+
+    const t2bLifecycle = await waitForChatPredicate((events) => {
+      return matchOrderedProbeLifecycle(events.slice(t2bEventStart), {
+        beforeCount: t2bSendBaseline,
+        beforeProcessing: false,
         prompt: t2bPrompt,
-        probe: true,
-        chatTimeMs: 2200,
-      }),
-      files: [uploadedFile],
-    },
-  });
-  assert(t2bSendRes.status === 200, `T3b chat-send returned ${t2bSendRes.status}`);
+        inProgressText: PROBE_IN_PROGRESS_TEXT,
+      });
+    }, 60_000, 'T3b ordered lifecycle');
+    assert(!!t2bLifecycle, 'T3b ordered lifecycle not observed');
 
-  const t2bUserOrProcessing = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const e = events[i];
-      if (e.messageCount >= t2bSendBaseline + 1 || e.processing === true) return e;
-    }
-    return false;
-  }, 45_000, 'T3b user/proc signal');
-  assert(!!t2bUserOrProcessing, 'T3b user/proc signal not observed');
+    const t2bAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2bAfter.status === 200, `T3b post chats returned ${t2bAfter.status}`);
+    const t2bAfterMessages = Array.isArray(t2bAfter.data?.messages) ? t2bAfter.data.messages : [];
+    const t2bNewMessages = t2bAfterMessages.slice(t2bSendBaseline);
+    assert(t2bNewMessages.length >= 3, `T3b expected at least 3 chat messages after send, got ${t2bNewMessages.length}`);
 
-  const t2bAssistantOnSse = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const e = events[i];
-      if (e.messageCount < t2bSendBaseline + 2) continue;
-      const last = e.messages[e.messages.length - 1];
-      if (last?.role === 'assistant' && String(last.text || '').includes(`Echo: ${t2bPrompt}`)) return e;
-    }
-    return false;
-  }, 60_000, 'T3b assistant response');
-  assert(!!t2bAssistantOnSse, 'T3b assistant response not observed on SSE');
+    const t2bUser = t2bNewMessages.find((m) => m?.role === 'user');
+    const t2bInProgress = t2bNewMessages.find((m) => m?.role === 'system' && String(m?.text || '').trim().toLowerCase() === PROBE_IN_PROGRESS_TEXT);
+    const t2bAssistantMsg = t2bNewMessages.find((m) => m?.role === 'assistant');
 
-  const t2bAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t2bAfter.status === 200, `T3b post chats returned ${t2bAfter.status}`);
-  const t2bAfterMessages = Array.isArray(t2bAfter.data?.messages) ? t2bAfter.data.messages : [];
-  const t2bNewMessages = t2bAfterMessages.slice(t2bSendBaseline);
-  assert(t2bNewMessages.length >= 2, `T3b expected at least 2 chat messages after send, got ${t2bNewMessages.length}`);
-
-  const t2bUser = t2bNewMessages.find((m) => m?.role === 'user');
-  const t2bAssistantMsg = t2bNewMessages.find((m) => m?.role === 'assistant');
-
-  assert(!!t2bUser && typeof t2bUser.id === 'string', 'T3b missing user chat message notification');
-  assert(!!t2bAssistantMsg && typeof t2bAssistantMsg.id === 'string', 'T3b missing assistant chat message notification');
-  assert(Array.isArray(t2bUser?.files) && t2bUser.files.length === 1, 'T3b user chat message missing uploaded file metadata');
-  assert(String(t2bAssistantMsg?.text || '').includes(`Echo: ${t2bPrompt}`), 'T3b assistant file content mismatch');
-
-  const t2bProcessingCleared = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const e = events[i];
-      if (e.messageCount >= t2bSendBaseline + 2 && e.processing === false) return e;
-    }
-    return false;
-  }, 30_000, 'T3b processing clear');
-  assert(!!t2bProcessingCleared, 'T3b processing clear not observed');
-  console.log('[T3b] ok: upload protocol (system/user) and chat protocol (.processing/user/assistant/.processing clear) observed');
-
-  // ── T3f: non-probe chat + file upload protocol over API + SSE ──
-  console.log('\n=== T3f: non-probe chat with file upload protocol ===');
-  const t3fBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t3fBefore.status === 200, `T3f pre chats returned ${t3fBefore.status}`);
-  const t3fBeforeMessages = Array.isArray(t3fBefore.data?.messages) ? t3fBefore.data.messages : [];
-  const t3fBeforeCount = t3fBeforeMessages.length;
-
-  const t3fUploadRes = await httpUploadChatFile(
-    `${BASE}/cards/${CHAT_CARD_ID}/files?inChat=true`,
-    't3f-question.txt',
-    [
-      'Assistant smoke-test reference file.',
-      'Question: what is the capital of japan?',
-      'Response format: reply in lower case using one word only.',
-    ].join('\n'),
-  );
-  assert(t3fUploadRes.status === 200, `T3f file upload returned ${t3fUploadRes.status}`);
-  const t3fUploadedFile = t3fUploadRes.data?.file;
-  assert(t3fUploadedFile && typeof t3fUploadedFile === 'object', 'T3f upload response missing file metadata');
-
-  const t3fAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t3fAfterUpload.status === 200, `T3f chats after upload returned ${t3fAfterUpload.status}`);
-  const t3fUploadMessages = Array.isArray(t3fAfterUpload.data?.messages) ? t3fAfterUpload.data.messages : [];
-  const t3fUploadNewMessages = t3fUploadMessages.slice(t3fBeforeCount);
-  const t3fUploadSystem = t3fUploadNewMessages.find((message) => message?.role === 'system');
-  assert(!!t3fUploadSystem, 'T3f upload protocol missing system chat file');
-  assert(String(t3fUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3f upload system message does not describe uploaded file');
-
-  const t3fSendBaseline = t3fUploadMessages.length;
-  const t3fPrompt = [
-    'Use the attached file as the primary context.',
-    'It contains the geography question and the required answer format.',
-    'Answer the question from the attached file only.',
-    'The question is about the capital of japan.',
-    'Return only the lower-case one-word answer with no commentary or markup.',
-  ].join(' ');
-
-  const t3fSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-    actionType: 'chat-send',
-    payload: {
-      text: JSON.stringify({
-        prompt: t3fPrompt,
-        chatTimeoutMs: 180000,
-      }),
-      files: [t3fUploadedFile],
-    },
-  });
-  assert(t3fSendRes.status === 200, `T3f chat-send returned ${t3fSendRes.status}`);
-
-  const t3fUserOrProcessing = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const event = events[i];
-      if (event.messageCount >= t3fSendBaseline + 1 || event.processing === true) return event;
-    }
-    return false;
-  }, 45_000, 'T3f user/proc signal');
-  assert(!!t3fUserOrProcessing, 'T3f user/proc signal not observed');
-
-  const t3fAssistantOnSse = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const event = events[i];
-      if (event.messageCount < t3fSendBaseline + 2) continue;
-      const last = event.messages[event.messages.length - 1];
-      if (last?.role === 'assistant' && /tokyo/i.test(String(last.text || ''))) return event;
-    }
-    return false;
-  }, 240_000, 'T3f assistant response with tokyo');
-  assert(!!t3fAssistantOnSse, 'T3f assistant response with tokyo not observed on SSE');
-
-  const t3fAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t3fAfter.status === 200, `T3f post chats returned ${t3fAfter.status}`);
-  const t3fAfterMessages = Array.isArray(t3fAfter.data?.messages) ? t3fAfter.data.messages : [];
-  const t3fNewMessages = t3fAfterMessages.slice(t3fSendBaseline);
-  assert(t3fNewMessages.length >= 2, `T3f expected at least 2 chat messages after send, got ${t3fNewMessages.length}`);
-
-  const t3fUser = t3fNewMessages.find((message) => message?.role === 'user');
-  const t3fAssistantMsg = [...t3fNewMessages].reverse().find((message) => message?.role === 'assistant');
-
-  assert(!!t3fUser && typeof t3fUser.id === 'string', 'T3f missing user chat message notification');
-  assert(Array.isArray(t3fUser?.files) && t3fUser.files.length === 1, 'T3f user chat message missing uploaded file metadata');
-  assert(!!t3fAssistantMsg && typeof t3fAssistantMsg.id === 'string', 'T3f missing assistant chat message notification');
-  assert(/tokyo/i.test(String(t3fAssistantMsg?.text || '')), 'T3f assistant response missing tokyo');
-  assert(!String(t3fAssistantMsg?.text || '').includes('Echo:'), 'T3f assistant response should not be the probe echo path');
-
-  const t3fProcessingCleared = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const event = events[i];
-      if (event.messageCount >= t3fSendBaseline + 2 && event.processing === false) return event;
-    }
-    return false;
-  }, 30_000, 'T3f processing clear');
-  assert(!!t3fProcessingCleared, 'T3f processing clear not observed');
-  console.log('[T3f] ok: upload protocol (system/user) and non-probe assistant response observed with processing clear');
-
-  // ── T3d: unsubscribe/resubscribe chat SSE notifications ──
-  console.log('\n=== T3d: unsubscribe/resubscribe SSE behavior ===');
-
-  const t3dUnsubRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/unsubscribe-sse`, { clientId: chatSseClientId });
-  assert(t3dUnsubRes.status === 200, `T3d chat unsubscribe returned ${t3dUnsubRes.status}`);
-
-  const t3dSilentBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t3dSilentBefore.status === 200, `T3d silent pre chats returned ${t3dSilentBefore.status}`);
-  const t3dSilentBeforeMessages = Array.isArray(t3dSilentBefore.data?.messages) ? t3dSilentBefore.data.messages : [];
-  const t3dSilentBeforeCount = t3dSilentBeforeMessages.length;
-  const t3dSilentEventCount = NS.chatEvents.length;
-  const t3dSilentPrompt = `unsubscribe silence validation ${Date.now()}`;
-
-  const t3dSilentSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-    actionType: 'chat-send',
-    payload: {
-      text: JSON.stringify({
-        prompt: t3dSilentPrompt,
-        probe: true,
-        chatTimeMs: 2200,
-        chatTimeoutMs: 20000,
-      }),
-    },
-  });
-  assert(t3dSilentSendRes.status === 200, `T3d silent chat-send returned ${t3dSilentSendRes.status}`);
-
-  const t3dSilentAfterMessages = await waitForChatHistory(
-    CHAT_CARD_ID,
-    (messages) => {
-      if (messages.length < t3dSilentBeforeCount + 2) return false;
-      const newMessages = messages.slice(t3dSilentBeforeCount);
-      const assistantMsg = newMessages.find((message) =>
-        message?.role === 'assistant' && String(message.text || '').includes(`Echo: ${t3dSilentPrompt}`));
-      return assistantMsg ? { messages, assistantMsg } : false;
-    },
-    45_000,
-    'T3d silent chat completion via HTTP history',
-  );
-  assert(!!t3dSilentAfterMessages.assistantMsg, 'T3d silent chat assistant response missing from HTTP history');
-  assert(NS.chatEvents.length === t3dSilentEventCount,
-    `T3d expected no chat SSE notifications while unsubscribed (before=${t3dSilentEventCount}, after=${NS.chatEvents.length})`);
-
-  const t3dResubRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/subscribe-sse`, { clientId: chatSseClientId });
-  assert(t3dResubRes.status === 200, `T3d chat resubscribe returned ${t3dResubRes.status}`);
-
-  const t3dLiveBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t3dLiveBefore.status === 200, `T3d live pre chats returned ${t3dLiveBefore.status}`);
-  const t3dLiveBeforeMessages = Array.isArray(t3dLiveBefore.data?.messages) ? t3dLiveBefore.data.messages : [];
-  const t3dLiveBeforeCount = t3dLiveBeforeMessages.length;
-  const t3dLivePrompt = `resubscribe resume validation ${Date.now()}`;
-
-  const t3dLiveSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-    actionType: 'chat-send',
-    payload: {
-      text: JSON.stringify({
-        prompt: t3dLivePrompt,
-        probe: true,
-        chatTimeMs: 2200,
-        chatTimeoutMs: 20000,
-      }),
-    },
-  });
-  assert(t3dLiveSendRes.status === 200, `T3d live chat-send returned ${t3dLiveSendRes.status}`);
-
-  const t3dLiveAssistant = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const event = events[i];
-      if (event.messageCount < t3dLiveBeforeCount + 2) continue;
-      const last = event.messages[event.messages.length - 1];
-      if (last?.role === 'assistant' && String(last.text || '').includes(`Echo: ${t3dLivePrompt}`)) {
-        return event;
-      }
-    }
-    return false;
-  }, 45_000, 'T3d resumed assistant echo on SSE');
-  assert(!!t3dLiveAssistant, 'T3d assistant echo not observed after resubscribe');
-  console.log('[T3d] ok: unsubscribed client stayed silent and resubscribed client resumed chat notifications');
-
-  // ── T3c: assistant failure path clears processing and surfaces failure ──
-  console.log('\n=== T3c: assistant failure clears processing and surfaces error ===');
-
-  try {
-    await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/unsubscribe-sse`, { clientId: chatSseClientId });
-  } catch { /* ignore */ }
-  if (chatSseClient) {
-    chatSseClient.close();
-    chatSseClient = null;
+    assert(!!t2bUser && typeof t2bUser.id === 'string', 'T3b missing user chat message notification');
+    assert(!!t2bInProgress && typeof t2bInProgress.id === 'string', 'T3b missing in-progress system chat message');
+    assert(!!t2bAssistantMsg && typeof t2bAssistantMsg.id === 'string', 'T3b missing assistant chat message notification');
+    assert(Array.isArray(t2bUser?.files) && t2bUser.files.length === 1, 'T3b user chat message missing uploaded file metadata');
+    assert(String(t2bAssistantMsg?.text || '').includes(`Echo: ${t2bPrompt}`), 'T3b assistant file content mismatch');
+    console.log('[T3b] ok: upload protocol and ordered probe lifecycle observed (user+processing, in-progress, assistant+processing clear)');
   }
-  chatSseClientId = '';
-  if (sseWorker) {
-    await sseWorker.terminate();
-    sseWorker = null;
-  }
-  await stopServer(serverProc);
-  serverProc = null;
-  resetNs();
-
-  const failureSetupDir = `${SETUP_DIR}-failure`;
-  const failureBoardSetupRoot = path.join(failureSetupDir, 'boards');
-  fs.rmSync(failureSetupDir, { recursive: true, force: true });
-
-  const failureFlowPath = path.join(failureSetupDir, 'chat-flow-failure.json');
-  const failureConfigPath = path.join(failureSetupDir, 'server-config.failure.json');
-  const baseConfig = JSON.parse(fs.readFileSync(path.join(BOARD_DIR, 'server-config.json'), 'utf-8'));
-  const failureFlow = JSON.parse(fs.readFileSync(path.join(BOARD_DIR, 'server', 'chat-flow', 'flow-steps.json'), 'utf-8'));
-  failureFlow.steps.copilot_assistant.handler.whatToRun.value = './server/chat-flow/does-not-exist.js';
-  fs.mkdirSync(path.dirname(failureFlowPath), { recursive: true });
-  fs.writeFileSync(failureFlowPath, JSON.stringify(failureFlow, null, 2) + '\n', 'utf-8');
-  baseConfig.boards[BOARD_ID].regular.chatHandlerFlowPath = failureFlowPath;
-  fs.writeFileSync(failureConfigPath, JSON.stringify(baseConfig, null, 2) + '\n', 'utf-8');
-
-  serverProc = await startServer(PORT, {
-    extraArgs: ['--config', failureConfigPath],
-    env: {
-      DEMO_SETUP_DIR: failureSetupDir,
-      DEMO_BOARD_SETUP_ROOT: failureBoardSetupRoot,
-    },
-  });
-
-  const t3cRegRes = await httpJson('POST', `http://127.0.0.1:${PORT}/api/boards`, { id: BOARD_ID, label: 'Live' });
-  assert(t3cRegRes.status === 200 || t3cRegRes.status === 201 || t3cRegRes.status === 409,
-    `T3c POST /api/boards returned ${t3cRegRes.status}: ${JSON.stringify(t3cRegRes.data)}`);
-
-  const t3cInitRes = await httpGet(`${BASE}/init-board`);
-  assert(t3cInitRes.status === 200, `T3c init-board returned ${t3cInitRes.status}`);
-
-  sseWorker = startBoardSseWorker();
-  await waitForInitialPayload();
-  await waitForAllCompleted(30_000, 'T3c initial completion');
-
-  chatSseClientId = `chat-proto-failure-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  chatSseClient = startSseClient(`${BASE}/sse?clientId=${encodeURIComponent(chatSseClientId)}`, (payload) => {
-    captureChatEvents(payload, CHAT_CARD_ID);
-  });
-  await new Promise((r) => setTimeout(r, 400));
-
-  const t3cSubRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/subscribe-sse`, { clientId: chatSseClientId });
-  assert(t3cSubRes.status === 200, `T3c chat subscribe returned ${t3cSubRes.status}`);
-
-  const t3cBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t3cBefore.status === 200, `T3c pre chats returned ${t3cBefore.status}`);
-  const t3cBeforeMessages = Array.isArray(t3cBefore.data?.messages) ? t3cBefore.data.messages : [];
-  const t3cBeforeCount = t3cBeforeMessages.length;
-  const t3cPrompt = `failure validation ${Date.now()}`;
-
-  const t3cSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-    actionType: 'chat-send',
-    payload: {
-      text: JSON.stringify({
-        prompt: t3cPrompt,
-        chatTimeoutMs: 20000,
-      }),
-    },
-  });
-  assert(t3cSendRes.status === 200, `T3c chat-send returned ${t3cSendRes.status}`);
-
-  const t3cUserOrProcessing = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const e = events[i];
-      if (e.messageCount >= t3cBeforeCount + 1 || e.processing === true) return e;
-    }
-    return false;
-  }, 30_000, 'T3c user/proc signal');
-  assert(!!t3cUserOrProcessing, 'T3c user/proc signal not observed');
-
-  const t3cFailureOnSse = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const e = events[i];
-      if (e.messageCount < t3cBeforeCount + 2) continue;
-      const last = e.messages[e.messages.length - 1];
-      if (last?.role === 'system' && /assistant request failed/i.test(String(last.text || ''))) return e;
-    }
-    return false;
-  }, 45_000, 'T3c surfaced failure message');
-  assert(!!t3cFailureOnSse, 'T3c surfaced failure message not observed on SSE');
-
-  const t3cProcessingCleared = await waitForChatPredicate((events) => {
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const e = events[i];
-      if (e.messageCount >= t3cBeforeCount + 2 && e.processing === false) return e;
-    }
-    return false;
-  }, 30_000, 'T3c processing clear');
-  assert(!!t3cProcessingCleared, 'T3c processing clear not observed');
-
-  const t3cAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t3cAfter.status === 200, `T3c post chats returned ${t3cAfter.status}`);
-  const t3cAfterMessages = Array.isArray(t3cAfter.data?.messages) ? t3cAfter.data.messages : [];
-  const t3cNewMessages = t3cAfterMessages.slice(t3cBeforeCount);
-  assert(t3cNewMessages.length >= 2, `T3c expected at least 2 new chat messages, got ${t3cNewMessages.length}`);
-  const t3cUser = t3cNewMessages.find((m) => m?.role === 'user');
-  const t3cFailureMsg = t3cNewMessages.find((m) => m?.role === 'system' && /assistant request failed/i.test(String(m?.text || '')));
-  const t3cAssistantMsg = t3cNewMessages.find((m) => m?.role === 'assistant');
-  assert(!!t3cUser && typeof t3cUser.id === 'string', 'T3c missing user chat message');
-  assert(!!t3cFailureMsg && typeof t3cFailureMsg.id === 'string', 'T3c missing surfaced failure chat message');
-  assert(!t3cAssistantMsg, 'T3c should not append an assistant message on handler failure');
-  console.log('[T3c] ok: failure surfaced via system chat message and processing cleared');
   }
 
   console.log('\n=== All smoke checks passed ===\n');
@@ -1022,7 +727,8 @@ try {
     } catch { /* ignore */ }
   }
   if (chatSseClient) chatSseClient.close();
-  await stopServer(serverProc);
+  serverProc.kill();
+  await new Promise((r) => serverProc.on('exit', r));
   if (sseWorker) await sseWorker.terminate();
 
   // Clean up the test setup directory

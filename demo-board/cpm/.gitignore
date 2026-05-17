@@ -1,7 +1,0 @@
-*
-!.gitignore
-!cards/
-!cards/*.json
-!.retain/
-!.retain/**
-**/chats/*.txt

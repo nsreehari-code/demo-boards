@@ -18,6 +18,7 @@ import {
   createFsBoardChatStorage,
   createNodeSpawnInvocationAdapter,
   createArtifactsStore,
+  invokeExecutionRef,
   parseRef,
   serializeRef,
 } from 'yaml-flow/board-live-cards-node';
@@ -315,7 +316,7 @@ function buildBoardContextConfig(label, boardDir, taskExecPath, chatHandlerFlow,
 
 // Pre-register configured boards in the server meta store
 const persistedBoardsConfigText = serverMetaStore.getText('boards-config.json');
-let persistedBoardsConfig = { boards: [{ id: 'default', label: 'Default Board' }] };
+let persistedBoardsConfig = { boards: [] };
 if (persistedBoardsConfigText) {
   try {
     const parsedBoardsConfig = JSON.parse(persistedBoardsConfigText);
@@ -323,7 +324,7 @@ if (persistedBoardsConfigText) {
       persistedBoardsConfig = parsedBoardsConfig;
     }
   } catch {
-    persistedBoardsConfig = { boards: [{ id: 'default', label: 'Default Board' }] };
+    persistedBoardsConfig = { boards: [] };
   }
 }
 
@@ -350,82 +351,15 @@ serverMetaStore.putText(
 );
 
 /**
- * Async local-node ref invoker — uses spawn() instead of spawnSync() so the
- * Node.js event loop is never blocked.  Required for chat-flow handlers that
- * must call back to the same server process (avoids a deadlock).
+ * Thin wrapper around the shared execution-ref invoker that pins the board
+ * server's cliDir/cwd/label defaults for chat-flow steps.
  */
-function invokeLocalNodeRefAsync(ref, args, opts) {
-  return new Promise((resolve) => {
-    const whatToRun = ref.whatToRun;
-    let scriptPath = '';
-    if (whatToRun && typeof whatToRun === 'object' && whatToRun.kind === 'fs-path') {
-      scriptPath = String(whatToRun.value || '');
-    } else if (typeof whatToRun === 'string') {
-      if (whatToRun.startsWith('b64:')) {
-        try {
-          const parsed = parseRef(whatToRun);
-          if (parsed.kind === 'fs-path') scriptPath = String(parsed.value || '');
-        } catch { /* fall through */ }
-      } else {
-        scriptPath = whatToRun;
-      }
-    }
-    if (!scriptPath) {
-      return resolve({ result: 'failure', data: { error: 'cannot resolve script path from ref' } });
-    }
-
-    const cliDir = opts?.cliDir || BOARD_ROOT;
-    const resolved = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(cliDir, scriptPath);
-    const stdinData = JSON.stringify(args);
-    const timeoutMs = typeof opts?.timeoutMs === 'number' && opts.timeoutMs > 0 ? opts.timeoutMs : 30_000;
-
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const settle = (val) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(val);
-    };
-
-    const child = spawn(process.execPath, [resolved], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      cwd: opts?.cwd || cliDir,
-    });
-
-    const timer = setTimeout(() => {
-      try { child.kill(); } catch { /* best-effort */ }
-      settle({ result: 'failure', data: { error: `timeout after ${timeoutMs}ms` } });
-    }, timeoutMs);
-
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
-
-    child.on('close', (code) => {
-      if (settled) return;
-      if (code !== 0) {
-        settle({ result: 'failure', data: { error: stderr.trim() || `exit code ${code}` } });
-        return;
-      }
-      try {
-        const parsed = JSON.parse(stdout.trim());
-        settle(typeof parsed?.result === 'string' ? parsed : { result: 'success', data: parsed });
-      } catch {
-        settle({ result: 'success', data: { stdout: stdout.trim() } });
-      }
-    });
-
-    child.on('error', (err) => {
-      settle({ result: 'failure', data: { error: err.message } });
-    });
-
-    try {
-      child.stdin.end(stdinData);
-    } catch (err) {
-      settle({ result: 'failure', data: { error: `stdin write failed: ${err.message}` } });
-    }
+function invokeExecutionRefAsync(ref, args, opts) {
+  return invokeExecutionRef(ref, args, {
+    cliDir: opts?.cliDir || BOARD_ROOT,
+    cwd: opts?.cwd || BOARD_ROOT,
+    timeoutMs: typeof opts?.timeoutMs === 'number' ? opts.timeoutMs : undefined,
+    label: 'board-server-chat-flow',
   });
 }
 
@@ -467,9 +401,8 @@ const runtime = createMultiBoardServerRuntime({
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
     fs.mkdirSync(boardRoot, { recursive: true });
     const boardDir = path.join(boardRoot, 'runtime');
-    const runtimeCardsDir = path.join(boardRoot, 'cards');
     const flowRunner = createStepMachineChatFlowRunner({
-      invokeRef: (ref, stepArgs) => invokeLocalNodeRefAsync(ref, stepArgs, {
+      invokeRef: (ref, stepArgs) => invokeExecutionRefAsync(ref, stepArgs, {
         cliDir: BOARD_ROOT,
         cwd: BOARD_ROOT,
         timeoutMs: chatInvokeRefTimeoutMs,
@@ -477,10 +410,11 @@ const runtime = createMultiBoardServerRuntime({
     });
     const baseExecutionExtra = {
       boardSetupRoot: boardRoot,
+      boardRuntimeDir: 'runtime',
+      runtimeStatusDir: 'runtime-out',
+      cardsDir: 'cards',
       projectRoot: BOARD_ROOT,
       chatFlowRoot,
-      apiBasePath: `${apiBasePath}/${boardId}`,
-      chatsBlobBasePath: path.join(runtimeCardsDir, 'chats'),
       serverUrl: `http://127.0.0.1:${PORT}`,
       chatCopilotTimeoutMs,
       ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
@@ -505,10 +439,11 @@ const runtime = createMultiBoardServerRuntime({
       serverUrl: `http://127.0.0.1:${PORT}`,
       executionExtra: {
         boardSetupRoot: boardRoot,
+        boardRuntimeDir: 'runtime',
+        runtimeStatusDir: 'runtime-out',
+        cardsDir: 'cards',
         projectRoot: BOARD_ROOT,
         chatFlowRoot,
-        apiBasePath: `${apiBasePath}/${boardId}`,
-        chatsBlobBasePath: path.join(runtimeCardsDir, 'chats'),
         chatCopilotTimeoutMs,
         ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
       },
