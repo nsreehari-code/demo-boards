@@ -31,6 +31,8 @@ const __dirname = path.dirname(__filename);
 const cliArgs = process.argv.slice(2);
 const portArg = cliArgs.indexOf('--port');
 const cliPort = portArg !== -1 ? parseInt(cliArgs[portArg + 1], 10) : NaN;
+const serverConfigArg = cliArgs.indexOf('--server-config');
+const cliServerConfig = serverConfigArg !== -1 ? String(cliArgs[serverConfigArg + 1] || '').trim() : '';
 const skipT1 = cliArgs.includes('--skip-t1');
 const skipT2 = cliArgs.includes('--skip-t2');
 const skipT3 = cliArgs.includes('--skip-t3');
@@ -48,6 +50,10 @@ const RUN_ID = `run-${Date.now()}-${process.pid}-${Math.random().toString(36).sl
 const BOARD_ID = 'live';
 const BOARD_DIR = path.resolve(__dirname, '..');
 const SERVER_SCRIPT = path.resolve(BOARD_DIR, 'server', 'board-server.js');
+const DEFAULT_SERVER_CONFIG = path.resolve(BOARD_DIR, 'test', 'server-test-config.json');
+const SERVER_CONFIG = cliServerConfig
+  ? (path.isAbsolute(cliServerConfig) ? cliServerConfig : path.resolve(process.cwd(), cliServerConfig))
+  : DEFAULT_SERVER_CONFIG;
 const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
 const CARD_PATTERN = 'cardT*';
 const CHAT_CARD_ID = 'card-portfolio';
@@ -359,7 +365,8 @@ function httpUploadChatFile(url, fileName, content, contentType = 'text/plain; c
 
 function startServer(port) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [SERVER_SCRIPT], {
+    const serverArgs = [SERVER_SCRIPT, '--config', SERVER_CONFIG];
+    const proc = spawn(process.execPath, serverArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: {

@@ -1,0 +1,25 @@
+{
+  "port": 7799,
+  "chatFlowTimeoutMs": 1800000,
+  "chatInvokeRefTimeoutMs": 1800000,
+  "chatCopilotTimeoutMs": 1800000,
+  "boards": {
+    "live": {
+      "label": "Live",
+      "setup": {
+        "setupRoot": "./live/.board-ws",
+        "cardStore": "cards/store",
+        "artifactsStore": "cards/files",
+        "boardRuntime": "runtime",
+        "boardOutputsStore": "runtime-out",
+        "chatStore": "cards/chats",
+        "scratchStore": "scratch"
+      },
+      "regular": {
+        "seedCardsDir": "./test/live-cards",
+        "taskExecutorPath": "./server/board-worker/task-executor.js",
+        "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
+      }
+    }
+  }
+}
