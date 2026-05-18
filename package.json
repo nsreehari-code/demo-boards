@@ -11,6 +11,7 @@
     "start": "node scripts/start-server.cjs demo-board --all",
     "backend": "node scripts/start-server.cjs demo-board --backend",
     "frontend": "npx http-server demo-board -p 8000 -c-1",
+    "vite": "cd demo-board/web/vite && npm run dev",
     "mcp:install": "npm --prefix mcp-server install",
     "mcp:dry-run": "npm --prefix mcp-server run dry-run -- --manifest manifests/demo-boards.workiq.json --manifest manifests/demo-boards.graph.json --manifest ../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json --transport streamable-http",
     "mcp:start": "npm --prefix mcp-server run start:http",
@@ -26,7 +27,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "latest",
     "better-sqlite3": "^12.9.0",
-    "yaml-flow": "^8.4.1"
+    "yaml-flow": "^8.4.3"
   },
   "devDependencies": {
     "http-server": "^14.1.1"
