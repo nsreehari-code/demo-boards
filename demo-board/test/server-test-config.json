@@ -13,7 +13,8 @@
         "boardRuntime": "runtime",
         "boardOutputsStore": "runtime-out",
         "chatStore": "cards/chats",
-        "scratchStore": "scratch"
+        "scratchStore": "scratch",
+        "archivalStore": "runtime/archive"
       },
       "regular": {
         "seedCardsDir": "./test/live-cards",

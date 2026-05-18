@@ -8,12 +8,13 @@
       "label": "Finbook",
       "setup": {
         "setupRoot": "../data-repos-VX/case-workspace",
-        "cardStore": "cards/store",
-        "artifactsStore": "cards/files",
+        "cardStore": "cards-store",
+        "artifactsStore": "cards-files",
         "boardRuntime": "runtime",
         "boardOutputsStore": "board-outputs",
-        "chatStore": "cards/chats",
-        "scratchStore": "scratch"
+        "chatStore": "cards-chats",
+        "scratchStore": "scratch",
+        "archivalStore": "runtime-archive"
       },
       "regular": {
         "seedCardsDir": "./finbook/cards",

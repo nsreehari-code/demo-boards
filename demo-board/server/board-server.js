@@ -60,11 +60,6 @@ function normalizeSetupPath(configValue, fallbackValue) {
   return normalized || fallbackValue;
 }
 
-function resolveSetupPath(setupRoot, configValue, fallbackValue) {
-  const normalized = normalizeSetupPath(configValue, fallbackValue);
-  return path.isAbsolute(normalized) ? normalized : path.resolve(setupRoot, normalized);
-}
-
 function resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride) {
   const legacySetupRoot = cfg?.setupDir
     ? path.resolve(BOARD_ROOT, cfg.setupDir)
@@ -74,27 +69,27 @@ function resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride) {
     ? path.resolve(boardSetupRootOverride, `board-${boardId}`)
     : (resolveFromConfig(setupCfg.setupRoot) || legacySetupRoot);
 
-  const boardRuntime = normalizeSetupPath(setupCfg.boardRuntime, 'runtime');
-  const boardOutputsStore = normalizeSetupPath(setupCfg.boardOutputsStore, 'runtime-out');
-  const cardStore = normalizeSetupPath(setupCfg.cardStore, path.join('cards', 'store'));
-  const artifactsStore = normalizeSetupPath(setupCfg.artifactsStore, 'cards');
-  const chatStore = normalizeSetupPath(setupCfg.chatStore, 'runtime');
-  const scratchStore = normalizeSetupPath(setupCfg.scratchStore, 'scratch');
+  const leaves = {
+    boardRuntime:      normalizeSetupPath(setupCfg.boardRuntime,      'runtime'),
+    boardOutputsStore: normalizeSetupPath(setupCfg.boardOutputsStore, 'board-outputs'),
+    cardStore:         normalizeSetupPath(setupCfg.cardStore,         'cards-store'),
+    artifactsStore:    normalizeSetupPath(setupCfg.artifactsStore,    'cards-files'),
+    chatStore:         normalizeSetupPath(setupCfg.chatStore,         'cards-chats'),
+    scratchStore:      normalizeSetupPath(setupCfg.scratchStore,      'scratch'),
+    archivalStore:     normalizeSetupPath(setupCfg.archivalStore,     'runtime-archive'),
+  };
+  const toAbs = (leaf) => (path.isAbsolute(leaf) ? leaf : path.resolve(setupRoot, leaf));
 
   return {
     setupRoot,
-    boardRuntime,
-    boardOutputsStore,
-    cardStore,
-    artifactsStore,
-    chatStore,
-    scratchStore,
-    boardRuntimePath: resolveSetupPath(setupRoot, setupCfg.boardRuntime, 'runtime'),
-    boardOutputsStorePath: resolveSetupPath(setupRoot, setupCfg.boardOutputsStore, 'runtime-out'),
-    cardStorePath: resolveSetupPath(setupRoot, setupCfg.cardStore, path.join('cards', 'store')),
-    artifactsStorePath: resolveSetupPath(setupRoot, setupCfg.artifactsStore, 'cards'),
-    chatStorePath: resolveSetupPath(setupRoot, setupCfg.chatStore, 'runtime'),
-    scratchStorePath: resolveSetupPath(setupRoot, setupCfg.scratchStore, 'scratch'),
+    ...leaves,
+    boardRuntimePath:      toAbs(leaves.boardRuntime),
+    boardOutputsStorePath: toAbs(leaves.boardOutputsStore),
+    cardStorePath:         toAbs(leaves.cardStore),
+    artifactsStorePath:    toAbs(leaves.artifactsStore),
+    chatStorePath:         toAbs(leaves.chatStore),
+    scratchStorePath:      toAbs(leaves.scratchStore),
+    archivalStorePath:     toAbs(leaves.archivalStore),
   };
 }
 
@@ -332,6 +327,7 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
   fs.mkdirSync(boardSetupPaths.boardOutputsStorePath, { recursive: true });
   fs.mkdirSync(boardSetupPaths.chatStorePath, { recursive: true });
   fs.mkdirSync(boardSetupPaths.scratchStorePath, { recursive: true });
+  fs.mkdirSync(boardSetupPaths.archivalStorePath, { recursive: true });
 
   const notifyChannel = `yaml-flow-server-${label}-${boardId}-${process.pid}`;
   const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath }));
@@ -348,7 +344,9 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
     artifactsAdapter,
     baseRef,
     cardStoreRef,
-    outputsStoreRef: serializeRef({ kind: 'fs-path', value: path.join(boardSetupPaths.boardOutputsStorePath, '.outputs') }),
+    outputsStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardOutputsStorePath }),
+    scratchStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath }),
+    archiveStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.archivalStorePath }),
     notifyRef: { kind: 'named-pipe', value: namedPipePath(notifyChannel) },
     taskExecutorRef: makeExecutionRef(taskExecPath, executionExtra),
     chatHandlerFlow,
@@ -418,6 +416,7 @@ const runtime = createMultiBoardServerRuntime({
       runtimeStatusDir: boardSetupPaths.boardOutputsStore,
       artifactsStore: boardSetupPaths.artifactsStore,
       scratchStore: boardSetupPaths.scratchStore,
+      archivalStore: boardSetupPaths.archivalStore,
       projectRoot: BOARD_ROOT,
       chatFlowRoot,
       serverUrl: `http://127.0.0.1:${PORT}`,
@@ -449,6 +448,7 @@ const runtime = createMultiBoardServerRuntime({
         runtimeStatusDir: boardSetupPaths.boardOutputsStore,
         artifactsStore: boardSetupPaths.artifactsStore,
         scratchStore: boardSetupPaths.scratchStore,
+        archivalStore: boardSetupPaths.archivalStore,
         projectRoot: BOARD_ROOT,
         chatFlowRoot,
         chatCopilotTimeoutMs,
