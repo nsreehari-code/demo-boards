@@ -75,7 +75,7 @@ function IngestPaneNav({ cards, idx, onPrev, onNext }) {
 
 export function IngestPane({ boardId, includeFilters = [], layoutStrategy = 'vertical' }) {
   const board = useBoardState(boardId);
-  const [visible, setVisible] = useState(true);
+  const [visible, setVisible] = useState(false);
   const [idx, setIdx] = useState(0);
   const layout = resolveLayoutStrategy(layoutStrategy);
   const ingestCardIds = useMemo(() => {

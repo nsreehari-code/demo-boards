@@ -23,6 +23,7 @@ function startBoardStore(boardId, store) {
       if (!store.started) return;
 
       const clientId = crypto.randomUUID();
+      store.clientId = clientId;
       const url = `${SERVER}/api/boards/${boardId}/sse?clientId=${encodeURIComponent(clientId)}`;
       const es = new EventSource(url);
       store.es = es;
@@ -49,6 +50,7 @@ function getOrCreateBoardStore(boardId) {
   if (!boardStores.has(boardId)) {
     boardStores.set(boardId, {
       snapshot: null,
+      clientId: null,
       listeners: new Set(),
       es: null,
       started: false,
@@ -279,6 +281,7 @@ export function useBoardState(boardId) {
 
   return {
     boardId:     raw.boardId,
+    sseClientId: getOrCreateBoardStore(boardId).clientId,
     boardInfo:   null,
     cardContents,
     cardRuntimes,

@@ -26,7 +26,7 @@ export const dispatchAction = (boardId, cardId, type, payload = {}) =>
   fetch(`${base(boardId)}/cards/${cardId}/actions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, ...payload }),
+    body: JSON.stringify({ actionType: type, payload }),
   });
 
 export const uploadFile = (boardId, cardId, file) =>
@@ -49,8 +49,16 @@ export const uploadFileForChat = (boardId, cardId, file) =>
     body: file,
   });
 
-export const subscribeCardChats = (boardId, cardId) =>
-  fetch(`${base(boardId)}/cards/${cardId}/chats/subscribe-sse`, { method: 'POST' });
+export const subscribeCardChats = (boardId, cardId, clientId) =>
+  fetch(`${base(boardId)}/cards/${cardId}/chats/subscribe-sse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId }),
+  });
 
-export const unsubscribeCardChats = (boardId, cardId) =>
-  fetch(`${base(boardId)}/cards/${cardId}/chats/unsubscribe-sse`, { method: 'POST' });
+export const unsubscribeCardChats = (boardId, cardId, clientId) =>
+  fetch(`${base(boardId)}/cards/${cardId}/chats/unsubscribe-sse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId }),
+  });

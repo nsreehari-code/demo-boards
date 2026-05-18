@@ -28,6 +28,7 @@ export function useCardState(boardId, cardId) {
   const filesUploadedCount = filesUploaded.length;
 
   return {
+    boardSseClientId: board.sseClientId ?? null,
     cardContent,
     cardData,
     cardRuntime: board.cardRuntimes[cardId] ?? null,

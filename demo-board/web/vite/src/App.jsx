@@ -2,7 +2,7 @@ import React from 'react';
 import { useBoardState } from './hooks/useBoardState.js';
 import { MainBoard }  from './components/MainBoard.jsx';
 
-const BOARD_ID = 'finbook';
+const BOARD_ID = 'live';
 
 export default function App() {
   const board = useBoardState(BOARD_ID);

@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export const CARD_CORE_VIEW_KINDS = {
   table: { Component: TableView, isEditable: false },
@@ -740,7 +742,55 @@ function MarkdownView({ data }) {
   if (typeof data === 'string') text = data;
   else if (data && typeof data === 'object' && data.text) text = data.text;
   else if (data != null) text = JSON.stringify(data, null, 2);
-  return text ? <pre className="small mb-0" style={{ whiteSpace: 'pre-wrap' }}>{text}</pre> : null;
+  if (!text) return null;
+
+  const normalizedText = text
+    .replace(/\s*\[(\d+)\]\((https?:\/\/[^)]+)\)/g, '')
+    .replace(/\s+$/gm, '')
+    .trim();
+
+  if (!normalizedText) return null;
+
+  return (
+    <div className="small mb-0 markdown-body lh-sm" style={{ color: 'var(--bs-body-color)' }}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ node, ...props }) => <h1 className="h5 fw-bold mb-2 pb-1 border-bottom" {...props} />,
+          h2: ({ node, ...props }) => <h2 className="fs-6 fw-bold text-uppercase text-secondary mb-2 mt-3" {...props} />,
+          h3: ({ node, ...props }) => <h3 className="fs-6 fw-semibold mb-2 mt-2" {...props} />,
+          h4: ({ node, ...props }) => <h4 className="small fw-semibold text-body mb-1 mt-2" {...props} />,
+          h5: ({ node, ...props }) => <h5 className="small fw-semibold text-body mb-1 mt-2" {...props} />,
+          h6: ({ node, ...props }) => <h6 className="small fw-semibold text-secondary mb-1 mt-2" {...props} />,
+          p: ({ node, ...props }) => <p className="mb-1" {...props} />,
+          ul: ({ node, ...props }) => <ul className="mb-1 ps-3" {...props} />,
+          ol: ({ node, ...props }) => <ol className="mb-1 ps-3" {...props} />,
+          li: ({ node, ...props }) => <li className="mb-1" {...props} />,
+          a: ({ node, ...props }) => <a className="link-primary text-decoration-none" target="_blank" rel="noreferrer" {...props} />,
+          blockquote: ({ node, ...props }) => <blockquote className="border-start border-3 border-secondary-subtle ps-2 text-muted fst-italic my-2" {...props} />,
+          hr: ({ node, ...props }) => <hr className="my-2 opacity-25" {...props} />,
+          strong: ({ node, ...props }) => <strong className="fw-semibold text-body" {...props} />,
+          code: ({ inline, className, children, ...props }) => (
+            inline ? (
+              <code className="bg-body-tertiary rounded px-1 py-0 text-body" {...props}>{children}</code>
+            ) : (
+              <code className={`${className ?? ''} small`.trim()} {...props}>{children}</code>
+            )
+          ),
+          pre: ({ node, ...props }) => <pre className="bg-body-tertiary border rounded p-2 mb-2 overflow-auto" style={{ lineHeight: 1.4 }} {...props} />,
+          table: ({ node, ...props }) => (
+            <div className="table-responsive my-2">
+              <table className="table table-sm table-striped align-middle mb-0" {...props} />
+            </div>
+          ),
+          thead: ({ node, ...props }) => <thead className="table-light" {...props} />,
+          img: ({ node, ...props }) => <img className="img-fluid rounded border my-2" loading="lazy" {...props} />,
+        }}
+      >
+        {normalizedText}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 function CustomView({ data }) {

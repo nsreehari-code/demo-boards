@@ -100,9 +100,16 @@ function normalizeElement(namespaces, element) {
   };
 }
 
-function normalizeLayoutElement(namespaces, element) {
+function normalizeLayoutElement(namespaces, element, index) {
   const normalizedElement = normalizeElement(namespaces, element);
+  const bindKey = normalizedElement.renderDef?.data?.bind ?? normalizedElement.renderDef?.data?.writeTo ?? null;
+  const reactKey = normalizedElement.renderDef?.id
+    ?? bindKey
+    ?? normalizedElement.renderDef?.label
+    ?? `${normalizedElement.kind}-${element?.className ?? 'col-12'}-${index}`;
+
   return {
+    reactKey,
     containerClassName: element?.className ?? 'col-12',
     containerStyle: element?.containerStyle ?? null,
     kind: normalizedElement.kind,
@@ -156,19 +163,21 @@ export function CardCore({ boardId, cardId }) {
 
   const namespaces = buildNamespaces(boardId, cardState);
 
-  const layoutElements = view.elements.filter((element) => {
-    if (!element.visible) return true;
-    return !!resolveBind(namespaces, element.visible);
-  }).map((element) => normalizeLayoutElement(namespaces, element));
+  const layoutElements = view.elements
+    .filter((element) => {
+      if (!element.visible) return true;
+      return !!resolveBind(namespaces, element.visible);
+    })
+    .map((element, index) => normalizeLayoutElement(namespaces, element, index));
 
   const handleSave = buildSaveHandler(cardState);
 
   return (
     <div className="row g-2 align-content-start">
-      {layoutElements.map(({ containerClassName, containerStyle, kind, renderDef, data }) => {
+      {layoutElements.map(({ reactKey, containerClassName, containerStyle, kind, renderDef, data }) => {
         return (
           <div
-            key={renderDef.id ?? `${kind}-${renderDef.label ?? containerClassName}`}
+            key={reactKey}
             className={containerClassName}
             style={containerStyle ?? undefined}
           >
