@@ -16,8 +16,7 @@ function buildState(payload) {
     const runtime    = payload.cardRuntimeById?.[def.id] ?? {};
     const statusInfo = statusByName[def.id] ?? {};
     cardsById[def.id] = {
-      id:              def.id,
-      meta:            def.meta ?? {},
+      ...def,                               // id, meta, source_defs, view, compute, requires, ...
       card_data:       runtime.card_data ?? {},
       computed_values: runtime.computed_values ?? {},
       status:          statusInfo.status ?? 'fresh',
@@ -41,6 +40,7 @@ function buildState(payload) {
     cardsById,
     chatsById,
     statusSummary: payload.statusSnapshot?.summary ?? null,
+    dataObjects:   payload.dataObjectsByToken ?? {},
   };
 }
 
@@ -55,8 +55,9 @@ function applyFrame(prev, payload) {
   if (payload.kind === 'notification-batch') {
     const next = {
       ...prev,
-      cardsById: { ...prev.cardsById },
-      chatsById: { ...prev.chatsById },
+      cardsById:   { ...prev.cardsById },
+      chatsById:   { ...prev.chatsById },
+      dataObjects: { ...prev.dataObjects },
     };
     for (const n of (payload.notifications ?? [])) {
       if (n.kind === 'status') {
@@ -70,6 +71,8 @@ function applyFrame(prev, payload) {
             };
           }
         }
+      } else if (n.kind === 'data_object' && n.key) {
+        next.dataObjects[n.key] = n.payload;
       } else if (n.kind === 'computed_values' && n.cardId) {
         if (next.cardsById[n.cardId]) {
           next.cardsById[n.cardId] = {
@@ -83,6 +86,13 @@ function applyFrame(prev, payload) {
           processing: !!n.processing,
           receiving:  !!n.receiving,
         };
+      } else if (n.kind === 'card_refreshed' && n.cardId && n.card) {
+        if (next.cardsById[n.cardId]) {
+          next.cardsById[n.cardId] = {
+            ...next.cardsById[n.cardId],
+            ...n.card,
+          };
+        }
       }
     }
     return next;
@@ -132,4 +142,75 @@ export function useBoardSSE(boardId) {
   }, [boardId]);
 
   return boardState;
+}
+
+// ---------------------------------------------------------------------------
+// useBoardState — structured view on top of the raw SSE state
+// ---------------------------------------------------------------------------
+export function useBoardState(boardId) {
+  const raw = useBoardSSE(boardId);
+
+  if (!raw) return null;
+
+  // cardContents: full card object keyed by cardId
+  const cardContents = {};
+  for (const id of (raw.cardIds ?? [])) {
+    const c = raw.cardsById[id];
+    if (c) {
+      const { computed_values, runtime, status, ...cardDefinition } = c;
+      cardContents[id] = cardDefinition;
+    }
+  }
+
+  // cardRuntimes: status + runtime + computed_values keyed by cardId
+  const cardRuntimes = {};
+  for (const id of (raw.cardIds ?? [])) {
+    const c = raw.cardsById[id];
+    if (c) cardRuntimes[id] = {
+      status:          c.status,
+      runtime:         c.runtime,
+      computed_values: c.computed_values ?? {},
+    };
+  }
+
+  // boardStatus: summary-level status (no per-card runtimes)
+  const boardStatus = raw.statusSummary ?? null;
+
+  // dataObjects: board-level map keyed by token, from dataObjectsByToken + data_object notifications
+  const dataObjects = raw.dataObjects ?? {};
+
+  return {
+    boardId:     raw.boardId,
+    boardInfo:   null,
+    cardContents,
+    cardRuntimes,
+    boardStatus,
+    dataObjects,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// useCardState — focused selector for a single card, built on useBoardState
+// ---------------------------------------------------------------------------
+export function useCardState(boardId, cardId) {
+  const board = useBoardState(boardId);
+
+  if (!board || !cardId) return null;
+
+  const cardContent = board.cardContents[cardId] ?? null;
+
+  // resolve requires[] tokens against board-level dataObjects
+  const requiresDataObjects = {};
+  for (const token of (cardContent?.requires ?? [])) {
+    if (token in board.dataObjects) {
+      requiresDataObjects[token] = board.dataObjects[token];
+    }
+  }
+
+  return {
+    cardContent,
+    cardData:            cardContent?.card_data ?? {},
+    cardRuntime:         board.cardRuntimes[cardId] ?? null,
+    requiresDataObjects,
+  };
 }

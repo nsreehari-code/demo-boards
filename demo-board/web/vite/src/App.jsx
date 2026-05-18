@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useBoardSSE } from './hooks/useBoardState.js';
+import { useBoardSSE, useBoardState } from './hooks/useBoardState.js';
 import { MainBoard }  from './components/MainBoard.jsx';
 import { IngestPane } from './components/IngestPane.jsx';
 
@@ -8,6 +8,20 @@ const BOARD_ID = 'finbook';
 export default function App() {
   const [ingestVisible, setIngestVisible] = useState(true);
   const boardState = useBoardSSE(BOARD_ID);
+  const x = useBoardState(BOARD_ID);
+  console.log('[useBoardState]', x);
+  if (x) {
+    Object.keys(x.cardContents).forEach(id =>
+      console.log('[card]', id, {
+        cardContent:         x.cardContents[id],
+        cardData:            x.cardContents[id]?.card_data ?? {},
+        cardRuntime:         x.cardRuntimes[id],
+        requiresDataObjects: Object.fromEntries(
+          (x.cardContents[id]?.requires ?? []).map(t => [t, x.dataObjects[t]])
+        ),
+      })
+    );
+  }
 
   return (
     <>
