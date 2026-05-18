@@ -109,6 +109,44 @@ function normalizeTimeoutMs(value, fallback = null) {
   return Math.floor(n);
 }
 
+function normalizePrestartCommands(configValue) {
+  if (!Array.isArray(configValue)) return [];
+  return configValue
+    .filter((entry) => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+async function runPrestartCommands(commands) {
+  for (const command of commands) {
+    console.log(`[board-server] prestart: ${command}`);
+    await new Promise((resolve, reject) => {
+      const child = spawn(command, {
+        cwd: BOARD_ROOT,
+        stdio: 'inherit',
+        shell: true,
+        windowsHide: true,
+      });
+
+      child.on('error', (err) => {
+        reject(new Error(`Prestart command failed to launch: ${command}\n${String(err?.message || err)}`));
+      });
+
+      child.on('exit', (code, signal) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        if (signal) {
+          reject(new Error(`Prestart command terminated by signal ${signal}: ${command}`));
+          return;
+        }
+        reject(new Error(`Prestart command exited with code ${code}: ${command}`));
+      });
+    });
+  }
+}
+
 function pickTimeoutMs(...values) {
   for (const value of values) {
     const n = normalizeTimeoutMs(value, null);
@@ -186,6 +224,7 @@ const PORT = Number(process.env.DEMO_SERVER_PORT || serverConfig.port || 7799);
 const cardsPatternArgIndex = cliArgs.indexOf('--cards-pattern');
 const cliCardsPattern = cardsPatternArgIndex !== -1 ? cliArgs[cardsPatternArgIndex + 1] : null;
 const selectedCardsPattern = (process.env.DEMO_CARDS_PATTERN || cliCardsPattern || '').trim() || null;
+const prestartCommands = normalizePrestartCommands(serverConfig.prestart);
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -304,6 +343,8 @@ function createConfigBackedServerMetaStore(entries) {
 // ---------------------------------------------------------------------------
 // Server meta store (multi-board registry)
 // ---------------------------------------------------------------------------
+
+await runPrestartCommands(prestartCommands);
 
 const serverMetaStore = createConfigBackedServerMetaStore(serverConfig.boards ? Object.entries(serverConfig.boards) : []);
 

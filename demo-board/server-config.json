@@ -1,5 +1,8 @@
 {
   "port": 7799,
+  "prestart": [
+    "node ./server/sync-copilot-mcp-config.js --refresh"
+  ],
   "chatFlowTimeoutMs": 1800000,
   "chatInvokeRefTimeoutMs": 1800000,
   "chatCopilotTimeoutMs": 1800000,
@@ -8,11 +11,11 @@
       "label": "Finbook",
       "setup": {
         "setupRoot": "../data-repos-VX/case-workspace",
-        "cardStore": "cards-store",
-        "artifactsStore": "cards-files",
+        "cardStore": "ingest/cards-store",
+        "artifactsStore": "ingest/cards-files",
         "boardRuntime": "runtime",
         "boardOutputsStore": "board-outputs",
-        "chatStore": "cards-chats",
+        "chatStore": "ingest/cards-chats",
         "scratchStore": "scratch",
         "archivalStore": "runtime-archive"
       },
