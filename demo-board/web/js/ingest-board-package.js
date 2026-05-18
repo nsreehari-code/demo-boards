@@ -63,53 +63,77 @@
     return ids;
   }
 
+  var INGEST_OPEN_STATE_KEY = 'demo-board-ingest-open';
+  var DONE_SECTION_ID = '__ingest_done__';
+
+  function readIngestOpenId() {
+    try { return window.localStorage.getItem(INGEST_OPEN_STATE_KEY) || null; } catch (_) { return null; }
+  }
+  function writeIngestOpenId(id) {
+    try { window.localStorage.setItem(INGEST_OPEN_STATE_KEY, id || ''); } catch (_) { /* ignore */ }
+  }
+
   (function () {
     var _LC = window.LiveCard;
     if (!_LC || typeof _LC.registerCardRenderer !== 'function') return;
 
-    function normalizeMessages(messages) {
-      return (Array.isArray(messages) ? messages : []).map(function (msg) {
-        if (!msg || typeof msg !== 'object') return null;
-        return {
-          role: typeof msg.role === 'string' ? msg.role : 'system',
-          text: typeof msg.text === 'string' ? msg.text : typeof msg.message === 'string' ? msg.message : '',
-          files: Array.isArray(msg.files) ? msg.files : []
-        };
-      }).filter(Boolean);
+    function disposePane(pane) {
+      if (pane && typeof pane.dispose === 'function') {
+        try { pane.dispose(); } catch (_) { /* ignore */ }
+      }
     }
 
-    function getChatMessages(model, context) {
-      var chatState = context && context.chatState && typeof context.chatState === 'object'
-        ? context.chatState
-        : null;
-      var stateMessages = normalizeMessages(chatState && chatState.messages);
-      if (stateMessages.length) {
-        return stateMessages;
+    function findHost(node) {
+      var n = node;
+      while (n && n !== document.body) {
+        if (n.classList && n.classList.contains('lc-ingest-board-host')) return n;
+        n = n.parentNode;
       }
-      return normalizeMessages(model && model.card_data && model.card_data.messages);
+      return null;
     }
 
     if (typeof _LC.registerBoardTheme === 'function') {
       _LC.registerBoardTheme('ingest', {
         boardClass: 'lc-ingest-board',
-        listClass: 'lc-ingest-board-list',
+        listClass: 'lc-ingest-active-list',
         styles: [
-          '.lc-ingest-board { position:relative; display:flex; justify-content:flex-start; align-items:stretch; width:auto; height:100%; min-height:100%; overflow:visible; }',
-          '.lc-ingest-board-host { display:inline-flex; align-items:flex-start; justify-content:flex-start; gap:.5rem; width:auto; max-width:calc(100vw - 24px); height:100%; min-height:100%; padding:0; overflow:visible; pointer-events:auto; }',
-          '.lc-ingest-board-rail { flex:0 0 auto; min-width:0; width:min(28rem, calc(100vw - 4.5rem)); max-width:min(28rem, calc(100vw - 4.5rem)); height:100%; max-height:none; display:flex; flex-direction:column; gap:1rem; padding:1rem; box-sizing:border-box; overflow:hidden auto; scrollbar-width:thin; scrollbar-color:rgba(15,23,42,.28) transparent; background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(248,250,252,.94)); border:1px solid rgba(15,23,42,.08); border-radius:1.25rem; box-shadow:0 20px 50px rgba(15,23,42,.12); backdrop-filter:blur(10px); opacity:1; transition:width .24s cubic-bezier(.22,1,.36,1), max-width .24s cubic-bezier(.22,1,.36,1), padding .24s cubic-bezier(.22,1,.36,1), border-color .24s cubic-bezier(.22,1,.36,1), box-shadow .24s cubic-bezier(.22,1,.36,1), opacity .18s ease; }',
-          '.lc-ingest-board-rail::-webkit-scrollbar { width:8px; }',
-          '.lc-ingest-board-rail::-webkit-scrollbar-track { background:transparent; }',
-          '.lc-ingest-board-rail::-webkit-scrollbar-thumb { background:rgba(15,23,42,.22); border-radius:999px; border:2px solid transparent; background-clip:padding-box; }',
-          '.lc-ingest-board-rail:hover::-webkit-scrollbar-thumb { background:rgba(15,23,42,.32); border-radius:999px; border:2px solid transparent; background-clip:padding-box; }',
-          '.lc-ingest-board-host.lc-ingest-collapsed { width:2rem; max-width:2rem; pointer-events:none; }',
-          '.lc-ingest-board-host.lc-ingest-collapsed .lc-ingest-board-rail { width:0; min-width:0; max-width:0; padding:0; border-color:transparent; box-shadow:none; opacity:0; pointer-events:none; }',
-          '.lc-ingest-board-host.lc-ingest-collapsed .lc-ingest-board-toggle { pointer-events:auto; }',
-          '.lc-ingest-board-toggle { position:relative; flex:0 0 auto; margin-top:1rem; width:2rem; height:2rem; border:1px solid rgba(15,23,42,.12); border-radius:999px; background:rgba(255,255,255,.96); color:#334155; box-shadow:0 8px 20px rgba(15,23,42,.12); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:transform .24s cubic-bezier(.22,1,.36,1), box-shadow .24s cubic-bezier(.22,1,.36,1); }',
-          '.lc-ingest-board-toggle:hover { transform:translateY(-1px); box-shadow:0 12px 24px rgba(15,23,42,.16); }',
-          '.lc-ingest-board-toggle:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }',
-          '.lc-ingest-board-toggle-icon { font-size:0.95rem; line-height:1; }',
-          '.lc-ingest-board-list { display:flex; flex-direction:column; gap:.6rem; width:100%; margin:0; }',
-          '.lc-ingest-board-list > [class*="col-"] { width:100%; max-width:none; flex:0 0 auto; }'
+          /* Layout shell: rail + collapse toggle */
+          '.lc-ingest-board { position:relative; display:flex; width:auto; height:100%; min-height:100%; overflow:visible; }',
+          '.lc-ingest-board-host { display:inline-flex; align-items:stretch; gap:.5rem; max-width:calc(100vw - 24px); height:100%; min-height:100%; }',
+          '.lc-ingest-rail { position:relative; z-index:1050; pointer-events:auto; width:min(28rem, calc(100vw - 4.5rem)); height:100%; overflow:hidden; transition:width .24s ease, opacity .18s ease; }',
+          '.lc-ingest-board-host.lc-ingest-collapsed .lc-ingest-rail { width:0; opacity:0; pointer-events:none; padding:0; border-color:transparent; box-shadow:none; }',
+          '.lc-ingest-rail-toggle { pointer-events:auto; align-self:flex-start; margin-top:1rem; width:2rem; height:2rem; padding:0; display:inline-flex; align-items:center; justify-content:center; }',
+
+          /* Carousel nav bar */
+          '.lc-ingest-nav { flex:0 0 auto; display:flex; align-items:center; gap:.25rem; padding:.5rem .75rem; border-bottom:1px solid rgba(0,0,0,.08); }',
+          '.lc-ingest-nav-btn { text-decoration:none; opacity:.55; line-height:1; }',
+          '.lc-ingest-nav-btn:hover:not(:disabled) { opacity:.85; text-decoration:none; }',
+          '.lc-ingest-nav-btn:disabled { opacity:.25; }',
+          '.lc-ingest-nav-btn:focus-visible { outline:2px solid currentColor; outline-offset:2px; }',
+          '.lc-ingest-nav-btn:focus:not(:focus-visible) { box-shadow:none; outline:none; }',  
+          '.lc-ingest-nav-title { flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }',
+          '.lc-ingest-counter { flex:0 0 auto; white-space:nowrap; }',
+
+          /* Card slot: fills remaining rail height, cards stacked absolutely */
+          '.lc-ingest-slot { flex:1 1 auto; min-height:0; position:relative; overflow:hidden; }',
+          '.lc-ingest-active-list { position:absolute; inset:0; --bs-gutter-x:0; --bs-gutter-y:0; margin:0 !important; }',
+          '.lc-ingest-active-list > * { position:absolute; inset:0; width:100% !important; height:100% !important; display:none; flex-direction:column; padding:0 !important; overflow:hidden; margin:0 !important; }',
+          '.lc-ingest-active-list > .lc-ingest-current { display:flex; }',
+
+          /* Shell fills its slot */
+          '.lc-ingest-shell-wrap { height:100%; display:flex; flex-direction:column; min-height:0; overflow:hidden; }',
+          '.lc-ingest-active-card, .lc-ingest-done-card { flex:1 1 auto; display:flex; flex-direction:column; min-height:0; overflow:hidden; }',
+
+          /* Chat pane: messages scroll, input pinned at bottom */
+          '.lc-ingest-chat-host { flex:1 1 auto; display:flex; flex-direction:column; min-height:0; overflow:hidden; padding:.5rem; gap:.5rem; }',
+          '.lc-ingest-chat-host > .lc-chat-pane-body { flex:1 1 auto; min-height:0; max-height:none; overflow:auto; border-radius:.375rem; }',
+          '.lc-ingest-chat-host .lc-chat-bubble-user { background:var(--bs-secondary-bg,#e9ecef) !important; }',
+          '.lc-ingest-chat-host .lc-chat-bubble-assistant { background:rgba(var(--bs-primary-rgb,13,110,253),0.10) !important; }',
+          '.lc-ingest-chat-host .lc-chat-bubble { margin-top:calc(.75rem) !important; margin-bottom:calc(.750rem) !important; }',
+          '.lc-ingest-chat-host > .lc-chat-pane-input { flex:0 0 auto; border-radius:.375rem; overflow:hidden; }',
+
+          /* Done card: files list scrolls */
+          '.lc-ingest-done-files { flex:1 1 auto; min-height:0; overflow:auto; padding:.5rem; }'
         ].join('')
       });
     }
@@ -117,194 +141,259 @@
     if (typeof _LC.registerBoardRenderer === 'function') {
       _LC.registerBoardRenderer('ingest', {
         createBoardHost: function (context) {
+          var uid = Math.random().toString(36).slice(2, 8);
           var host = document.createElement('div');
           host.className = 'lc-ingest-board-host';
-          var collapsed = readIngestRailCollapsed();
+          host.__ingestUid = uid;
+          host.__ingestCurrentId = readIngestOpenId();
+          host.__ingestCurrentIndex = 0;
 
+          var collapsed = readIngestRailCollapsed();
+          if (collapsed) host.classList.add('lc-ingest-collapsed');
+
+          /* Rail hide/show toggle */
           var toggle = document.createElement('button');
           toggle.type = 'button';
-          toggle.className = 'lc-ingest-board-toggle';
-          toggle.setAttribute('aria-label', collapsed ? 'Show ingest panel' : 'Hide ingest panel');
+          toggle.className = 'btn btn-light rounded-circle shadow-sm lc-ingest-rail-toggle';
           toggle.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
-
-          var toggleIcon = document.createElement('span');
-          toggleIcon.className = 'lc-ingest-board-toggle-icon';
-          toggleIcon.textContent = collapsed ? '>' : '<';
-          toggle.appendChild(toggleIcon);
-
-          var rail = document.createElement('div');
-          rail.className = 'lc-ingest-board-rail';
-
-          var listEl = context && context.defaultListEl ? context.defaultListEl : null;
-          if (listEl) {
-            rail.appendChild(listEl);
-          }
-
-          if (collapsed) {
-            host.classList.add('lc-ingest-collapsed');
-          }
-
+          toggle.setAttribute('aria-label', collapsed ? 'Show ingest panel' : 'Hide ingest panel');
+          toggle.textContent = collapsed ? '>' : '<';
           toggle.addEventListener('click', function () {
             collapsed = host.classList.toggle('lc-ingest-collapsed');
             toggle.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
             toggle.setAttribute('aria-label', collapsed ? 'Show ingest panel' : 'Hide ingest panel');
-            toggleIcon.textContent = collapsed ? '>' : '<';
+            toggle.textContent = collapsed ? '>' : '<';
             writeIngestRailCollapsed(collapsed);
           });
 
+          /* Rail card */
+          var rail = document.createElement('div');
+          rail.className = 'card lc-ingest-rail border-0 shadow-lg rounded-3';
+          var railBody = document.createElement('div');
+          railBody.className = 'card-body d-flex flex-column p-0 h-100 overflow-hidden';
+
+          /* Carousel navigation bar */
+          var nav = document.createElement('div');
+          nav.className = 'lc-ingest-nav';
+
+          var prevBtn = document.createElement('button');
+          prevBtn.type = 'button';
+          prevBtn.className = 'btn btn-sm btn-link text-secondary-emphasis py-0 px-1 lc-ingest-nav-btn';
+          prevBtn.setAttribute('aria-label', 'Previous card');
+          prevBtn.textContent = '▲';
+
+          var counter = document.createElement('span');
+          counter.className = 'lc-ingest-counter text-muted small';
+          counter.textContent = '0 / 0';
+
+          var navTitle = document.createElement('span');
+          navTitle.className = 'lc-ingest-nav-title fw-semibold small';
+          navTitle.textContent = '—';
+
+          var navBadge = document.createElement('span');
+          navBadge.className = 'badge lc-ingest-nav-badge';
+
+          var nextBtn = document.createElement('button');
+          nextBtn.type = 'button';
+          nextBtn.className = 'btn btn-sm btn-link text-secondary-emphasis py-0 px-1 lc-ingest-nav-btn';
+          nextBtn.setAttribute('aria-label', 'Next card');
+          nextBtn.textContent = '▼';
+
+          nav.appendChild(navTitle);
+          nav.appendChild(navBadge);
+          nav.appendChild(prevBtn);
+          nav.appendChild(counter);
+          nav.appendChild(nextBtn);
+
+          /* Card slot: hosts the engine listEl, all cards overlap absolutely */
+          var slot = document.createElement('div');
+          slot.className = 'lc-ingest-slot';
+
+          var listEl = context && context.defaultListEl ? context.defaultListEl : null;
+          if (listEl) slot.appendChild(listEl);
+
+          railBody.appendChild(nav);
+          railBody.appendChild(slot);
+          rail.appendChild(railBody);
           host.appendChild(toggle);
           host.appendChild(rail);
 
-          return {
-            mountEl: host,
-            listEl: listEl || host
-          };
+          /* Navigation helpers */
+          function getShells() {
+            if (!listEl) return [];
+            /* Engine wraps shells in col-* divs; shells may also be direct children */
+            var direct = Array.from(listEl.querySelectorAll(':scope > .lc-ingest-shell-wrap'));
+            var nested = Array.from(listEl.querySelectorAll(':scope > * > .lc-ingest-shell-wrap'));
+            return (direct.length ? direct : nested);
+          }
+
+          function goToIndex(idx) {
+            var shells = getShells();
+            var n = shells.length;
+            if (!n) {
+              counter.textContent = '0 / 0';
+              navTitle.textContent = '—';
+              navBadge.className = 'badge lc-ingest-nav-badge';
+              navBadge.textContent = '';
+              prevBtn.disabled = true;
+              nextBtn.disabled = true;
+              return;
+            }
+            idx = Math.max(0, Math.min(n - 1, idx));
+            host.__ingestCurrentIndex = idx;
+
+            /* Show only the wrapper of the current shell */
+            shells.forEach(function (shell, i) {
+              var wrapper = shell.parentElement;
+              var target = (wrapper && wrapper !== listEl) ? wrapper : shell;
+              if (i === idx) target.classList.add('lc-ingest-current');
+              else target.classList.remove('lc-ingest-current');
+            });
+
+            /* Update nav from the current shell's ingest state */
+            var shell = shells[idx];
+            var st = shell.__ingestState;
+            var parts = st && st.parts;
+            var model = parts && parts._model;
+            var meta = model && model.card && model.card.meta ? model.card.meta : {};
+            var phase = st ? st.phase : null;
+
+            host.__ingestCurrentId = shell.getAttribute('data-card-id');
+            counter.textContent = (idx + 1) + ' / ' + n;
+            navTitle.textContent = (meta && (meta.title || meta.name)) || (model && model.id) || '—';
+
+            if (phase === 'done') {
+              navBadge.className = 'badge bg-success-subtle text-success-emphasis lc-ingest-nav-badge';
+              navBadge.textContent = 'done';
+            } else if (phase) {
+              navBadge.className = 'badge bg-primary-subtle text-primary-emphasis lc-ingest-nav-badge';
+              navBadge.textContent = phase;
+            } else {
+              navBadge.className = 'badge lc-ingest-nav-badge';
+              navBadge.textContent = '';
+            }
+            prevBtn.disabled = idx <= 0;
+            nextBtn.disabled = idx >= n - 1;
+            if (host.__ingestCurrentId) writeIngestOpenId(host.__ingestCurrentId);
+          }
+
+          function refreshNav() {
+            var shells = getShells();
+            /* Stay on the same card by ID; fall back to index 0 */
+            var targetId = host.__ingestCurrentId;
+            var idx = 0;
+            if (targetId) {
+              var found = shells.findIndex(function (s) {
+                return s.getAttribute('data-card-id') === targetId;
+              });
+              if (found >= 0) idx = found;
+            }
+            goToIndex(idx);
+          }
+
+          prevBtn.addEventListener('click', function () { goToIndex((host.__ingestCurrentIndex || 0) - 1); });
+          nextBtn.addEventListener('click', function () { goToIndex((host.__ingestCurrentIndex || 0) + 1); });
+
+          host.__ingestGoTo = goToIndex;
+          host.__ingestRefreshNav = refreshNav;
+
+          return { mountEl: host, listEl: listEl || host };
         }
       });
     }
 
+    function buildActiveCard(model) {
+      var meta = model && model.card && model.card.meta ? model.card.meta : {};
+      var card = document.createElement('div');
+      card.className = 'lc-ingest-active-card';
+      card.setAttribute('data-card-id', model.id);
+
+      var errorEl = document.createElement('div');
+      errorEl.className = 'alert alert-danger small mb-0 mx-2 mt-2 d-none';
+      var chatHost = document.createElement('div');
+      chatHost.className = 'lc-ingest-chat-host';
+
+      card.appendChild(errorEl);
+      card.appendChild(chatHost);
+      return { root: card, errorEl: errorEl, chatHost: chatHost, _model: model };
+    }
+
+    function buildDoneCard(model) {
+      var meta = model && model.card && model.card.meta ? model.card.meta : {};
+      var card = document.createElement('div');
+      card.className = 'lc-ingest-done-card';
+      card.setAttribute('data-card-id', model.id);
+
+      var errorEl = document.createElement('div');
+      errorEl.className = 'alert alert-danger small mb-0 mx-2 mt-2 d-none';
+      var filesContent = document.createElement('div');
+      filesContent.className = 'lc-ingest-done-files';
+
+      card.appendChild(errorEl);
+      card.appendChild(filesContent);
+      return { root: card, errorEl: errorEl, filesContent: filesContent, _model: model };
+    }
+
     _LC.registerCardRenderer('ingest', {
-      styles: [
-        '.lc-ingest-shell { background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(248,250,252,.98)); border:1px solid rgba(15,23,42,.08); border-radius:1rem; overflow:hidden; box-shadow:0 10px 30px rgba(15,23,42,.08); }',
-        '.lc-ingest-shell-head { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.75rem .9rem; border-bottom:1px solid rgba(15,23,42,.08); background:rgba(248,250,252,.92); }',
-        '.lc-ingest-shell-title { font-size:.78rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#334155; }',
-        '.lc-ingest-shell-state { font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#475569; }',
-        '.lc-ingest-body { padding:.9rem; min-height:0; }',
-        '.lc-ingest-shell-active .lc-ingest-body { min-height:26rem; }',
-        '.lc-ingest-shell-active .lc-chat-el { height:100%; display:flex; flex-direction:column; gap:.75rem; }',
-        '.lc-ingest-shell-active .lc-chat-body { min-height:18rem; max-height:none; background:rgba(255,255,255,.85); border:1px solid rgba(148,163,184,.25); border-radius:.85rem; padding:.5rem; }',
-        '.lc-ingest-shell-active .lc-chat-input-bar { padding:.5rem; border:1px solid rgba(148,163,184,.25); border-radius:.85rem; background:#fff; }',
-        '.lc-ingest-shell-done .lc-ingest-body { min-height:0; padding-bottom:1.15rem; }',
-        '.lc-ingest-files { display:flex; flex-direction:column; gap:.75rem; }',
-        '.lc-ingest-files-label { font-size:.74rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#64748b; }',
-        '.lc-ingest-empty { border:1px dashed rgba(148,163,184,.45); border-radius:.85rem; padding:1rem; color:#64748b; font-size:.85rem; background:rgba(248,250,252,.7); }',
-        '.lc-ingest-error { margin-bottom:.75rem; padding:.65rem .8rem; border-radius:.75rem; border:1px solid rgba(239,68,68,.18); background:rgba(254,242,242,.96); color:#991b1b; font-size:.82rem; }'
-      ].join(''),
+      styles: '',
 
       createShell: function (model) {
-        var meta = model && model.card && model.card.meta ? model.card.meta : {};
         var wrap = document.createElement('div');
-        wrap.className = 'lc-ingest-shell';
-        var head = document.createElement('div');
-        head.className = 'lc-ingest-shell-head';
-        var title = document.createElement('div');
-        title.className = 'lc-ingest-shell-title';
-        title.textContent = meta.title || model.id;
-        var stateLabel = document.createElement('div');
-        stateLabel.className = 'lc-ingest-shell-state';
-        head.appendChild(title);
-        head.appendChild(stateLabel);
-        var body = document.createElement('div');
-        body.className = 'lc-ingest-body';
-        var errorEl = document.createElement('div');
-        errorEl.className = 'lc-ingest-error';
-        errorEl.style.display = 'none';
-        var chatHost = document.createElement('div');
-        var doneFilesWrap = document.createElement('div');
-        doneFilesWrap.className = 'lc-ingest-files';
-        doneFilesWrap.style.display = 'none';
-        var doneFilesLabel = document.createElement('div');
-        doneFilesLabel.className = 'lc-ingest-files-label';
-        var doneFilesContent = document.createElement('div');
-        doneFilesWrap.appendChild(doneFilesLabel);
-        doneFilesWrap.appendChild(doneFilesContent);
-        var activeFilesWrap = document.createElement('div');
-        activeFilesWrap.className = 'lc-ingest-files mt-3';
-        activeFilesWrap.style.display = 'none';
-        var activeFilesLabel = document.createElement('div');
-        activeFilesLabel.className = 'lc-ingest-files-label';
-        var activeFilesContent = document.createElement('div');
-        activeFilesWrap.appendChild(activeFilesLabel);
-        activeFilesWrap.appendChild(activeFilesContent);
-        body.appendChild(errorEl);
-        body.appendChild(chatHost);
-        body.appendChild(doneFilesWrap);
-        body.appendChild(activeFilesWrap);
-        wrap.__ingestRefs = {
-          errorEl: errorEl,
-          chatHost: chatHost,
-          doneFilesWrap: doneFilesWrap,
-          doneFilesLabel: doneFilesLabel,
-          doneFilesContent: doneFilesContent,
-          activeFilesWrap: activeFilesWrap,
-          activeFilesLabel: activeFilesLabel,
-          activeFilesContent: activeFilesContent,
-          chatSubscribed: false,
-          lastPhase: ''
-        };
-        wrap.appendChild(head);
-        wrap.appendChild(body);
+        wrap.className = 'lc-ingest-shell-wrap';
+        wrap.setAttribute('data-card-id', model.id);
+        wrap.__ingestState = { phase: null, parts: null, chatPane: null, listPane: null };
         return wrap;
       },
 
       renderBody: function (model, shell, context) {
         var meta = model && model.card && model.card.meta ? model.card.meta : {};
         var stateField = meta.ingestStateField || meta.ingest_state_field || 'X';
-        var state = String(model && model.card_data && model.card_data[stateField] || 'active').toLowerCase();
-        var body = shell && shell.querySelector ? shell.querySelector('.lc-ingest-body') : null;
-        var refs = shell && shell.__ingestRefs ? shell.__ingestRefs : null;
-        if (!body || !refs) {
-          return;
-        }
-        shell.className = 'lc-ingest-shell lc-ingest-shell-' + state;
-        var stateEl = shell.querySelector('.lc-ingest-shell-state');
-        if (stateEl) stateEl.textContent = state;
-        refs.errorEl.style.display = 'none';
-        refs.doneFilesWrap.style.display = 'none';
-        refs.activeFilesWrap.style.display = 'none';
-        refs.chatHost.style.display = 'none';
+        var phase = String(model && model.card_data && model.card_data[stateField] || 'active').toLowerCase();
+        var st = shell.__ingestState;
+        var host = findHost(shell);
 
-        if (model && model.card_data && model.card_data.status === 'error' && model.card_data.error) {
-          refs.errorEl.textContent = model.card_data.error;
-          refs.errorEl.style.display = '';
-        }
+        if (phase !== st.phase) {
+          disposePane(st.chatPane); st.chatPane = null;
+          disposePane(st.listPane); st.listPane = null;
+          shell.innerHTML = '';
 
-        if (state === 'done') {
-          if (refs.chatSubscribed) {
-            Promise.resolve(context.stopReceivingChats(model.id)).catch(function () {});
+          if (phase === 'done') {
+            st.parts = buildDoneCard(model);
+            shell.appendChild(st.parts.root);
+            st.listPane = context.mountFilesListPane({
+              container: st.parts.filesContent,
+              emptyText: meta.emptyFilesText || 'No files uploaded.'
+            });
+          } else {
+            st.parts = buildActiveCard(model);
+            shell.appendChild(st.parts.root);
+            st.chatPane = context.mountChatPane({
+              container: st.parts.chatHost,
+              placeholder: meta.chatPlaceholder || 'Request another file or continue the ingest review...',
+              fileAttach: true
+            });
           }
-          refs.chatSubscribed = false;
-          refs.doneFilesLabel.textContent = meta.doneLabel || 'Uploaded files';
-          refs.doneFilesContent.innerHTML = '';
-          refs.doneFilesWrap.style.display = '';
-          context.renderBuiltin(null, 'text',
-            model && model.card_data && Array.isArray(model.card_data.files) ? model.card_data.files : [],
-            refs.doneFilesContent,
-            { data: { format: 'file-links', cardId: model.id } }
-          );
-          refs.lastPhase = state;
-          return;
+          st.phase = phase;
+
+          /* Refresh nav after any phase change or new card arrival */
+          if (host && host.__ingestRefreshNav) {
+            queueMicrotask(function () { host.__ingestRefreshNav(); });
+          }
         }
 
-        refs.chatHost.style.display = '';
-        var chatState = context && context.chatState && typeof context.chatState === 'object'
-          ? context.chatState
-          : { receiving: false, messages: [] };
-        if (chatState.receiving) {
-          refs.chatSubscribed = true;
-        } else if (!refs.chatSubscribed) {
-          refs.chatSubscribed = true;
-          Promise.resolve(context.startReceivingChats(model.id)).catch(function () {
-            refs.chatSubscribed = false;
-          });
-        }
-        context.renderBuiltin(null, 'chat', getChatMessages(model, context), refs.chatHost, {
-          id: 'ingest-chat-' + model.id,
-          data: { fileAttach: true, placeholder: meta.chatPlaceholder || 'Type a message...' }
-        });
+        /* Keep model reference fresh for nav display */
+        if (st.parts) st.parts._model = model;
 
-        var activeFiles = model && model.card_data && Array.isArray(model.card_data.files)
-          ? model.card_data.files.filter(Boolean)
-          : [];
-        if (activeFiles.length) {
-          refs.activeFilesLabel.textContent = meta.doneLabel || 'Attached files';
-          refs.activeFilesContent.innerHTML = '';
-          refs.activeFilesWrap.style.display = '';
-          context.renderBuiltin(null, 'text', activeFiles, refs.activeFilesContent, {
-            data: { format: 'file-links', cardId: model.id }
-          });
+        /* Update error banner on every render */
+        if (st.parts && st.parts.errorEl) {
+          var hasError = model && model.card_data && model.card_data.status === 'error' && model.card_data.error;
+          if (hasError) {
+            st.parts.errorEl.textContent = model.card_data.error;
+            st.parts.errorEl.classList.remove('d-none');
+          } else {
+            st.parts.errorEl.classList.add('d-none');
+          }
         }
-        refs.lastPhase = state;
       }
     });
   })();
