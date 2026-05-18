@@ -1,5 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
-import { SERVER, initBoard } from '../lib/client.js';
+import {
+  SERVER,
+  initBoard,
+  refreshCard,
+  patchCard,
+  dispatchAction,
+  uploadFile,
+  uploadFileForChat,
+  subscribeCardChats,
+  unsubscribeCardChats,
+} from '../lib/client.js';
 
 // ---------------------------------------------------------------------------
 // State builder — converts the raw SSE initial payload into React state
@@ -179,6 +189,9 @@ export function useBoardState(boardId) {
   // dataObjects: board-level map keyed by token, from dataObjectsByToken + data_object notifications
   const dataObjects = raw.dataObjects ?? {};
 
+  // chatStates: chat state keyed by cardId
+  const chatStates = raw.chatsById ?? {};
+
   return {
     boardId:     raw.boardId,
     boardInfo:   null,
@@ -186,6 +199,7 @@ export function useBoardState(boardId) {
     cardRuntimes,
     boardStatus,
     dataObjects,
+    chatStates,
   };
 }
 
@@ -211,6 +225,31 @@ export function useCardState(boardId, cardId) {
     cardContent,
     cardData:            cardContent?.card_data ?? {},
     cardRuntime:         board.cardRuntimes[cardId] ?? null,
+    chatState:           board.chatStates?.[cardId] ?? null,
     requiresDataObjects,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// useBoardActions — board-level imperative actions
+// ---------------------------------------------------------------------------
+export function useBoardActions(boardId) {
+  return {
+    initBoard: () => initBoard(boardId),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// useCardActions — card-level imperative actions
+// ---------------------------------------------------------------------------
+export function useCardActions(boardId, cardId) {
+  return {
+    refresh: () => refreshCard(boardId, cardId),
+    patch: (patch) => patchCard(boardId, cardId, patch),
+    sendChat: (text, payload = {}) => dispatchAction(boardId, cardId, 'chat-send', { text, ...payload }),
+    uploadFileForChat: (file) => uploadFileForChat(boardId, cardId, file),
+    uploadFile: (file) => uploadFile(boardId, cardId, file),
+    subscribeChat: () => subscribeCardChats(boardId, cardId),
+    unsubscribeChat: () => unsubscribeCardChats(boardId, cardId),
   };
 }

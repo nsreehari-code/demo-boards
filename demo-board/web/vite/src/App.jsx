@@ -1,30 +1,28 @@
 import React, { useState } from 'react';
-import { useBoardSSE, useBoardState } from './hooks/useBoardState.js';
+import { useBoardSSE, useBoardState, useCardState } from './hooks/useBoardState.js';
 import { MainBoard }  from './components/MainBoard.jsx';
 import { IngestPane } from './components/IngestPane.jsx';
 
 const BOARD_ID = 'finbook';
+
+function CardStateLogger({ boardId, cardId }) {
+  const cardState = useCardState(boardId, cardId);
+  console.log('[useCardState]', cardId, cardState);
+  return null;
+}
 
 export default function App() {
   const [ingestVisible, setIngestVisible] = useState(true);
   const boardState = useBoardSSE(BOARD_ID);
   const x = useBoardState(BOARD_ID);
   console.log('[useBoardState]', x);
-  if (x) {
-    Object.keys(x.cardContents).forEach(id =>
-      console.log('[card]', id, {
-        cardContent:         x.cardContents[id],
-        cardData:            x.cardContents[id]?.card_data ?? {},
-        cardRuntime:         x.cardRuntimes[id],
-        requiresDataObjects: Object.fromEntries(
-          (x.cardContents[id]?.requires ?? []).map(t => [t, x.dataObjects[t]])
-        ),
-      })
-    );
-  }
 
   return (
     <>
+      {(x?.cardIds ?? x?.cardContents ? Object.keys(x?.cardContents ?? {}) : []).map((cardId) => (
+        <CardStateLogger key={cardId} boardId={BOARD_ID} cardId={cardId} />
+      ))}
+
       {/* ── top nav ── */}
       <nav className="navbar navbar-expand-lg bg-body-tertiary border-bottom px-3 py-2"
            style={{ height: '56px' }}>

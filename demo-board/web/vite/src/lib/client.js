@@ -39,6 +39,16 @@ export const uploadFile = (boardId, cardId, file) =>
     body: file,
   });
 
+export const uploadFileForChat = (boardId, cardId, file) =>
+  fetch(`${base(boardId)}/cards/${cardId}/files?inChat=true`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'x-file-name': encodeURIComponent(file.name),
+    },
+    body: file,
+  });
+
 export const subscribeCardChats = (boardId, cardId) =>
   fetch(`${base(boardId)}/cards/${cardId}/chats/subscribe-sse`, { method: 'POST' });
 
