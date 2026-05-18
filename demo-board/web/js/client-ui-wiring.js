@@ -20,6 +20,18 @@
     return state;
   }
 
+  // Keys that are pure volatile timestamps and should not trigger re-renders on their own.
+  var _VOLATILE_KEYS = new Set([
+    'last_transition_at', 'last_completed_at', 'last_restarted_at',
+    'status_age_ms', 'in_progress_since', 'lastRun'
+  ]);
+
+  function stateSignature(state) {
+    return JSON.stringify(state, function (k, v) {
+      return _VOLATILE_KEYS.has(k) ? undefined : v;
+    });
+  }
+
   async function derivePluginState(plugin, sourceState, context) {
     var client = requireClient();
 
@@ -259,12 +271,16 @@
       });
       var runtime = null;
       var runtimeSubscription = null;
+      var prevDerivedSig = stateSignature(derivedState);
 
       async function updatePluginRuntime(nextSourceState) {
         if (!runtime || typeof runtime.setState !== 'function' || !nextSourceState) {
           return;
         }
         var nextDerived = await derivePluginState(plugin, nextSourceState, pluginContext);
+        var sig = stateSignature(nextDerived.state);
+        if (sig === prevDerivedSig) { return; }
+        prevDerivedSig = sig;
         runtime.setState(nextDerived.state);
       }
 

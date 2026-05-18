@@ -72,7 +72,6 @@
       if (activeBoardView && typeof activeBoardView.setState === 'function') {
         activeBoardView.setState(function () { return activeState; });
       }
-      notifyBoardEngine();
       return activeState;
     }
 

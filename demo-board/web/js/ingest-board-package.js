@@ -123,6 +123,7 @@
           /* Shell fills its slot */
           '.lc-ingest-shell-wrap { height:100%; display:flex; flex-direction:column; min-height:0; overflow:hidden; }',
           '.lc-ingest-active-card, .lc-ingest-done-card { flex:1 1 auto; display:flex; flex-direction:column; min-height:0; overflow:hidden; }',
+          '.lc-ingest-done-card .lc-chat-pane-input { display:none !important; }',
 
           /* Chat pane: messages scroll, input pinned at bottom */
           '.lc-ingest-chat-host { flex:1 1 auto; display:flex; flex-direction:column; min-height:0; overflow:hidden; padding:.5rem; gap:.5rem; }',
@@ -133,7 +134,7 @@
           '.lc-ingest-chat-host > .lc-chat-pane-input { flex:0 0 auto; border-radius:.375rem; overflow:hidden; }',
 
           /* Done card: files list scrolls */
-          '.lc-ingest-done-files { flex:1 1 auto; min-height:0; overflow:auto; padding:.5rem; }'
+          '.lc-ingest-done-files { flex:1 1 auto; min-height:0; overflow:auto; padding:.5rem; }' /* kept for legacy */
         ].join('')
       });
     }
@@ -302,36 +303,17 @@
       });
     }
 
-    function buildActiveCard(model) {
-      var meta = model && model.card && model.card.meta ? model.card.meta : {};
+    function buildCard(model, phase) {
       var card = document.createElement('div');
-      card.className = 'lc-ingest-active-card';
+      card.className = phase === 'done' ? 'lc-ingest-done-card' : 'lc-ingest-active-card';
       card.setAttribute('data-card-id', model.id);
-
       var errorEl = document.createElement('div');
       errorEl.className = 'alert alert-danger small mb-0 mx-2 mt-2 d-none';
       var chatHost = document.createElement('div');
       chatHost.className = 'lc-ingest-chat-host';
-
       card.appendChild(errorEl);
       card.appendChild(chatHost);
       return { root: card, errorEl: errorEl, chatHost: chatHost, _model: model };
-    }
-
-    function buildDoneCard(model) {
-      var meta = model && model.card && model.card.meta ? model.card.meta : {};
-      var card = document.createElement('div');
-      card.className = 'lc-ingest-done-card';
-      card.setAttribute('data-card-id', model.id);
-
-      var errorEl = document.createElement('div');
-      errorEl.className = 'alert alert-danger small mb-0 mx-2 mt-2 d-none';
-      var filesContent = document.createElement('div');
-      filesContent.className = 'lc-ingest-done-files';
-
-      card.appendChild(errorEl);
-      card.appendChild(filesContent);
-      return { root: card, errorEl: errorEl, filesContent: filesContent, _model: model };
     }
 
     _LC.registerCardRenderer('ingest', {
@@ -341,7 +323,7 @@
         var wrap = document.createElement('div');
         wrap.className = 'lc-ingest-shell-wrap';
         wrap.setAttribute('data-card-id', model.id);
-        wrap.__ingestState = { phase: null, parts: null, chatPane: null, listPane: null };
+        wrap.__ingestState = { phase: null, parts: null, chatPane: null };
         return wrap;
       },
 
@@ -354,25 +336,15 @@
 
         if (phase !== st.phase) {
           disposePane(st.chatPane); st.chatPane = null;
-          disposePane(st.listPane); st.listPane = null;
           shell.innerHTML = '';
 
-          if (phase === 'done') {
-            st.parts = buildDoneCard(model);
-            shell.appendChild(st.parts.root);
-            st.listPane = context.mountFilesListPane({
-              container: st.parts.filesContent,
-              emptyText: meta.emptyFilesText || 'No files uploaded.'
-            });
-          } else {
-            st.parts = buildActiveCard(model);
-            shell.appendChild(st.parts.root);
-            st.chatPane = context.mountChatPane({
-              container: st.parts.chatHost,
-              placeholder: meta.chatPlaceholder || 'Request another file or continue the ingest review...',
-              fileAttach: true
-            });
-          }
+          st.parts = buildCard(model, phase);
+          shell.appendChild(st.parts.root);
+          st.chatPane = context.mountChatPane({
+            container: st.parts.chatHost,
+            placeholder: meta.chatPlaceholder || 'Request another file or continue the ingest review...',
+            fileAttach: true
+          });
           st.phase = phase;
 
           /* Refresh nav after any phase change or new card arrival */

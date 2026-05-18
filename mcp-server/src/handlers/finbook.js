@@ -374,6 +374,39 @@ export async function handleFinbookTool(args, tool) {
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
+      case 'lore': {
+        const cmd = args?.cmd;
+        const key = args?.key || null;
+        const value = Object.prototype.hasOwnProperty.call(args || {}, 'value') ? args.value : undefined;
+        const includeDeprecated = args?.includeDeprecated === true;
+        const params = { cmd: cmd || null, key };
+        const loreFile = api.getLoreFilePath(dbFile);
+        const loreDb = api.loadLoreDb(loreFile);
+        if (cmd === 'get') {
+          return toMcpResult(contract.success(operation, params, { entry: api.loreGet(loreDb, key) }, meta));
+        }
+        if (cmd === 'get_all') {
+          const entries = api.loreGetAll(loreDb, { includeDeprecated });
+          return toMcpResult(contract.success(operation, params, { count: entries.length, entries }, meta));
+        }
+        if (cmd === 'set') {
+          const result = api.loreSet(loreDb, key, value);
+          api.saveLoreDb(loreFile, loreDb);
+          return toMcpResult(contract.success(operation, params, result, meta));
+        }
+        if (cmd === 'append') {
+          const result = api.loreAppend(loreDb, key, value);
+          api.saveLoreDb(loreFile, loreDb);
+          return toMcpResult(contract.success(operation, params, result, meta));
+        }
+        if (cmd === 'deprecate') {
+          const result = api.loreDeprecate(loreDb, key);
+          api.saveLoreDb(loreFile, loreDb);
+          return toMcpResult(contract.success(operation, params, result, meta));
+        }
+        throw new Error(`Unknown lore cmd: ${cmd}`);
+      }
+
       default:
         throw new Error(`Unsupported Finbook MCP tool: ${tool.name}`);
     }

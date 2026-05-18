@@ -72,6 +72,36 @@
       }
     }
 
+    // Keys that are volatile (change on every server write) and should not
+    // trigger a CDN board re-render on their own.
+    var _VOLATILE_KEYS = new Set([
+      'last_transition_at', 'last_completed_at', 'last_restarted_at',
+      'status_age_ms', 'in_progress_since', 'lastRun'
+    ]);
+
+    function stateSignature(s) {
+      return JSON.stringify(s, function (k, v) {
+        return _VOLATILE_KEYS.has(k) ? undefined : v;
+      });
+    }
+
+    // Wraps a runtime session so that its subscribe callback only fires when
+    // the board state has a meaningful change (not just volatile timestamps).
+    function createVolatileFilteredSession(session) {
+      var prevSig = stateSignature(typeof session.getState === 'function' ? session.getState() : null);
+      return {
+        __proto__: session,
+        subscribe: function (callback) {
+          return session.subscribe(function (nextState) {
+            var sig = stateSignature(nextState);
+            if (sig === prevSig) { return; }
+            prevSig = sig;
+            callback(nextState);
+          });
+        }
+      };
+    }
+
     function createRuntimeSession(boardId) {
       return client.createBoardRuntimeSession({
         fetchServer: fetchServer,
@@ -139,7 +169,7 @@
 
       var runtimeSession = await ensureRuntimeSession(bid);
       var runtime = client.createDerivedBoardRuntime({
-        session: runtimeSession,
+        session: createVolatileFilteredSession(runtimeSession),
         initialMode: state.mode,
         canvas: state.canvas,
         boardPaths: boardPaths,
@@ -174,7 +204,7 @@
         return String(cardId);
       }));
       var runtime = client.createDerivedBoardRuntime({
-        session: runtimeSession,
+        session: createVolatileFilteredSession(runtimeSession),
         initialMode: state.mode,
         canvas: state.canvas,
         boardPaths: boardPaths,
