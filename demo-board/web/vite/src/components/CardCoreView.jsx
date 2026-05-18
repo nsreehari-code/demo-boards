@@ -1,0 +1,787 @@
+import React, { useEffect, useMemo, useState } from 'react';
+
+export const CARD_CORE_VIEW_KINDS = {
+  table: { Component: TableView, isEditable: false },
+  filter: { Component: FilterView, isEditable: true },
+  metric: { Component: MetricView, isEditable: false },
+  list: { Component: ListView, isEditable: false },
+  chart: { Component: ChartView, isEditable: false },
+  form: { Component: FormView, isEditable: true },
+  notes: { Component: NotesView, isEditable: true },
+  'editable-table': { Component: EditableTableView, isEditable: true },
+  todo: { Component: TodoView, isEditable: true },
+  alert: { Component: AlertView, isEditable: false },
+  narrative: { Component: NarrativeView, isEditable: false },
+  badge: { Component: BadgeView, isEditable: false },
+  text: { Component: TextView, isEditable: false },
+  markdown: { Component: MarkdownView, isEditable: false },
+  actions: { Component: ActionsView, isEditable: false },
+  custom: { Component: CustomView, isEditable: false },
+};
+
+function deepEqual(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function parseThreshold(expr) {
+  const match = String(expr ?? '').match(/^(<=?|>=?|===?)\s*(.+)$/);
+  if (!match) return null;
+  return { op: match[1], value: Number.parseFloat(match[2]) };
+}
+
+function evalThreshold(value, expr) {
+  const threshold = parseThreshold(expr);
+  if (!threshold || Number.isNaN(threshold.value)) return false;
+  switch (threshold.op) {
+    case '<':
+      return value < threshold.value;
+    case '<=':
+      return value <= threshold.value;
+    case '>':
+      return value > threshold.value;
+    case '>=':
+      return value >= threshold.value;
+    case '=':
+    case '==':
+    case '===':
+      return value === threshold.value;
+    default:
+      return false;
+  }
+}
+
+function detectChartType(data) {
+  if (!data.length) return 'bar';
+  const sample = data[0];
+  if (sample?.label !== undefined && sample?.value !== undefined && sample?.x === undefined && sample?.date === undefined) {
+    return 'pie';
+  }
+  if (sample?.x !== undefined || sample?.date !== undefined) return 'line';
+  return 'bar';
+}
+
+function getObjectColumns(rows, configuredColumns) {
+  if (Array.isArray(configuredColumns) && configuredColumns.length) return configuredColumns;
+  const keys = new Set();
+  for (const row of rows) {
+    if (row && typeof row === 'object' && !Array.isArray(row)) {
+      Object.keys(row).forEach((key) => keys.add(key));
+    }
+  }
+  return [...keys];
+}
+
+function mergeRows(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) => ({ ...(row ?? {}) }));
+}
+
+function CardFrame({ label, kind, children }) {
+  const showLabel = label && kind !== 'metric' && kind !== 'alert';
+  return (
+    <div className="w-100 d-flex flex-column">
+      {showLabel ? <div className="small text-muted fw-medium mb-1">{label}</div> : null}
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function TableView({ data, renderDef }) {
+  const viewData = renderDef?.data ?? {};
+
+  const [sortCol, setSortCol] = useState(null);
+  const [sortDir, setSortDir] = useState('asc');
+
+  useEffect(() => {
+    setSortCol(null);
+    setSortDir('asc');
+  }, [data]);
+
+  if (!Array.isArray(data) || !data.length) {
+    return <p className="text-muted small mb-0">{viewData.placeholder ?? 'No data'}</p>;
+  }
+
+  const limit = Math.min(data.length, viewData.maxRows ?? 200);
+  const columns = getObjectColumns(data.slice(0, limit), viewData.columns);
+  const sortable = viewData.sortable !== false;
+
+  let rows = data.slice(0, limit);
+  if (sortable && sortCol !== null) {
+    const sortKey = columns[sortCol];
+    rows = rows.slice().sort((left, right) => {
+      const leftValue = left?.[sortKey];
+      const rightValue = right?.[sortKey];
+      if (leftValue == null) return 1;
+      if (rightValue == null) return -1;
+      if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+        return sortDir === 'asc' ? leftValue - rightValue : rightValue - leftValue;
+      }
+      const leftText = String(leftValue);
+      const rightText = String(rightValue);
+      return sortDir === 'asc' ? leftText.localeCompare(rightText) : rightText.localeCompare(leftText);
+    });
+  }
+
+  return (
+    <div className="d-flex flex-column">
+      <div className="table-responsive">
+        <table className="table table-sm table-striped table-hover mb-0">
+          <thead>
+            <tr>
+              {columns.map((column, index) => {
+                const arrow = sortCol === index ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+                return (
+                  <th
+                    key={column}
+                    className="small text-nowrap"
+                    role={sortable ? 'button' : undefined}
+                    style={sortable ? { cursor: 'pointer' } : undefined}
+                    onClick={sortable ? () => {
+                      if (sortCol === index) {
+                        setSortDir((current) => (current === 'asc' ? 'desc' : 'asc'));
+                      } else {
+                        setSortCol(index);
+                        setSortDir('asc');
+                      }
+                    } : undefined}
+                  >
+                    {column}{arrow}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {columns.map((column) => (
+                  <td key={column} className="small">{row?.[column] != null ? String(row[column]) : ''}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {data.length > limit ? (
+        <p className="text-muted small mt-1 mb-0">Showing {limit} of {data.length} rows</p>
+      ) : null}
+    </div>
+  );
+}
+
+function FilterView({ data, renderDef, onSave }) {
+  const viewData = renderDef?.data ?? {};
+  const fields = viewData.fields?.properties ?? {};
+  const writeValues = renderDef?.resolvedWriteValue ?? {};
+  const keys = data && typeof data === 'object' && !Array.isArray(data) ? Object.keys(data) : [];
+
+  if (!keys.length) {
+    return <p className="text-muted small mb-0">No filter options</p>;
+  }
+
+  return (
+    <div className="row g-2">
+      {keys.map((key) => {
+        const options = Array.isArray(data[key]) ? data[key] : [];
+        const label = fields[key]?.title ?? key;
+        return (
+          <div key={key} className="col-12 col-sm-6 col-md-4">
+            <label className="form-label small mb-1">{label}</label>
+            <select
+              className="form-select form-select-sm"
+              value={String(writeValues?.[key] ?? '')}
+              onChange={(event) => {
+                const next = {};
+                for (const currentKey of keys) {
+                  const select = currentKey === key ? event.target.value : String(writeValues?.[currentKey] ?? '');
+                  if (select) next[currentKey] = select;
+                }
+                onSave?.(next, { kind: 'filter', renderDef, writeTo: viewData.writeTo });
+              }}
+            >
+              <option value="">All</option>
+              {options.map((option) => (
+                <option key={String(option)} value={String(option)}>{String(option)}</option>
+              ))}
+            </select>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MetricView({ data, renderDef }) {
+  let title = renderDef?.label ?? '';
+  let value = '—';
+  let detail = '';
+
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    title = data.title ?? data.label ?? data.metric ?? title;
+    value = data.value != null ? String(data.value) : '—';
+    detail = data.detail ?? '';
+  } else if (data != null) {
+    value = String(data);
+  }
+
+  return (
+    <div className="text-center py-2">
+      {title ? <div className="text-muted small">{title}</div> : null}
+      <div style={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1.2 }}>{value}</div>
+      {detail ? <div className="small mt-1">{detail}</div> : null}
+    </div>
+  );
+}
+
+function ListView({ data, renderDef }) {
+  const viewData = renderDef?.data ?? {};
+
+  if (data == null) return null;
+
+  if (Array.isArray(data)) {
+    if (!data.length) {
+      return <p className="text-muted small mb-0">{viewData.placeholder ?? 'Empty'}</p>;
+    }
+    if (typeof data[0] === 'string' || typeof data[0] === 'number') {
+      const max = viewData.maxRows ?? data.length;
+      return (
+        <ul className="list-unstyled mb-0">
+          {data.slice(0, max).map((item, index) => (
+            <li key={index} className="small mb-1">• {String(item)}</li>
+          ))}
+        </ul>
+      );
+    }
+    return <TableView data={data} renderDef={renderDef} />;
+  }
+
+  if (typeof data === 'object') {
+    return (
+      <dl className="row mb-0">
+        {Object.entries(data).map(([key, value]) => (
+          <React.Fragment key={key}>
+            <dt className="col-sm-5 small text-muted text-truncate">{key}</dt>
+            <dd className="col-sm-7 small mb-1">{value != null ? String(value) : '—'}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+    );
+  }
+
+  return <div className="small">{String(data)}</div>;
+}
+
+function ChartView({ data, renderDef }) {
+  if (!Array.isArray(data) || !data.length) {
+    return <p className="text-muted small mb-0">No chart data</p>;
+  }
+
+  const chartType = renderDef?.data?.chartType ?? detectChartType(data);
+  return (
+    <div className="h-100 d-flex flex-column min-h-0">
+      <div className="small text-muted mb-2">Chart preview ({chartType})</div>
+      <TableView data={data} renderDef={renderDef} />
+    </div>
+  );
+}
+
+function FormView({ data, renderDef, onSave }) {
+  const viewData = renderDef?.data ?? {};
+  const schema = viewData.fields ?? {};
+  const props = schema.properties ?? {};
+  const required = schema.required ?? [];
+  const baseValues = useMemo(() => (
+    data && typeof data === 'object' && !Array.isArray(data) ? { ...data } : {}
+  ), [data]);
+
+  const [journal, setJournal] = useState({});
+
+  useEffect(() => {
+    setJournal((current) => {
+      const next = { ...current };
+      Object.keys(next).forEach((key) => {
+        if (deepEqual(next[key], baseValues[key])) delete next[key];
+      });
+      return next;
+    });
+  }, [baseValues]);
+
+  const effectiveValues = useMemo(() => ({ ...baseValues, ...journal }), [baseValues, journal]);
+  const dirty = Object.keys(journal).length > 0;
+
+  function setFieldValue(key, prop, rawValue) {
+    let nextValue = rawValue;
+    if (prop.type === 'boolean') nextValue = !!rawValue;
+    if (prop.type === 'number' || prop.type === 'integer') nextValue = rawValue === '' ? 0 : Number.parseFloat(rawValue);
+
+    setJournal((current) => {
+      const next = { ...current };
+      if (deepEqual(nextValue, baseValues[key])) delete next[key];
+      else next[key] = nextValue;
+      return next;
+    });
+  }
+
+  return (
+    <form className="row g-2 h-100 align-content-start" onSubmit={(event) => {
+      event.preventDefault();
+      onSave?.(effectiveValues, { kind: 'form', renderDef, writeTo: viewData.writeTo });
+    }}>
+      {Object.entries(props).map(([key, prop]) => {
+        const isRequired = required.includes(key);
+        const compact = ['number', 'integer', 'boolean'].includes(prop.type) || prop.enum || prop.format === 'date';
+        const value = effectiveValues[key];
+        return (
+          <div key={key} className={compact ? 'col-12 col-md-6' : 'col-12'}>
+            {prop.type === 'boolean' ? (
+              <div className="form-check mt-3">
+                <input
+                  id={`${renderDef?.id ?? 'field'}-${key}`}
+                  type="checkbox"
+                  className="form-check-input"
+                  checked={!!value}
+                  onChange={(event) => setFieldValue(key, prop, event.target.checked)}
+                />
+                <label className="form-check-label small" htmlFor={`${renderDef?.id ?? 'field'}-${key}`}>
+                  {prop.title ?? key}
+                </label>
+              </div>
+            ) : (
+              <>
+                <label className="form-label small mb-1">{prop.title ?? key}</label>
+                {prop.enum ? (
+                  <select
+                    className="form-select form-select-sm"
+                    value={value ?? ''}
+                    onChange={(event) => setFieldValue(key, prop, event.target.value)}
+                    required={isRequired}
+                  >
+                    {prop.enum.map((option) => (
+                      <option key={String(option)} value={String(option)}>{String(option)}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={prop.format === 'date' ? 'date' : (prop.type === 'number' || prop.type === 'integer' ? 'number' : 'text')}
+                    className="form-control form-control-sm"
+                    value={prop.format === 'date' ? (value != null ? String(value).slice(0, 10) : '') : (value ?? '')}
+                    min={prop.minimum}
+                    max={prop.maximum}
+                    step={prop.type === 'integer' ? '1' : (prop.type === 'number' ? 'any' : undefined)}
+                    placeholder={prop.placeholder}
+                    required={isRequired}
+                    onChange={(event) => setFieldValue(key, prop, event.target.value)}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+      <div className="col-12 mt-1">
+        <button
+          type="button"
+          className={`btn btn-sm btn-outline-secondary me-2${dirty ? '' : ' d-none'}`}
+          onClick={() => setJournal({})}
+        >
+          Discard
+        </button>
+        <button type="submit" className={`btn btn-sm btn-primary${dirty ? '' : ' d-none'}`}>
+          Save
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function NotesView({ data, renderDef, onSave }) {
+  const baseContent = typeof data === 'string' ? data : '';
+  const [journal, setJournal] = useState(null);
+
+  useEffect(() => {
+    setJournal((current) => (current === baseContent ? null : current));
+  }, [baseContent]);
+
+  const dirty = journal != null;
+  const effectiveContent = journal != null ? journal : baseContent;
+
+  return (
+    <div className="h-100 d-flex flex-column min-h-0">
+      <textarea
+        className="form-control form-control-sm flex-grow-1"
+        rows={8}
+        placeholder="Write markdown..."
+        value={effectiveContent}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          setJournal(nextValue === baseContent ? null : nextValue);
+        }}
+      />
+      <div className="mt-2">
+        <button
+          type="button"
+          className={`btn btn-sm btn-outline-secondary me-2${dirty ? '' : ' d-none'}`}
+          onClick={() => setJournal(null)}
+        >
+          Discard
+        </button>
+        <button
+          type="button"
+          className={`btn btn-sm btn-primary${dirty ? '' : ' d-none'}`}
+          onClick={() => onSave?.(effectiveContent, { kind: 'notes', renderDef, writeTo: renderDef?.data?.writeTo })}
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EditableTableView({ data, renderDef, onSave }) {
+  const viewData = renderDef?.data ?? {};
+  const schemaProps = viewData.schema?.properties ?? {};
+  const canAdd = viewData.addRow !== false;
+  const canDelete = viewData.deleteRow !== false;
+  const baseRows = useMemo(() => mergeRows(data), [data]);
+  const [journalRows, setJournalRows] = useState(null);
+
+  useEffect(() => {
+    setJournalRows((current) => (Array.isArray(current) && deepEqual(current, baseRows) ? null : current));
+  }, [baseRows]);
+
+  const dirty = Array.isArray(journalRows);
+  const effectiveRows = dirty ? mergeRows(journalRows) : mergeRows(baseRows);
+  const columns = getObjectColumns(effectiveRows, viewData.columns);
+
+  function updateRows(nextRows) {
+    setJournalRows(deepEqual(nextRows, baseRows) ? null : mergeRows(nextRows));
+  }
+
+  return (
+    <div className="h-100 d-flex flex-column min-h-0">
+      {(!columns.length && !canAdd) ? (
+        <p className="text-muted small mb-0">{viewData.placeholder ?? 'No data'}</p>
+      ) : (
+        <div className="table-responsive flex-grow-1 min-h-0">
+          <table className="table table-sm table-bordered mb-0">
+            <thead>
+              <tr>
+                {columns.map((column) => <th key={column} className="small text-nowrap">{column}</th>)}
+                {canDelete ? <th style={{ width: '2rem' }} /> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {effectiveRows.length ? effectiveRows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {columns.map((column) => {
+                    const prop = schemaProps[column] ?? {};
+                    const isNumber = prop.type === 'number' || prop.type === 'integer' || typeof row?.[column] === 'number';
+                    return (
+                      <td key={column} className="p-0">
+                        <input
+                          type={isNumber ? 'number' : 'text'}
+                          className="form-control form-control-sm border-0 rounded-0"
+                          value={row?.[column] ?? ''}
+                          step={isNumber ? 'any' : undefined}
+                          onChange={(event) => {
+                            const nextRows = mergeRows(effectiveRows);
+                            nextRows[rowIndex][column] = isNumber
+                              ? (event.target.value === '' ? 0 : Number.parseFloat(event.target.value))
+                              : event.target.value;
+                            updateRows(nextRows);
+                          }}
+                        />
+                      </td>
+                    );
+                  })}
+                  {canDelete ? (
+                    <td className="text-center align-middle p-0">
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-link text-danger p-0"
+                        title="Remove row"
+                        onClick={() => updateRows(effectiveRows.filter((_, index) => index !== rowIndex))}
+                      >
+                        ✕
+                      </button>
+                    </td>
+                  ) : null}
+                </tr>
+              )) : (
+                <tr>
+                  <td colSpan={columns.length + (canDelete ? 1 : 0)} className="text-muted small text-center">
+                    {viewData.placeholder ?? 'No rows'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="mt-1">
+        {canAdd ? (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary me-1"
+            onClick={() => {
+              const nextRow = {};
+              columns.forEach((column) => {
+                nextRow[column] = '';
+              });
+              updateRows([...effectiveRows, nextRow]);
+            }}
+          >
+            + Add row
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={`btn btn-sm btn-outline-secondary me-1${dirty ? '' : ' d-none'}`}
+          onClick={() => setJournalRows(null)}
+        >
+          Discard
+        </button>
+        <button
+          type="button"
+          className={`btn btn-sm btn-primary${dirty ? '' : ' d-none'}`}
+          onClick={() => onSave?.(effectiveRows, { kind: 'editable-table', renderDef, writeTo: viewData.writeTo })}
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TodoView({ data, renderDef, onSave }) {
+  const baseItems = useMemo(() => mergeRows(data), [data]);
+  const [state, setState] = useState({ currentState: baseItems, pending: mergeRows(baseItems) });
+
+  useEffect(() => {
+    setState((current) => {
+      const dirty = !deepEqual(current.currentState, current.pending);
+      return {
+        currentState: baseItems,
+        pending: dirty ? current.pending : mergeRows(baseItems),
+      };
+    });
+  }, [baseItems]);
+
+  function save(nextPending) {
+    setState({ currentState: mergeRows(nextPending), pending: mergeRows(nextPending) });
+    onSave?.(nextPending, { kind: 'todo', renderDef, writeTo: renderDef?.data?.writeTo });
+  }
+
+  return (
+    <div className="h-100 d-flex flex-column min-h-0">
+      <div className="flex-grow-1 overflow-auto">
+        {state.pending.map((item, index) => (
+          <div key={index} className="d-flex align-items-center gap-2 py-2 border-bottom">
+            <input
+              className="form-check-input flex-shrink-0"
+              type="checkbox"
+              checked={!!item.done}
+              onChange={(event) => {
+                const next = mergeRows(state.pending);
+                next[index].done = event.target.checked;
+                save(next);
+              }}
+            />
+            <span className={`small flex-grow-1${item.done ? ' text-decoration-line-through text-muted' : ''}`}>{item.text}</span>
+            <button
+              type="button"
+              className="btn btn-sm btn-link text-danger p-0"
+              title="Remove"
+              onClick={() => save(state.pending.filter((_, itemIndex) => itemIndex !== index))}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <TodoComposer
+        onAdd={(text) => {
+          const next = [...state.pending, { text, done: false }];
+          save(next);
+        }}
+      />
+    </div>
+  );
+}
+
+function TodoComposer({ onAdd }) {
+  const [value, setValue] = useState('');
+
+  return (
+    <div className="input-group input-group-sm mt-2">
+      <input
+        type="text"
+        className="form-control"
+        placeholder="Add item..."
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          const text = value.trim();
+          if (!text) return;
+          onAdd(text);
+          setValue('');
+        }}
+      />
+      <button
+        type="button"
+        className="btn btn-outline-secondary"
+        onClick={() => {
+          const text = value.trim();
+          if (!text) return;
+          onAdd(text);
+          setValue('');
+        }}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function AlertView({ data, renderDef }) {
+  const thresholds = renderDef?.data?.thresholds ?? {};
+  const value = typeof data === 'number' ? data : (data?.value ?? null);
+
+  let level = 'unknown';
+  let color = 'secondary';
+  if (value != null) {
+    if (thresholds.green && evalThreshold(value, thresholds.green)) {
+      level = 'green';
+      color = 'success';
+    } else if (thresholds.amber && evalThreshold(value, thresholds.amber)) {
+      level = 'amber';
+      color = 'warning';
+    } else {
+      level = 'red';
+      color = 'danger';
+    }
+  }
+
+  return (
+    <div className="d-flex align-items-center gap-3 py-2">
+      <span className={`rounded-circle bg-${color}`} style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+      <div className="flex-grow-1">
+        <div className="fw-bold">{value != null ? String(value) : '—'}</div>
+        {renderDef?.label ? <div className="text-muted small">{renderDef.label}</div> : null}
+      </div>
+      <span className={`badge bg-${color} fs-6`}>{level}</span>
+    </div>
+  );
+}
+
+function NarrativeView({ data }) {
+  const text = typeof data === 'string' ? data : (data?.text ?? '');
+  if (!text) {
+    return <p className="text-muted small fst-italic mb-0">No narrative yet. Click refresh to generate.</p>;
+  }
+  return <div className="small">{text}</div>;
+}
+
+function BadgeView({ data, renderDef }) {
+  const colorMap = renderDef?.data?.colorMap ?? {};
+  const value = data != null ? String(data) : '';
+  const bootstrapMap = { green: 'success', amber: 'warning', red: 'danger', blue: 'primary' };
+  const color = bootstrapMap[colorMap[value]] ?? colorMap[value] ?? 'secondary';
+  return <span className={`badge bg-${color}`}>{value}</span>;
+}
+
+function TextView({ data, renderDef }) {
+  const viewData = renderDef?.data ?? {};
+  const format = viewData.format ?? 'default';
+  const style = renderDef?.style ?? viewData.style ?? 'default';
+  const hideIfEmpty = viewData.hideIfEmpty ?? renderDef?.hideIfEmpty;
+
+  if (hideIfEmpty && (data == null || data === '')) return null;
+
+  if (format === 'file-links') {
+    if (!Array.isArray(data) || data.length === 0) {
+      return <div className="text-muted small">No files uploaded</div>;
+    }
+    return (
+      <div>
+        {data.map((file, index) => {
+          if (!file?.stored_name) return null;
+          const name = file.name ?? file.stored_name;
+          const size = file.size ? ` (${Math.round(file.size / 1024)}KB)` : '';
+          const href = renderDef?.fileUrlForIndex?.(index, file);
+          return (
+            <div key={`${file.stored_name}-${index}`} className="mb-2">
+              {href ? (
+                <a href={href} className="btn btn-sm btn-outline-secondary">{name}{size}</a>
+              ) : (
+                <span className="btn btn-sm btn-outline-secondary disabled">{name}{size}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const Tag = style === 'heading' ? 'h4' : 'div';
+  const className = style === 'muted'
+    ? 'text-muted small'
+    : style === 'muted-italic'
+      ? 'text-muted small fst-italic'
+      : style === 'heading'
+        ? 'fw-bold'
+        : 'small';
+  return <Tag className={className}>{data != null ? String(data) : ''}</Tag>;
+}
+
+function MarkdownView({ data }) {
+  let text = '';
+  if (typeof data === 'string') text = data;
+  else if (data && typeof data === 'object' && data.text) text = data.text;
+  else if (data != null) text = JSON.stringify(data, null, 2);
+  return text ? <pre className="small mb-0" style={{ whiteSpace: 'pre-wrap' }}>{text}</pre> : null;
+}
+
+function CustomView({ data }) {
+  if (data == null) return null;
+  return <pre className="small mb-0" style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(data, null, 2)}</pre>;
+}
+
+function ActionsView({ data, renderDef, onSave }) {
+  const buttons = renderDef?.data?.buttons ?? (Array.isArray(data) ? data : []);
+  if (!buttons.length) return null;
+
+  return (
+    <div className="d-flex gap-2 flex-wrap">
+      {buttons.map((button) => (
+        <button
+          key={button.id}
+          type="button"
+          className={`btn btn-${button.style ?? 'outline-secondary'} btn-${button.size ?? 'sm'}`}
+          disabled={!!button.disabled}
+          onClick={() => onSave?.(null, { kind: 'actions', renderDef, buttonId: button.id, elemId: renderDef?.id })}
+        >
+          {button.label ?? button.id}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function CardCoreView({ kind, renderDef, data, onSave }) {
+  const viewEntry = CARD_CORE_VIEW_KINDS[kind] ?? CARD_CORE_VIEW_KINDS.text;
+  const ViewComponent = viewEntry.Component;
+  const viewData = CARD_CORE_VIEW_KINDS[kind]
+    ? data
+    : (typeof data === 'string' ? data : (data != null ? JSON.stringify(data, null, 2) : ''));
+  const body = <ViewComponent data={viewData} renderDef={renderDef} onSave={onSave} />;
+
+  return (
+    <div className="w-100 d-flex flex-column">
+      <CardFrame label={renderDef?.label} kind={kind}>
+        {body}
+      </CardFrame>
+    </div>
+  );
+}

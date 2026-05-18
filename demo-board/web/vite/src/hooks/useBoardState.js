@@ -1,15 +1,98 @@
-import { useState, useEffect, useRef } from 'react';
-import {
-  SERVER,
-  initBoard,
-  refreshCard,
-  patchCard,
-  dispatchAction,
-  uploadFile,
-  uploadFileForChat,
-  subscribeCardChats,
-  unsubscribeCardChats,
-} from '../lib/client.js';
+import { useCallback, useSyncExternalStore } from 'react';
+import { SERVER, initBoard } from '../lib/client.js';
+
+const boardStores = new Map();
+
+function emitBoardStore(store) {
+  store.listeners.forEach((listener) => listener());
+}
+
+function stopBoardStore(boardId, store) {
+  store.es?.close();
+  store.es = null;
+  store.started = false;
+  boardStores.delete(boardId);
+}
+
+function startBoardStore(boardId, store) {
+  if (store.started) return;
+  store.started = true;
+
+  initBoard(boardId)
+    .then(() => {
+      if (!store.started) return;
+
+      const clientId = crypto.randomUUID();
+      const url = `${SERVER}/api/boards/${boardId}/sse?clientId=${encodeURIComponent(clientId)}`;
+      const es = new EventSource(url);
+      store.es = es;
+
+      es.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          store.snapshot = applyFrame(store.snapshot ?? {}, payload);
+          emitBoardStore(store);
+        } catch {
+          // ignore malformed frames
+        }
+      };
+
+      es.onerror = () => {
+        // EventSource reconnects automatically.
+        console.debug('[useBoardSSE] SSE error — will retry');
+      };
+    })
+    .catch((err) => console.error('[useBoardSSE] init-board failed', err));
+}
+
+function getOrCreateBoardStore(boardId) {
+  if (!boardStores.has(boardId)) {
+    boardStores.set(boardId, {
+      snapshot: null,
+      listeners: new Set(),
+      es: null,
+      started: false,
+    });
+  }
+
+  return boardStores.get(boardId);
+}
+
+function subscribeBoardStore(boardId, listener) {
+  if (!boardId) return () => {};
+
+  const store = getOrCreateBoardStore(boardId);
+  store.listeners.add(listener);
+  startBoardStore(boardId, store);
+
+  return () => {
+    store.listeners.delete(listener);
+  };
+}
+
+function normalizeFilterFns(filterFns) {
+  if (!filterFns) return [];
+  return (Array.isArray(filterFns) ? filterFns : [filterFns]).filter((filterFn) => typeof filterFn === 'function');
+}
+
+function buildBoardCardState(cardId, cardContents, cardRuntimes, chatStates, dataObjects) {
+  const cardContent = cardContents[cardId] ?? null;
+  const requiresDataObjects = {};
+  for (const token of (cardContent?.requires ?? [])) {
+    if (token in dataObjects) {
+      requiresDataObjects[token] = dataObjects[token];
+    }
+  }
+
+  return {
+    cardId,
+    cardContent,
+    cardData: cardContent?.card_data ?? {},
+    cardRuntime: cardRuntimes[cardId] ?? null,
+    chatState: chatStates[cardId] ?? null,
+    requiresDataObjects,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // State builder — converts the raw SSE initial payload into React state
@@ -36,11 +119,11 @@ function buildState(payload) {
 
   // cardChatsByCardId values are objects: { messages: [...], processing, receiving }
   const chatsById = {};
-  for (const [cardId, chatData] of Object.entries(payload.cardChatsByCardId ?? {})) {
+  for (const [cardId, chatSnapshot] of Object.entries(payload.cardChatsByCardId ?? {})) {
     chatsById[cardId] = {
-      messages:   chatData?.messages   ?? [],
-      processing: !!chatData?.processing,
-      receiving:  !!chatData?.receiving,
+      messages:   chatSnapshot?.messages   ?? [],
+      processing: !!chatSnapshot?.processing,
+      receiving:  !!chatSnapshot?.receiving,
     };
   }
 
@@ -112,46 +195,17 @@ function applyFrame(prev, payload) {
 }
 
 // ---------------------------------------------------------------------------
-// useBoardSSE — the only hook the app needs
+// useBoardSSE — shared per-board subscription across all consumers
 // ---------------------------------------------------------------------------
 export function useBoardSSE(boardId) {
-  const [boardState, setBoardState] = useState(null);
-  const esRef = useRef(null);
+  const subscribe = useCallback((listener) => subscribeBoardStore(boardId, listener), [boardId]);
+  const getSnapshot = useCallback(() => (boardId ? getOrCreateBoardStore(boardId).snapshot : null), [boardId]);
 
-  useEffect(() => {
-    if (!boardId) return;
-    let active = true;
-
-    initBoard(boardId)
-      .then(() => {
-        if (!active) return;
-        const clientId = crypto.randomUUID();
-        const url = `${SERVER}/api/boards/${boardId}/sse?clientId=${encodeURIComponent(clientId)}`;
-        const es = new EventSource(url);
-        esRef.current = es;
-
-        es.onmessage = (event) => {
-          try {
-            const payload = JSON.parse(event.data);
-            setBoardState(prev => applyFrame(prev ?? {}, payload));
-          } catch { /* ignore malformed frames */ }
-        };
-
-        es.onerror = () => {
-          // EventSource reconnects automatically
-          console.debug('[useBoardSSE] SSE error — will retry');
-        };
-      })
-      .catch(err => console.error('[useBoardSSE] init-board failed', err));
-
-    return () => {
-      active = false;
-      esRef.current?.close();
-      esRef.current = null;
-    };
-  }, [boardId]);
-
-  return boardState;
+  return useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    () => null,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +246,37 @@ export function useBoardState(boardId) {
   // chatStates: chat state keyed by cardId
   const chatStates = raw.chatsById ?? {};
 
+  const filterCards = (filterFns = []) => {
+    const filters = normalizeFilterFns(filterFns);
+    const matchedCardIds = new Set();
+
+    for (const cardId of (raw.cardIds ?? [])) {
+      const cardState = buildBoardCardState(cardId, cardContents, cardRuntimes, chatStates, dataObjects);
+      if (filters.some((filterFn) => filterFn(cardState))) {
+        matchedCardIds.add(cardId);
+      }
+    }
+
+    return matchedCardIds;
+  };
+
+  const excludedCards = (filterFns = []) => {
+    const matchedCardIds = filterCards(filterFns);
+    const remainingCardIds = new Set();
+
+    for (const cardId of (raw.cardIds ?? [])) {
+      if (!matchedCardIds.has(cardId)) {
+        remainingCardIds.add(cardId);
+      }
+    }
+
+    return remainingCardIds;
+  };
+
+  const boardActions = {
+    initBoard: () => initBoard(boardId),
+  };
+
   return {
     boardId:     raw.boardId,
     boardInfo:   null,
@@ -200,56 +285,8 @@ export function useBoardState(boardId) {
     boardStatus,
     dataObjects,
     chatStates,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// useCardState — focused selector for a single card, built on useBoardState
-// ---------------------------------------------------------------------------
-export function useCardState(boardId, cardId) {
-  const board = useBoardState(boardId);
-
-  if (!board || !cardId) return null;
-
-  const cardContent = board.cardContents[cardId] ?? null;
-
-  // resolve requires[] tokens against board-level dataObjects
-  const requiresDataObjects = {};
-  for (const token of (cardContent?.requires ?? [])) {
-    if (token in board.dataObjects) {
-      requiresDataObjects[token] = board.dataObjects[token];
-    }
-  }
-
-  return {
-    cardContent,
-    cardData:            cardContent?.card_data ?? {},
-    cardRuntime:         board.cardRuntimes[cardId] ?? null,
-    chatState:           board.chatStates?.[cardId] ?? null,
-    requiresDataObjects,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// useBoardActions — board-level imperative actions
-// ---------------------------------------------------------------------------
-export function useBoardActions(boardId) {
-  return {
-    initBoard: () => initBoard(boardId),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// useCardActions — card-level imperative actions
-// ---------------------------------------------------------------------------
-export function useCardActions(boardId, cardId) {
-  return {
-    refresh: () => refreshCard(boardId, cardId),
-    patch: (patch) => patchCard(boardId, cardId, patch),
-    sendChat: (text, payload = {}) => dispatchAction(boardId, cardId, 'chat-send', { text, ...payload }),
-    uploadFileForChat: (file) => uploadFileForChat(boardId, cardId, file),
-    uploadFile: (file) => uploadFile(boardId, cardId, file),
-    subscribeChat: () => subscribeCardChats(boardId, cardId),
-    unsubscribeChat: () => unsubscribeCardChats(boardId, cardId),
+    filterCards,
+    excludedCards,
+    boardActions,
   };
 }

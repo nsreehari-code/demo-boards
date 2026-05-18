@@ -3,3 +3,4 @@ default-board/
 **/.demo-setup/
 logs/
 .tmp/
+dist-vite/

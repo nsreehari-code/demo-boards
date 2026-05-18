@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { dispatchAction, uploadFile, subscribeCardChats, unsubscribeCardChats } from '../lib/client.js';
+import { useChatState } from '../hooks/useChatState.js';
 
 // Subscribe to chat SSE on mount so the server sends card_chats notifications
-function useChatSubscription(boardId, cardId) {
+function useChatSubscription(chatActions, boardId, cardId) {
   useEffect(() => {
-    if (!boardId || !cardId) return;
-    subscribeCardChats(boardId, cardId).catch(() => {});
-    return () => { unsubscribeCardChats(boardId, cardId).catch(() => {}); };
-  }, [boardId, cardId]);
+    if (!chatActions || !boardId || !cardId) return;
+    chatActions.subscribeChat().catch(() => {});
+    return () => { chatActions.unsubscribeChat().catch(() => {}); };
+  }, [chatActions, boardId, cardId]);
 }
 
 function ChatBubble({ msg }) {
@@ -35,72 +35,123 @@ function ChatBubble({ msg }) {
   );
 }
 
-function ChatInput({ boardId, cardId, placeholder }) {
-  const [text, setText] = useState('');
-  const fileRef = useRef(null);
-
-  const send = () => {
-    const t = text.trim();
-    if (!t) return;
-    dispatchAction(boardId, cardId, 'chat-send', { text: t }).catch(() => {});
-    setText('');
-  };
-
+function WorkingBubble() {
   return (
-    <div className="border-top p-2 d-flex gap-1 flex-shrink-0">
-      <button className="btn btn-sm btn-outline-secondary"
-              onClick={() => fileRef.current?.click()} title="Attach file">
-        <i className="bi bi-paperclip" />
-        <input ref={fileRef} type="file" className="d-none"
-               onChange={e => {
-                 const f = e.target.files?.[0];
-                 if (f) uploadFile(boardId, cardId, f).catch(() => {});
-                 e.target.value = '';
-               }} />
-      </button>
-      <textarea
-        className="form-control form-control-sm"
-        rows={1}
-        value={text}
-        placeholder={placeholder ?? 'Send a message…'}
-        onChange={e => setText(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-        style={{ resize: 'none' }}
-      />
-      <button className="btn btn-sm btn-primary" onClick={send} disabled={!text.trim()}>
-        <i className="bi bi-send" />
-      </button>
+    <div className="d-flex mb-2">
+      <div
+        className="px-3 py-2 rounded-3 small text-muted fst-italic"
+        style={{
+          maxWidth: '85%',
+          background: 'rgba(var(--bs-primary-rgb,13,110,253),0.08)',
+        }}
+      >
+        AI working...
+      </div>
     </div>
   );
 }
 
-export function ChatPane({ card, chatData, boardId, onClose }) {
-  const { id, meta = {}, card_data = {} } = card;
-  const { messages = [], processing = false } = chatData ?? {};
-  const done = card_data.phase === 'done';
+function ChatComposer({ chatActions, placeholder }) {
+  const [text, setText] = useState('');
+  const [dragActive, setDragActive] = useState(false);
+  const fileRef = useRef(null);
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [text]);
+
+  const upload = (file) => {
+    if (!file) return;
+    chatActions.uploadFileForChat(file).catch(() => {});
+  };
+
+  const send = () => {
+    const t = text.trim();
+    if (!t) return;
+    chatActions.sendChat(t).catch(() => {});
+    setText('');
+  };
+
+  return (
+    <div className="border-top p-2 d-flex flex-column gap-2 flex-shrink-0">
+      <div
+        className={`border rounded-3 p-2 small text-center ${dragActive ? 'border-primary bg-primary-subtle' : 'border-secondary-subtle bg-body-tertiary'}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => fileRef.current?.click()}
+        onDragEnter={(e) => { e.preventDefault(); setDragActive(true); }}
+        onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+        onDragLeave={(e) => { e.preventDefault(); if (e.currentTarget === e.target) setDragActive(false); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragActive(false);
+          upload(e.dataTransfer.files?.[0]);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            fileRef.current?.click();
+          }
+        }}
+      >
+        Drop a file here or click to browse
+        <input
+          ref={fileRef}
+          type="file"
+          className="d-none"
+          onChange={(e) => {
+            upload(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+        />
+      </div>
+
+      <div className="d-flex gap-2 align-items-end">
+        <textarea
+          ref={textareaRef}
+          className="form-control form-control-sm"
+          rows={1}
+          value={text}
+          placeholder={placeholder ?? 'Send a message…'}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          style={{ resize: 'none', minHeight: '38px', maxHeight: '160px' }}
+        />
+        <button className="btn btn-sm btn-primary flex-shrink-0" onClick={send} disabled={!text.trim()}>
+          <i className="bi bi-send" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function ChatPane({ boardId, cardId, readOnly = false }) {
+  const chat = useChatState(boardId, cardId);
+  const messages = chat?.messages ?? [];
+  const processing = chat?.processing ?? false;
+  const chatActions = chat?.chatActions ?? null;
   const bottomRef = useRef(null);
 
-  useChatSubscription(boardId, id);
+  useChatSubscription(chatActions, boardId, cardId);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
+  if (!chat) return null;
+
   return (
-    <div className="d-flex flex-column" style={{ minHeight: 0 }}>
-      {onClose && (
-        <div className="d-flex align-items-center border-top pt-2 pb-1 px-1">
-          <span className="small fw-semibold flex-grow-1">{meta.title} — Chat</span>
-          {processing && <span className="spinner-border spinner-border-sm me-2" />}
-          <button className="btn btn-sm btn-close" onClick={onClose} />
-        </div>
-      )}
-      <div className="overflow-auto p-2" style={{ maxHeight: '30vh' }}>
+    <div className="d-flex flex-column h-100 min-h-0">
+      <div className="flex-grow-1 overflow-auto p-2" style={{ minHeight: 0 }}>
         {messages.map((msg, i) => <ChatBubble key={i} msg={msg} />)}
-        {processing && <div className="small text-muted fst-italic">Assistant is typing…</div>}
+        {processing && <WorkingBubble />}
         <div ref={bottomRef} />
       </div>
-      {!done && <ChatInput boardId={boardId} cardId={id} placeholder={meta.chatPlaceholder} />}
+      {!readOnly && chatActions && <ChatComposer chatActions={chatActions} />}
     </div>
   );
 }
