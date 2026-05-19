@@ -16,6 +16,11 @@ export const refreshCard = (boardId, cardId) =>
     body: '{}',
   });
 
+export const resyncSeedCards = (boardId) =>
+  fetch(`${base(boardId)}/resync-seedcards`, {
+    method: 'POST',
+  });
+
 export const patchCard = (boardId, cardId, patch) =>
   fetch(`${base(boardId)}/cards/${cardId}`, {
     method: 'PATCH',

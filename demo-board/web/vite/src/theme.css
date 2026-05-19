@@ -558,6 +558,18 @@ a {
   background: linear-gradient(180deg, rgba(247, 250, 252, 0.98), rgba(236, 242, 247, 0.98));
 }
 
+.board-card.board-tone--running {
+  background:
+    radial-gradient(circle at top right, rgba(80, 169, 255, 0.1), transparent 52%),
+    linear-gradient(180deg, rgba(26, 42, 67, 0.97), rgba(16, 28, 47, 0.95));
+}
+
+.board-app-shell[data-theme='mist-ops'] .board-card.board-tone--running {
+  background:
+    radial-gradient(circle at top right, rgba(45, 140, 255, 0.1), transparent 54%),
+    linear-gradient(180deg, rgba(246, 250, 255, 0.99), rgba(231, 240, 250, 0.99));
+}
+
 .board-card__header {
   display: flex;
   align-items: flex-start;
@@ -571,6 +583,14 @@ a {
 .board-app-shell[data-theme='mist-ops'] .board-card__header {
   border-bottom: 1px solid rgba(78, 106, 138, 0.1);
   background: linear-gradient(180deg, rgba(239, 245, 250, 0.98), rgba(247, 250, 252, 0.82));
+}
+
+.board-card.board-tone--running .board-card__header {
+  background: linear-gradient(180deg, rgba(91, 162, 233, 0.08), rgba(255, 255, 255, 0));
+}
+
+.board-app-shell[data-theme='mist-ops'] .board-card.board-tone--running .board-card__header {
+  background: linear-gradient(180deg, rgba(75, 154, 232, 0.08), rgba(247, 250, 252, 0.72));
 }
 
 .board-card__title-wrap {
@@ -867,6 +887,28 @@ a {
   margin-left: auto;
   color: var(--color-text-soft);
   font-size: 0.75rem;
+}
+
+.board-ingest-pane__count-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transition: color 160ms ease, opacity 160ms ease;
+}
+
+.board-ingest-pane__count-button:hover:not(:disabled),
+.board-ingest-pane__count-button:focus-visible:not(:disabled) {
+  color: var(--color-text);
+}
+
+.board-ingest-pane__count-button:focus-visible {
+  outline: 2px solid rgba(111, 153, 221, 0.45);
+  outline-offset: 4px;
+}
+
+.board-ingest-pane__count-button:disabled {
+  opacity: 0.7;
+  cursor: progress;
 }
 
 .board-ingest-nav {

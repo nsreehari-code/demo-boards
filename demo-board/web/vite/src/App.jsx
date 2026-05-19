@@ -16,12 +16,21 @@ function formatCountdown(remainingMs) {
 export default function App() {
   const board = useBoardState(BOARD_ID);
   const canRefreshAll = board?.hasRefreshableCards === true;
-  const [remainingMs, setRemainingMs] = useState(REFRESH_ALL_INTERVAL_MS);
+  const [nextRefreshAt, setNextRefreshAt] = useState(() => Date.now() + REFRESH_ALL_INTERVAL_MS);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [refreshingAll, setRefreshingAll] = useState(false);
   const refreshAllRef = useRef(null);
   const isMountedRef = useRef(true);
 
+  const remainingMs = Math.max(0, nextRefreshAt - nowMs);
+
   refreshAllRef.current = board?.boardActions?.refreshAll ?? null;
+
+  const resetCountdown = () => {
+    const currentTime = Date.now();
+    setNowMs(currentTime);
+    setNextRefreshAt(currentTime + REFRESH_ALL_INTERVAL_MS);
+  };
 
   useEffect(() => () => {
     isMountedRef.current = false;
@@ -33,12 +42,7 @@ export default function App() {
     }
 
     const timerId = window.setInterval(() => {
-      setRemainingMs((currentMs) => {
-        if (currentMs <= 1000) {
-          return 0;
-        }
-        return currentMs - 1000;
-      });
+      setNowMs(Date.now());
     }, 1000);
 
     return () => window.clearInterval(timerId);
@@ -56,7 +60,7 @@ export default function App() {
       } finally {
         if (isMountedRef.current) {
           setRefreshingAll(false);
-          setRemainingMs(REFRESH_ALL_INTERVAL_MS);
+          resetCountdown();
         }
       }
     };
@@ -74,7 +78,7 @@ export default function App() {
       await refreshAllRef.current?.();
     } finally {
       setRefreshingAll(false);
-      setRemainingMs(REFRESH_ALL_INTERVAL_MS);
+      resetCountdown();
     }
   };
 

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useBoardState } from '../hooks/useBoardState.js';
+import { resyncSeedCards } from '../lib/client.js';
 import { IngestCard } from './IngestCard.jsx';
 
 const INGEST_PANE_LAYOUTS = {
@@ -77,6 +78,7 @@ export function IngestPane({ boardId, includeFilters = [], layoutStrategy = 'ver
   const board = useBoardState(boardId);
   const [visible, setVisible] = useState(false);
   const [idx, setIdx] = useState(0);
+  const [resyncing, setResyncing] = useState(false);
   const layout = resolveLayoutStrategy(layoutStrategy);
   const ingestCardIds = useMemo(() => {
     if (!board) return [];
@@ -97,7 +99,25 @@ export function IngestPane({ boardId, includeFilters = [], layoutStrategy = 'ver
     });
   }, [board, ingestCardIds]);
 
-  if (!board) return null;
+  const handleResyncSeedCards = async () => {
+    if (resyncing) {
+      return;
+    }
+
+    setResyncing(true);
+    try {
+      const response = await resyncSeedCards(boardId);
+      if (!response.ok) {
+        throw new Error(`Resync seed cards failed with status ${response.status}`);
+      }
+    } catch (error) {
+      console.error('[IngestPane] Failed to resync seed cards', error);
+    } finally {
+      setResyncing(false);
+    }
+  };
+
+  if (!board || ingestCardIds.length === 0) return null;
 
   return (
     <aside aria-label="Ingest pane" className={`board-ingest-layer${visible ? ' is-open' : ''}`} style={layout.asideStyle}>
@@ -120,7 +140,15 @@ export function IngestPane({ boardId, includeFilters = [], layoutStrategy = 'ver
                 <div className="board-ingest-pane__eyebrow">Ingest</div>
                 <div className="board-ingest-pane__title">Active intake queue</div>
               </div>
-              <div className="board-ingest-pane__count">{ingestCardIds.length} cards</div>
+              <button
+                type="button"
+                className="board-ingest-pane__count board-ingest-pane__count-button"
+                onClick={handleResyncSeedCards}
+                disabled={resyncing}
+                title="Resync seed cards"
+              >
+                {resyncing ? 'Resyncing…' : `${ingestCardIds.length} cards`}
+              </button>
             </div>
             <IngestPaneNav
               cards={cards}
