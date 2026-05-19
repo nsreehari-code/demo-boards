@@ -34,7 +34,21 @@
         "seedCardsDir": "./sentinel/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
-      }
+      },
+      "copilot-workdirs-setup": [
+        { "copilot-root": "default", 
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./sentinel/copilot-instructions"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./sentinel/copilot-agents"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./sentinel/copilot-skills"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./sentinel/copilot-hooks"]
+        },
+        { "copilot-root": "gandalf", 
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./sentinel/copilot-instructions-gandalf"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./sentinel/copilot-agents-gandalf"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./sentinel/copilot-skills-gandalf"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./sentinel/copilot-hooks-gandalf"]
+        }
+      ]
     }
   }
 }

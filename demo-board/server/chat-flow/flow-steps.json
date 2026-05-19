@@ -37,7 +37,7 @@
     },
     "open_turn": {
       "description": "Resolve the current user turn from flow-provided chat messages and parse any chat envelope options",
-      "produces_data": ["boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "chatStore", "runtimeStatusDir", "artifactsStore", "scratchStore", "projectRoot", "chatFlowRoot", "chatMessages", "userText", "lastChatEntryId", "probe", "chatHandlerMode", "chatCopilotTimeoutMs"],
+      "produces_data": ["boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "cardStore", "cardStoreRef", "chatStore", "chatStoreRef", "runtimeStatusDir", "artifactsStore", "artifactsStoreRef", "scratchStore", "scratchStoreRef", "projectRoot", "chatFlowRoot", "chatMessages", "userText", "lastChatEntryId", "probe", "chatHandlerMode", "chatCopilotTimeoutMs"],
       "input_validations": [
         "$type(cardId) = \"string\" and $length(cardId) > 0",
         "$type(chatMessages) = \"array\"",
@@ -51,10 +51,15 @@
           "data.cardId = $type(expects_data.cardId) = \"string\" ? expects_data.cardId : \"\"",
           "data.boardSetupRoot = $type(expects_data.boardSetupRoot) = \"string\" ? expects_data.boardSetupRoot : \"\"",
           "data.boardRuntimeDir = ($type(expects_data.boardRuntimeDir) = \"string\" and $length(expects_data.boardRuntimeDir) > 0) ? expects_data.boardRuntimeDir : \"runtime\"",
+          "data.cardStore = ($type(expects_data.cardStore) = \"string\" and $length(expects_data.cardStore) > 0) ? expects_data.cardStore : \"cards-store\"",
+          "data.cardStoreRef = ($type(expects_data.cardStoreRef) = \"string\" and $length(expects_data.cardStoreRef) > 0) ? expects_data.cardStoreRef : \"\"",
           "data.chatStore = ($type(expects_data.chatStore) = \"string\" and $length(expects_data.chatStore) > 0) ? expects_data.chatStore : data.boardRuntimeDir",
+          "data.chatStoreRef = ($type(expects_data.chatStoreRef) = \"string\" and $length(expects_data.chatStoreRef) > 0) ? expects_data.chatStoreRef : \"\"",
           "data.runtimeStatusDir = ($type(expects_data.runtimeStatusDir) = \"string\" and $length(expects_data.runtimeStatusDir) > 0) ? expects_data.runtimeStatusDir : \"runtime-out\"",
           "data.artifactsStore = ($type(expects_data.artifactsStore) = \"string\" and $length(expects_data.artifactsStore) > 0) ? expects_data.artifactsStore : \"cards\"",
+          "data.artifactsStoreRef = ($type(expects_data.artifactsStoreRef) = \"string\" and $length(expects_data.artifactsStoreRef) > 0) ? expects_data.artifactsStoreRef : \"\"",
           "data.scratchStore = ($type(expects_data.scratchStore) = \"string\" and $length(expects_data.scratchStore) > 0) ? expects_data.scratchStore : \"scratch\"",
+          "data.scratchStoreRef = ($type(expects_data.scratchStoreRef) = \"string\" and $length(expects_data.scratchStoreRef) > 0) ? expects_data.scratchStoreRef : \"\"",
           "data.projectRoot = $type(expects_data.projectRoot) = \"string\" ? expects_data.projectRoot : \"\"",
           "data.chatFlowRoot = $type(expects_data.chatFlowRoot) = \"string\" ? expects_data.chatFlowRoot : \"\"",
           "data.chatMessages = expects_data.chatMessages",
@@ -119,7 +124,7 @@
     },
     "copilot_assistant": {
       "description": "Run the Copilot-backed assistant logic to generate the reply from the resolved chat history",
-      "expects_data": ["userText", "chatMessages", "boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "runtimeStatusDir", "artifactsStore", "scratchStore", "projectRoot", "chatFlowRoot", "chatCopilotTimeoutMs"],
+      "expects_data": ["userText", "chatMessages", "boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "cardStore", "cardStoreRef", "chatStore", "chatStoreRef", "runtimeStatusDir", "artifactsStore", "artifactsStoreRef", "scratchStore", "scratchStoreRef", "projectRoot", "chatFlowRoot", "chatCopilotTimeoutMs"],
       "produces_data": ["replyText"],
       "input_validations": [
         "$type(userText) = \"string\"",
@@ -134,7 +139,7 @@
         },
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/copilot-chat/assistant.js'"],
-          "stdinTemplate": "{ 'cardId': cardId, 'boardSetupRoot': boardSetupRoot, 'boardRuntimeDir': boardRuntimeDir, 'runtimeStatusDir': runtimeStatusDir, 'artifactsStore': artifactsStore, 'scratchStore': scratchStore, 'chatMessages': chatMessages, 'userText': userText, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs }"
+          "stdinTemplate": "{ 'cardId': cardId, 'boardSetupRoot': boardSetupRoot, 'boardRuntimeDir': boardRuntimeDir, 'cardStore': cardStore, 'cardStoreRef': cardStoreRef, 'chatStore': chatStore, 'chatStoreRef': chatStoreRef, 'runtimeStatusDir': runtimeStatusDir, 'artifactsStore': artifactsStore, 'artifactsStoreRef': artifactsStoreRef, 'scratchStore': scratchStore, 'scratchStoreRef': scratchStoreRef, 'chatMessages': chatMessages, 'userText': userText, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs }"
         },
         "meta": "chat-handler"
       },

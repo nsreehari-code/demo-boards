@@ -117,6 +117,34 @@ function normalizePrestartCommands(configValue) {
     .filter(Boolean);
 }
 
+function listFilesInDir(dirPath) {
+  if (!dirPath || !fs.existsSync(dirPath)) return [];
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(dirPath, entry.name))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function listFilesRecursive(dirPath) {
+  if (!dirPath || !fs.existsSync(dirPath)) return [];
+  const out = [];
+  const walk = (currentDir) => {
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const entryPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        walk(entryPath);
+      } else if (entry.isFile()) {
+        out.push(entryPath);
+      }
+    }
+  };
+  walk(dirPath);
+  return out;
+}
+
 async function runPrestartCommands(commands) {
   for (const command of commands) {
     console.log(`[board-server] prestart: ${command}`);
@@ -377,14 +405,18 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
 
   const artifactsRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath }));
   const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, { suppressSpawn: true });
+  const artifactsStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath });
   const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
+  const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
 
   return {
     label,
     boardAdapter,
     artifactsAdapter,
     baseRef,
+    artifactsStoreRef,
     cardStoreRef,
+    chatStoreRef,
     outputsStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardOutputsStorePath }),
     scratchStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath }),
     archiveStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.archivalStorePath }),
@@ -441,6 +473,10 @@ const runtime = createMultiBoardServerRuntime({
 
     const boardSetupRootOverride = (process.env.DEMO_BOARD_SETUP_ROOT || '').trim();
     const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
+    const artifactsStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath });
+    const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
+    const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
+    const scratchStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath });
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
     fs.mkdirSync(boardSetupPaths.setupRoot, { recursive: true });
     const flowRunner = createStepMachineChatFlowRunner({
@@ -453,10 +489,15 @@ const runtime = createMultiBoardServerRuntime({
     const baseExecutionExtra = {
       boardSetupRoot: boardSetupPaths.setupRoot,
       boardRuntimeDir: boardSetupPaths.boardRuntime,
+      cardStore: boardSetupPaths.cardStore,
+      cardStoreRef,
       chatStore: boardSetupPaths.chatStore,
+      chatStoreRef,
       runtimeStatusDir: boardSetupPaths.boardOutputsStore,
       artifactsStore: boardSetupPaths.artifactsStore,
+      artifactsStoreRef,
       scratchStore: boardSetupPaths.scratchStore,
+      scratchStoreRef,
       archivalStore: boardSetupPaths.archivalStore,
       projectRoot: BOARD_ROOT,
       chatFlowRoot,
@@ -468,7 +509,7 @@ const runtime = createMultiBoardServerRuntime({
     const baseCfg = buildBoardContextConfig('base', boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, baseExecutionExtra);
     const boards = [baseCfg];
 
-    demoPrepSetup({ cardsDir, boardDir: boardSetupPaths.boardRuntimePath });
+    demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot: boardSetupPaths.setupRoot });
 
     const chatStorage = createFsBoardChatStorage(boardSetupPaths.chatStorePath);
 
@@ -485,10 +526,15 @@ const runtime = createMultiBoardServerRuntime({
       executionExtra: {
         boardSetupRoot: boardSetupPaths.setupRoot,
         boardRuntimeDir: boardSetupPaths.boardRuntime,
+        cardStore: boardSetupPaths.cardStore,
+        cardStoreRef,
         chatStore: boardSetupPaths.chatStore,
+        chatStoreRef,
         runtimeStatusDir: boardSetupPaths.boardOutputsStore,
         artifactsStore: boardSetupPaths.artifactsStore,
+        artifactsStoreRef,
         scratchStore: boardSetupPaths.scratchStore,
+        scratchStoreRef,
         archivalStore: boardSetupPaths.archivalStore,
         projectRoot: BOARD_ROOT,
         chatFlowRoot,
@@ -510,14 +556,89 @@ const runtime = createMultiBoardServerRuntime({
 });
 
 // ---------------------------------------------------------------------------
-// Host setup — writes copilot-instructions.md into the board setup root.
+// Host setup — prepares Copilot workspaces under the board setup root.
 // ---------------------------------------------------------------------------
 
-function demoPrepSetup({ cardsDir, boardDir }) {
+function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
+  fs.mkdirSync(boardSetupRoot, { recursive: true });
+
+  const workspaceSetup = Array.isArray(cfg?.['copilot-workdirs-setup'])
+    ? cfg['copilot-workdirs-setup'].filter((entry) => entry && typeof entry === 'object')
+    : [];
+
+  if (workspaceSetup.length > 0) {
+    const copilotWorkspaceRoot = path.join(boardSetupRoot, 'copilot-workspaces');
+    fs.mkdirSync(copilotWorkspaceRoot, { recursive: true });
+
+    for (const entry of workspaceSetup) {
+      const copilotRoot = typeof entry['copilot-root'] === 'string' ? entry['copilot-root'].trim() : '';
+      if (!copilotRoot) continue;
+
+      const workspaceRoot = path.join(copilotWorkspaceRoot, copilotRoot);
+      const instructionsTarget = path.join(workspaceRoot, 'copilot-instructions.md');
+      const agentsTarget = path.join(workspaceRoot, '.github', 'agents');
+      const hooksTarget = path.join(workspaceRoot, '.github', 'hooks');
+      const skillsTarget = path.join(workspaceRoot, '.github', 'skills');
+
+      fs.mkdirSync(workspaceRoot, { recursive: true });
+      fs.rmSync(agentsTarget, { recursive: true, force: true });
+      fs.rmSync(hooksTarget, { recursive: true, force: true });
+      fs.rmSync(skillsTarget, { recursive: true, force: true });
+      fs.mkdirSync(agentsTarget, { recursive: true });
+      fs.mkdirSync(hooksTarget, { recursive: true });
+      fs.mkdirSync(skillsTarget, { recursive: true });
+
+      const instructionDirs = Array.isArray(entry.instructionsDirs) ? entry.instructionsDirs : [];
+      const instructionParts = [];
+      for (const dir of instructionDirs) {
+        const resolvedDir = resolveFromConfig(dir);
+        const files = listFilesInDir(resolvedDir);
+        for (const filePath of files) {
+          instructionParts.push(fs.readFileSync(filePath, 'utf-8').trimEnd());
+        }
+      }
+
+      if (instructionParts.length > 0) {
+        fs.writeFileSync(instructionsTarget, instructionParts.join('\n===============\n') + '\n', 'utf-8');
+      } else {
+        fs.rmSync(instructionsTarget, { force: true });
+      }
+
+      const agentsDirs = Array.isArray(entry.agentsDirs) ? entry.agentsDirs : [];
+      for (const dir of agentsDirs) {
+        const resolvedDir = resolveFromConfig(dir);
+        const files = listFilesRecursive(resolvedDir);
+        for (const filePath of files) {
+          fs.copyFileSync(filePath, path.join(agentsTarget, path.basename(filePath)));
+        }
+      }
+
+      const agentsHooks = Array.isArray(entry.agentsHooks) ? entry.agentsHooks : [];
+      for (const dir of agentsHooks) {
+        const resolvedDir = resolveFromConfig(dir);
+        const files = listFilesRecursive(resolvedDir);
+        for (const filePath of files) {
+          fs.copyFileSync(filePath, path.join(hooksTarget, path.basename(filePath)));
+        }
+      }
+
+      const agentsSkills = Array.isArray(entry.agentsSkills) ? entry.agentsSkills : [];
+      for (const dir of agentsSkills) {
+        const resolvedDir = resolveFromConfig(dir);
+        const files = listFilesRecursive(resolvedDir);
+        for (const filePath of files) {
+          const relativePath = path.relative(resolvedDir, filePath);
+          const targetPath = path.join(skillsTarget, relativePath);
+          fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+          fs.copyFileSync(filePath, targetPath);
+        }
+      }
+    }
+    return;
+  }
+
   if (!cardsDir) return;
 
-  const boardSetupRoot = path.dirname(boardDir);
-  fs.mkdirSync(boardSetupRoot, { recursive: true });
   const srcDir = path.dirname(cardsDir);
   const agentInstructionFiles = ['agent-instructions.md', 'agent-instructions-cardlayout.md'];
   const parts = [];
