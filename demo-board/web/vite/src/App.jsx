@@ -1,8 +1,9 @@
 import React from 'react';
 import { useBoardState } from './hooks/useBoardState.js';
 import { MainBoard }  from './components/MainBoard.jsx';
+import { DEFAULT_BOARD_ID, DEFAULT_BOARD_LABEL, PAGE_TITLE } from './lib/appConfig.js';
 
-const BOARD_ID = 'finbook';
+const BOARD_ID = DEFAULT_BOARD_ID;
 
 export default function App() {
   const board = useBoardState(BOARD_ID);
@@ -12,9 +13,9 @@ export default function App() {
       {/* ── top nav ── */}
       <nav className="navbar navbar-expand-lg bg-body-tertiary border-bottom px-3 py-2"
            style={{ height: '56px' }}>
-        <span className="navbar-brand fw-bold mb-0">Live Boards</span>
+        <span className="navbar-brand fw-bold mb-0">{PAGE_TITLE}</span>
         <span className="ms-2 badge bg-secondary-subtle text-secondary-emphasis">
-          {BOARD_ID}
+          {DEFAULT_BOARD_LABEL}
         </span>
       </nav>
 

@@ -1,0 +1,110 @@
+{
+  "schema_version": "v1",
+  "meta": {
+    "board": {
+      "path": "b64:eyJraW5kIjoiZnMtcGF0aCIsInZhbHVlIjoiQzpcXFVzZXJzXFxzcmVlbmFnYVxcQURPXFxkZW1vLWJvYXJkc1xcZGVtby1ib2FyZFxcc2VudGluZWxcXC5ib2FyZC13c1xccnVudGltZSJ9"
+    }
+  },
+  "summary": {
+    "card_count": 4,
+    "completed": 4,
+    "eligible": 0,
+    "pending": 0,
+    "blocked": 0,
+    "unresolved": 0,
+    "failed": 0,
+    "in_progress": 0,
+    "orphan_cards": 4,
+    "topology": {
+      "edge_count": 0,
+      "max_fan_out_card": "card-sentinel-alert-details-7d",
+      "max_fan_out": 0
+    }
+  },
+  "cards": [
+    {
+      "name": "card-sentinel-alert-details-7d",
+      "status": "completed",
+      "requires": [],
+      "requires_satisfied": [],
+      "requires_missing": [],
+      "provides_declared": [
+        "sentinel-alert-details"
+      ],
+      "provides_runtime": [
+        "sentinel-alert-details"
+      ],
+      "blocked_by": [],
+      "unblocks": [],
+      "runtime": {
+        "attempt_count": 3,
+        "restart_count": 0,
+        "in_progress_since": null,
+        "last_transition_at": "2026-05-19T00:33:24.529Z",
+        "last_completed_at": "2026-05-19T00:33:24.529Z",
+        "last_restarted_at": "2026-05-19T00:33:23.595Z",
+        "status_age_ms": 0
+      }
+    },
+    {
+      "name": "card-sentinel-sign-in",
+      "status": "completed",
+      "requires": [],
+      "requires_satisfied": [],
+      "requires_missing": [],
+      "provides_declared": [],
+      "provides_runtime": [],
+      "blocked_by": [],
+      "unblocks": [],
+      "runtime": {
+        "attempt_count": 3,
+        "restart_count": 0,
+        "in_progress_since": null,
+        "last_transition_at": "2026-05-19T00:33:18.848Z",
+        "last_completed_at": "2026-05-19T00:33:18.848Z",
+        "last_restarted_at": "2026-05-19T00:33:17.943Z",
+        "status_age_ms": 0
+      }
+    },
+    {
+      "name": "card-sentinel-table-search",
+      "status": "completed",
+      "requires": [],
+      "requires_satisfied": [],
+      "requires_missing": [],
+      "provides_declared": [],
+      "provides_runtime": [],
+      "blocked_by": [],
+      "unblocks": [],
+      "runtime": {
+        "attempt_count": 1,
+        "restart_count": 0,
+        "in_progress_since": null,
+        "last_transition_at": "2026-05-19T00:09:01.634Z",
+        "last_completed_at": "2026-05-19T00:09:01.634Z",
+        "last_restarted_at": "2026-05-19T00:09:00.217Z",
+        "status_age_ms": 0
+      }
+    },
+    {
+      "name": "card-sentinel-workspaces",
+      "status": "completed",
+      "requires": [],
+      "requires_satisfied": [],
+      "requires_missing": [],
+      "provides_declared": [],
+      "provides_runtime": [],
+      "blocked_by": [],
+      "unblocks": [],
+      "runtime": {
+        "attempt_count": 1,
+        "restart_count": 0,
+        "in_progress_since": null,
+        "last_transition_at": "2026-05-19T00:09:01.634Z",
+        "last_completed_at": "2026-05-19T00:09:01.634Z",
+        "last_restarted_at": "2026-05-19T00:09:00.217Z",
+        "status_age_ms": 0
+      }
+    }
+  ]
+}

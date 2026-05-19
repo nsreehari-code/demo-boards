@@ -5,6 +5,12 @@ import { pathToFileURL } from 'node:url';
 
 function interpolateValue(value, context) {
   if (typeof value === 'string') {
+    const exactTokenMatch = value.match(/^\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}$/);
+    if (exactTokenMatch) {
+      const resolved = context?.[exactTokenMatch[1]];
+      return resolved === undefined ? '' : resolved;
+    }
+
     return value.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key) => {
       const resolved = context?.[key];
       if (resolved === undefined) return '';
@@ -98,7 +104,10 @@ async function createTransport(connection, extra) {
     if (!connection.url || typeof connection.url !== 'string') {
       throw new Error('mcp.server.url is required for streamable-http transport');
     }
-    return new StreamableHTTPClientTransport(new URL(connection.url));
+    const requestInit = connection.headers && typeof connection.headers === 'object' && !Array.isArray(connection.headers)
+      ? { headers: connection.headers }
+      : undefined;
+    return new StreamableHTTPClientTransport(new URL(connection.url), { requestInit });
   }
 
   throw new Error(`Unsupported MCP transport: ${connection.transport}`);

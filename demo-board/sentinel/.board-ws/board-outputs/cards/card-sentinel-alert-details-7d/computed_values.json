@@ -1,0 +1,9 @@
+{
+  "alertCountMetric": {
+    "title": "Possibly compromised users (7d)",
+    "value": 0,
+    "detail": "Sentinel query failed. See error below."
+  },
+  "topSeverity": "None",
+  "sourceError": "**Sentinel query failed:** spawnSync az ENOENT"
+}

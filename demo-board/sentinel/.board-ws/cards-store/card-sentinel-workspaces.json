@@ -1,0 +1,63 @@
+{
+  "id": "card-sentinel-workspaces",
+  "meta": {
+    "title": "Sentinel Workspaces",
+    "tags": [
+      "sentinel",
+      "workspaces"
+    ],
+    "desc": "Lists Sentinel workspaces visible to the current signed-in account."
+  },
+  "requires": [],
+  "source_defs": [
+    {
+      "bindTo": "workspaces",
+      "outputFile": "card-sentinel-workspaces.json",
+      "mcp": {
+        "server": "sentinel-data-exploration",
+        "tool": "list_sentinel_workspaces",
+        "input": {}
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "status",
+      "expr": "$type(fetched_sources.workspaces) = 'string' ? '**Sentinel workspace lookup failed:** ' & fetched_sources.workspaces : ''"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "data": {
+          "bind": "computed_values.status"
+        }
+      },
+      {
+        "kind": "table",
+        "label": "Available Workspaces",
+        "data": {
+          "bind": "fetched_sources.workspaces",
+          "maxRows": 25
+        }
+      }
+    ],
+    "layout": {
+      "board": {
+        "col": 6,
+        "order": 2
+      },
+      "canvas": {
+        "x": 440,
+        "y": 40,
+        "w": 620,
+        "h": 280
+      }
+    },
+    "features": {
+      "refresh": true
+    }
+  },
+  "card_data": {}
+}

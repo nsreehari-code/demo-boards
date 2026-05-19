@@ -1,0 +1,89 @@
+{
+  "id": "card-sentinel-sign-in",
+  "meta": {
+    "title": "Sign In to Sentinel",
+    "tags": [
+      "sentinel",
+      "auth"
+    ],
+    "desc": "Validates Sentinel access and opens browser-based Azure sign-in if a cached token is not available yet."
+  },
+  "requires": [],
+  "source_defs": [
+    {
+      "bindTo": "sign_in",
+      "outputFile": "card-sentinel-sign-in.json",
+      "projections": {
+        "forceLogin": "card_data.forceLogin"
+      },
+      "mcp": {
+        "server": "sentinel-data-exploration",
+        "tool": "sentinel.login",
+        "input": {
+          "forceLogin": "{{forceLogin}}"
+        }
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "headline",
+      "expr": "$type(fetched_sources.sign_in) = 'object' and fetched_sources.sign_in.account.user.name ? '**Signed in as:** ' & fetched_sources.sign_in.account.user.name : $type(fetched_sources.sign_in) = 'object' and fetched_sources.sign_in.account.name ? '**Sentinel login ready for:** ' & fetched_sources.sign_in.account.name : $type(fetched_sources.sign_in) = 'string' ? '**Sentinel sign-in failed:** ' & fetched_sources.sign_in : '**Sentinel sign-in status unavailable**'"
+    },
+    {
+      "bindTo": "detail",
+      "expr": "$type(fetched_sources.sign_in) = 'object' and fetched_sources.sign_in.promptedLogin ? 'A browser sign-in was prompted and the Sentinel token cache was refreshed.' : $type(fetched_sources.sign_in) = 'object' and fetched_sources.sign_in.tokenAcquired ? 'Existing Azure CLI login was reused for Sentinel.' : $type(fetched_sources.sign_in) = 'string' ? fetched_sources.sign_in : 'The backend could not validate Sentinel auth. Enable Force browser sign-in and refresh.'"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "form",
+        "label": "Sign-in Options",
+        "data": {
+          "writeTo": "card_data",
+          "fields": {
+            "type": "object",
+            "properties": {
+              "forceLogin": {
+                "type": "boolean",
+                "title": "Force browser sign-in on next refresh"
+              }
+            }
+          }
+        }
+      },
+      {
+        "kind": "markdown",
+        "data": {
+          "bind": "computed_values.headline"
+        }
+      },
+      {
+        "kind": "text",
+        "style": "muted-italic",
+        "data": {
+          "bind": "computed_values.detail"
+        }
+      }
+    ],
+    "layout": {
+      "board": {
+        "col": 4,
+        "order": 1
+      },
+      "canvas": {
+        "x": 40,
+        "y": 40,
+        "w": 380,
+        "h": 180
+      }
+    },
+    "features": {
+      "refresh": true
+    }
+  },
+  "card_data": {
+    "forceLogin": false
+  }
+}

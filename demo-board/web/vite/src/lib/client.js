@@ -2,7 +2,8 @@
  * boardApi.js — thin fetch wrappers for the board-server HTTP API.
  * The server has Access-Control-Allow-Origin: * so direct connections work.
  */
-export const SERVER = 'http://127.0.0.1:7799';
+export { SERVER } from './appConfig.js';
+import { SERVER } from './appConfig.js';
 const base = (boardId) => `${SERVER}/api/boards/${boardId}`;
 
 export const initBoard = (boardId) =>

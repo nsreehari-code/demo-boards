@@ -313,6 +313,8 @@ function loadManifestPathsFromRegistry() {
   const mcpServerDir = path.resolve(fileURLToPath(import.meta.url), '..', '..');
   const registryPath = path.resolve(mcpServerDir, 'registry.json');
   const manifestsDir = path.resolve(mcpServerDir, 'manifests');
+  // Registry manifests are auto-loaded into the local server process, so every
+  // registry-backed manifest must declare tools that have a working local handler.
   let registry;
   try {
     registry = JSON.parse(readFileSync(registryPath, 'utf8'));

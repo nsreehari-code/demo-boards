@@ -23,6 +23,15 @@
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
+    "sentinel": {
+      "label": "Sentinel",
+      "setupDir": "./sentinel/.board-ws",
+      "regular": {
+        "seedCardsDir": "./sentinel/cards",
+        "taskExecutorPath": "./server/board-worker/task-executor.js",
+        "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
+      }
+    },
     "cpm": {
       "label": "CPM",
       "setupDir": "./cpm/.board-ws",

@@ -1,0 +1,46 @@
+{
+  "server": {
+    "name": "sentinel-triage",
+    "version": "0.1.0",
+    "description": "Microsoft Sentinel triage MCP surface"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlDefault": "https://sentinel.microsoft.com/mcp/triage",
+    "auth": {
+      "type": "azure-cli-bearer",
+      "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
+      "tenantEnvVar": "SENTINEL_TENANT_ID",
+      "loginOnDemand": true
+    }
+  },
+  "tools": [
+    {
+      "name": "sentinel.triage.call_tool",
+      "title": "Sentinel Triage Call Tool",
+      "description": "Call a tool exposed by the Sentinel triage MCP server.",
+      "handler": "mcp.proxy",
+      "config": {
+        "remoteToolFromArg": "tool",
+        "remoteArgumentsFromArg": "arguments"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "Remote Sentinel triage tool name."
+          },
+          "arguments": {
+            "type": "object",
+            "description": "Arguments object passed to the selected remote tool."
+          }
+        },
+        "required": [
+          "tool"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

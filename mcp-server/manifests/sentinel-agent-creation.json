@@ -1,0 +1,46 @@
+{
+  "server": {
+    "name": "sentinel-agent-creation",
+    "version": "0.1.0",
+    "description": "Microsoft Sentinel agent creation MCP surface"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlDefault": "https://sentinel.microsoft.com/mcp/security-copilot-agent-creation",
+    "auth": {
+      "type": "azure-cli-bearer",
+      "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
+      "tenantEnvVar": "SENTINEL_TENANT_ID",
+      "loginOnDemand": true
+    }
+  },
+  "tools": [
+    {
+      "name": "sentinel.agent_creation.call_tool",
+      "title": "Sentinel Agent Creation Call Tool",
+      "description": "Call a tool exposed by the Sentinel agent-creation MCP server.",
+      "handler": "mcp.proxy",
+      "config": {
+        "remoteToolFromArg": "tool",
+        "remoteArgumentsFromArg": "arguments"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "Remote Sentinel agent-creation tool name."
+          },
+          "arguments": {
+            "type": "object",
+            "description": "Arguments object passed to the selected remote tool."
+          }
+        },
+        "required": [
+          "tool"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

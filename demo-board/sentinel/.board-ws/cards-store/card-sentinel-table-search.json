@@ -1,0 +1,90 @@
+{
+  "id": "card-sentinel-table-search",
+  "meta": {
+    "title": "Sentinel Table Search",
+    "tags": [
+      "sentinel",
+      "schema",
+      "tables"
+    ],
+    "desc": "Searches the Sentinel data-exploration surface for relevant tables using a natural-language query."
+  },
+  "requires": [],
+  "source_defs": [
+    {
+      "bindTo": "tables",
+      "outputFile": "card-sentinel-table-search.json",
+      "projections": {
+        "query": "card_data.query"
+      },
+      "mcp": {
+        "server": "sentinel-data-exploration",
+        "tool": "search_tables",
+        "input": {
+          "query": "{{query}}"
+        }
+      }
+    }
+  ],
+  "compute": [
+    {
+      "bindTo": "status",
+      "expr": "$type(fetched_sources.tables) = 'string' ? '**Sentinel table search failed:** ' & fetched_sources.tables : ''"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "form",
+        "label": "Search",
+        "data": {
+          "writeTo": "card_data",
+          "fields": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "title": "Search Query"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      },
+      {
+        "kind": "markdown",
+        "data": {
+          "bind": "computed_values.status"
+        }
+      },
+      {
+        "kind": "table",
+        "label": "Matching Tables",
+        "data": {
+          "bind": "fetched_sources.tables",
+          "maxRows": 20
+        }
+      }
+    ],
+    "layout": {
+      "board": {
+        "col": 6,
+        "order": 3
+      },
+      "canvas": {
+        "x": 1080,
+        "y": 40,
+        "w": 620,
+        "h": 320
+      }
+    },
+    "features": {
+      "refresh": true
+    }
+  },
+  "card_data": {
+    "query": "identity sign-in alerts and incident evidence tables"
+  }
+}

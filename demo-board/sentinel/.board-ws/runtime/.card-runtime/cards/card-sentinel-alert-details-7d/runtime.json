@@ -1,0 +1,17 @@
+{
+  "_sources": {
+    "card-sentinel-alert-details-7d-users.json": {
+      "lastRequestedToken": "2026-05-19T00:33:23.592Z",
+      "lastCompletedToken": "2026-05-19T00:33:23.592Z",
+      "lastCompletionStatus": "success",
+      "queueRequestedToken": "2026-05-19T00:33:23.592Z"
+    },
+    "card-sentinel-alert-details-7d-list.json": {
+      "lastRequestedToken": "2026-05-19T00:33:23.592Z",
+      "lastCompletedToken": "2026-05-19T00:33:23.592Z",
+      "lastCompletionStatus": "success",
+      "queueRequestedToken": "2026-05-19T00:33:23.592Z"
+    }
+  },
+  "_lastExecutionCount": 2
+}

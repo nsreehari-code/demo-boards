@@ -119,8 +119,9 @@
 
     function resolveApiOrigin() {
       var port = (state.serverConfig && state.serverConfig.port) || 7799;
-      var host = window.location.hostname === "localhost" ? "localhost" : "127.0.0.1";
-      return "http://" + host + ":" + port;
+      var protocol = window.location.protocol || "http:";
+      var host = window.location.hostname || "127.0.0.1";
+      return protocol + "//" + host + ":" + port;
     }
 
     function boardPaths(boardId) {
@@ -162,7 +163,10 @@
 
     function ensureActiveBoardId() {
       if (!state.activeBoardId) {
-        state.activeBoardId = state.boards[0].id;
+        var configuredDefaultBoardId = state.serverConfig && typeof state.serverConfig.defaultBoard === "string"
+          ? state.serverConfig.defaultBoard.trim()
+          : "";
+        state.activeBoardId = configuredDefaultBoardId || state.boards[0].id;
       }
 
       if (!state.boardById.has(state.activeBoardId)) {

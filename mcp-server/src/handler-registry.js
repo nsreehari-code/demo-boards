@@ -1,6 +1,8 @@
 import { askWorkiq } from './handlers/workiq.js';
 import { handleFinbookTool } from './handlers/finbook.js';
 import { handleTeamsGraph } from './handlers/teams.js';
+import { handleRemoteMcpTool } from './handlers/mcp-proxy.js';
+import { handleSentinelLogin } from './handlers/sentinel-auth.js';
 
 async function notImplemented(args, tool) {
   throw new Error(`Handler ${tool.handler} is not implemented yet`);
@@ -9,6 +11,8 @@ async function notImplemented(args, tool) {
 const HANDLERS = {
   'finbook': handleFinbookTool,
   'finbook.api': handleFinbookTool,
+  'mcp.proxy': handleRemoteMcpTool,
+  'sentinel.login': handleSentinelLogin,
   'teams.graph': handleTeamsGraph,
   'workiq.ask': askWorkiq,
   'repo.export': notImplemented,

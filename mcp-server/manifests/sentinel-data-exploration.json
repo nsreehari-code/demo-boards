@@ -1,0 +1,90 @@
+{
+  "server": {
+    "name": "sentinel-data-exploration",
+    "version": "0.1.0",
+    "description": "Microsoft Sentinel data exploration MCP surface"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlDefault": "https://sentinel.microsoft.com/mcp/data-exploration",
+    "auth": {
+      "type": "azure-cli-bearer",
+      "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
+      "tenantEnvVar": "SENTINEL_TENANT_ID",
+      "loginOnDemand": true
+    }
+  },
+  "tools": [
+    {
+      "name": "sentinel.login",
+      "title": "Sentinel Login",
+      "description": "Open browser-based Azure login when needed and validate that a Sentinel access token can be acquired locally.",
+      "handler": "sentinel.login",
+      "config": {
+        "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
+        "tenantEnvVar": "SENTINEL_TENANT_ID"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": "string",
+            "description": "Optional Azure tenant ID override for the login flow."
+          },
+          "forceLogin": {
+            "type": "boolean",
+            "description": "When true, always open browser-based Azure login before checking the Sentinel token."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_sentinel_workspaces",
+      "title": "List Sentinel Workspaces",
+      "description": "List the Sentinel workspaces available to the current principal.",
+      "handler": "mcp.proxy",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "query_lake",
+      "title": "Query Sentinel Lake",
+      "description": "Run a KQL query against Sentinel data exploration.",
+      "handler": "mcp.proxy",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Optional Sentinel workspace GUID."
+          },
+          "query": {
+            "type": "string",
+            "description": "KQL query to execute."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "search_tables",
+      "title": "Search Sentinel Tables",
+      "description": "Search for Sentinel tables using a natural-language or keyword query.",
+      "handler": "mcp.proxy",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural-language or keyword query describing the tables to find."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ]
+}

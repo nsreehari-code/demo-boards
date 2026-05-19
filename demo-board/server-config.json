@@ -6,6 +6,7 @@
   "chatFlowTimeoutMs": 1800000,
   "chatInvokeRefTimeoutMs": 1800000,
   "chatCopilotTimeoutMs": 1800000,
+  "defaultBoard": "sentinel",
   "boards": {
     "finbook": {
       "label": "Finbook",
@@ -21,6 +22,15 @@
       },
       "regular": {
         "seedCardsDir": "./finbook/cards",
+        "taskExecutorPath": "./server/board-worker/task-executor.js",
+        "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
+      }
+    },
+    "sentinel": {
+      "label": "Sentinel Demo",
+      "setupDir": "./sentinel/.board-ws",
+      "regular": {
+        "seedCardsDir": "./sentinel/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }

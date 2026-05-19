@@ -91,8 +91,22 @@ function normalizeEnv(connection) {
   return env;
 }
 
-function toCopilotServerConfig(serverName, manifestPath, manifest) {
-  const connection = manifest?.connection;
+function normalizeCwd(connection, manifestPath) {
+  const cwd = connection?.cwd;
+  if (typeof cwd !== 'string' || !cwd.trim()) return undefined;
+  if (path.isAbsolute(cwd)) return cwd;
+  return path.resolve(path.dirname(manifestPath), cwd);
+}
+
+function mergeConnection(manifestConnection, overrideConnection) {
+  return {
+    ...(manifestConnection || {}),
+    ...(overrideConnection || {}),
+  };
+}
+
+function toCopilotServerConfig(serverName, manifestPath, manifest, overrideConnection) {
+  const connection = mergeConnection(manifest?.connection, overrideConnection);
   if (!connection || typeof connection !== 'object') {
     throw new Error(`Manifest ${manifestPath} is missing connection details`);
   }
@@ -138,10 +152,12 @@ function toCopilotServerConfig(serverName, manifestPath, manifest) {
       throw new Error(`Manifest ${manifestPath} is missing command for stdio MCP transport`);
     }
     const env = normalizeEnv(connection);
+    const cwd = normalizeCwd(connection, manifestPath);
     return {
       type: 'local',
       command: connection.command,
       args: Array.isArray(connection.args) ? connection.args : [],
+      ...(cwd ? { cwd } : {}),
       ...(env ? { env } : {}),
       tools,
     };
@@ -163,7 +179,7 @@ function buildMissingEntries(registry) {
     }
     const manifestPath = resolveManifestPath(entry.manifest);
     const manifest = readJsonFile(manifestPath);
-    entries[serverName] = toCopilotServerConfig(serverName, manifestPath, manifest);
+    entries[serverName] = toCopilotServerConfig(serverName, manifestPath, manifest, entry.connection);
   }
   return entries;
 }

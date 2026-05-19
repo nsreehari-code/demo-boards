@@ -3,6 +3,30 @@
     "finbook": {
       "manifest": "../data-repos-VX/managed-truthsets/mcp-executable-manifest.json"
     },
+    "sentinel-data-exploration": {
+      "manifest": "sentinel-data-exploration.json",
+      "connection": {
+        "transport": "streamable-http",
+        "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+        "urlDefault": "http://127.0.0.1:7801/mcp"
+      }
+    },
+    "sentinel-triage": {
+      "manifest": "sentinel-triage.json",
+      "connection": {
+        "transport": "streamable-http",
+        "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+        "urlDefault": "http://127.0.0.1:7801/mcp"
+      }
+    },
+    "sentinel-agent-creation": {
+      "manifest": "sentinel-agent-creation.json",
+      "connection": {
+        "transport": "streamable-http",
+        "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+        "urlDefault": "http://127.0.0.1:7801/mcp"
+      }
+    },
     "workiq": {
       "manifest": "demo-boards.workiq.json"
     },

@@ -1,0 +1,22 @@
+{
+  "card-sentinel-alert-details-7d": {
+    "key": "card-sentinel-alert-details-7d",
+    "checksum": "card-sentinel-alert-details-7d",
+    "updatedAt": "2026-05-19T00:33:23.570Z"
+  },
+  "card-sentinel-sign-in": {
+    "key": "card-sentinel-sign-in",
+    "checksum": "card-sentinel-sign-in",
+    "updatedAt": "2026-05-19T00:33:17.917Z"
+  },
+  "card-sentinel-table-search": {
+    "key": "card-sentinel-table-search",
+    "checksum": "card-sentinel-table-search",
+    "updatedAt": "2026-05-19T00:08:59.981Z"
+  },
+  "card-sentinel-workspaces": {
+    "key": "card-sentinel-workspaces",
+    "checksum": "card-sentinel-workspaces",
+    "updatedAt": "2026-05-19T00:08:59.986Z"
+  }
+}
