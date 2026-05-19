@@ -1,0 +1,113 @@
+{
+  "id": "card-sentinel-demo-priority-alerts",
+  "meta": {
+    "title": "Sentinel Demo Priority Alerts",
+    "tags": [
+      "sentinel",
+      "demo",
+      "dependencies"
+    ],
+    "desc": "Consumes the demo alert feed and republishes only the higher-priority cases."
+  },
+  "requires": {
+    "sentinel_demo_alert_feed": {
+      "role": "primary"
+    },
+    "sentinel_demo_workspace_summary": {
+      "role": "context"
+    },
+    "sentinel_demo_watchlist_seed": {
+      "role": "enrichment"
+    }
+  },
+  "compute": [
+    {
+      "bindTo": "priority_alerts",
+      "expr": "$filter(requires.sentinel_demo_alert_feed, function($alert) { $alert.severity = 'High' or $alert.severity = 'Medium' })"
+    },
+    {
+      "bindTo": "affected_users",
+      "expr": "$distinct(computed_values.priority_alerts.user)"
+    },
+    {
+      "bindTo": "watchlist_candidates",
+      "expr": "$map(requires.sentinel_demo_watchlist_seed, function($seed) {{\"user\": $seed.user, \"reason\": $seed.reason, \"priorityAlertCount\": $count($filter(computed_values.priority_alerts, function($alert) { $alert.user = $seed.user }))}})"
+    },
+    {
+      "bindTo": "workspace_summary",
+      "expr": "$map(requires.sentinel_demo_workspace_summary, function($workspace) {{\"workspace\": $workspace.workspace, \"highSeverity\": $workspace.highSeverity, \"criticalUsers\": $workspace.criticalUsers}})"
+    },
+    {
+      "bindTo": "summary",
+      "expr": "'Promotes **' & $string($count(computed_values.priority_alerts)) & '** alerts for **' & $string($count(computed_values.affected_users)) & '** users into **sentinel_demo_priority_alerts** while emitting watchlist candidates and workspace rollups.'"
+    }
+  ],
+  "provides": [
+    {
+      "bindTo": "sentinel_demo_priority_alerts",
+      "ref": "computed_values.priority_alerts"
+    },
+    {
+      "bindTo": "sentinel_demo_watchlist_candidates",
+      "ref": "computed_values.watchlist_candidates"
+    },
+    {
+      "bindTo": "sentinel_demo_priority_workspace_summary",
+      "ref": "computed_values.workspace_summary"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "data": {
+          "bind": "computed_values.summary"
+        }
+      },
+      {
+        "kind": "table",
+        "label": "Priority Alerts",
+        "data": {
+          "bind": "computed_values.priority_alerts",
+          "columns": [
+            "user",
+            "alertName",
+            "severity",
+            "workspace",
+            "lastSeen"
+          ],
+          "maxRows": 10
+        }
+      },
+      {
+        "kind": "table",
+        "label": "Watchlist Candidates",
+        "data": {
+          "bind": "computed_values.watchlist_candidates",
+          "columns": [
+            "user",
+            "reason",
+            "priorityAlertCount"
+          ],
+          "maxRows": 10
+        }
+      }
+    ],
+    "layout": {
+      "board": {
+        "col": 6,
+        "order": 6
+      },
+      "canvas": {
+        "x": 840,
+        "y": 560,
+        "w": 640,
+        "h": 320
+      }
+    },
+    "features": {
+      "refresh": false
+    }
+  },
+  "card_data": {}
+}

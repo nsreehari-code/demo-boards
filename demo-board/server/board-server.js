@@ -536,6 +536,114 @@ function jsonReply(res, status, payload) {
   res.end(body);
 }
 
+function getSeedCardsForBoard(boardId) {
+  const cfg = boardConfigMap.get(boardId);
+  const regular = cfg?.regular || {};
+  const cardsDir = resolveFromConfig(regular.seedCardsDir);
+  if (!cardsDir) {
+    return { cardsDir: null, cards: [] };
+  }
+  const cards = createFsCardSource(cardsDir, selectedCardsPattern).listCards();
+  return { cardsDir, cards };
+}
+
+function upsertCardInRuntimeStore(cardStore, card) {
+  const existing = cardStore.get({});
+  const existingCards = Array.isArray(existing.data?.cards) ? existing.data.cards : [];
+  const nextCards = [];
+  let replaced = false;
+
+  for (const existingCard of existingCards) {
+    if (existingCard?.id === card.id) {
+      nextCards.push(card);
+      replaced = true;
+    } else {
+      nextCards.push(existingCard);
+    }
+  }
+
+  if (!replaced) {
+    nextCards.push(card);
+  }
+
+  return cardStore.set({ body: nextCards });
+}
+
+async function patchCardViaApi(boardId, cardId, card) {
+  const response = await fetch(`http://127.0.0.1:${PORT}${apiBasePath}/${boardId}/cards/${encodeURIComponent(cardId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(card),
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload,
+  };
+}
+
+async function resyncSeedCards(boardId) {
+  const { service } = runtime.requireBoardService(boardId);
+  const { cardsDir, cards } = getSeedCardsForBoard(boardId);
+
+  if (!cardsDir) {
+    return {
+      boardId,
+      cardsDir: null,
+      synced: 0,
+      skipped: 0,
+      results: [],
+      error: 'Board has no seedCardsDir configured',
+    };
+  }
+
+  const results = [];
+
+  for (const card of cards) {
+    const cardId = typeof card?.id === 'string' ? card.id.trim() : '';
+    if (!cardId) {
+      results.push({ ok: false, cardId: null, error: 'Seed card is missing id' });
+      continue;
+    }
+
+    const setResult = upsertCardInRuntimeStore(service.cardStore, card);
+    if (setResult.status !== 'success') {
+      results.push({
+        ok: false,
+        cardId,
+        step: 'cardStore.set',
+        error: setResult.error || 'cardStore.set failed',
+      });
+      continue;
+    }
+
+    const patchResult = await patchCardViaApi(boardId, cardId, card);
+    results.push({
+      ok: patchResult.ok,
+      cardId,
+      step: 'patch',
+      status: patchResult.status,
+      error: patchResult.ok ? null : (patchResult.payload?.error || `PATCH failed with status ${patchResult.status}`),
+    });
+  }
+
+  return {
+    boardId,
+    cardsDir,
+    synced: results.filter((result) => result.ok).length,
+    skipped: results.filter((result) => !result.ok).length,
+    results,
+  };
+}
+
 const server = http.createServer((req, res) => {
   const method = req.method || 'GET';
   const url = new URL(req.url || '/', 'http://localhost');
@@ -547,6 +655,29 @@ const server = http.createServer((req, res) => {
   if (method === 'OPTIONS') {
     res.writeHead(204, CORS_HEADERS);
     res.end();
+    return;
+  }
+
+  const resyncMatch = pathname.match(/^\/api\/boards\/([^/]+)\/resync-seedcards$/);
+  if (method === 'POST' && resyncMatch) {
+    const boardId = decodeURIComponent(resyncMatch[1] || '').trim();
+    (async () => {
+      try {
+        const result = await resyncSeedCards(boardId);
+        if (result.error) {
+          jsonReply(res, 400, result);
+          return;
+        }
+        const hasErrors = result.results.some((entry) => !entry.ok);
+        jsonReply(res, hasErrors ? 207 : 200, result);
+      } catch (error) {
+        const statusCode = Number(error?.statusCode) || 500;
+        jsonReply(res, statusCode, {
+          error: String(error?.message || error),
+          boardId,
+        });
+      }
+    })();
     return;
   }
 
@@ -567,6 +698,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`  GET  ${apiBasePath}/:boardId/init-board`);
   console.log(`  GET  ${apiBasePath}/:boardId/sse`);
   console.log(`  GET  ${apiBasePath}/:boardId/board-status`);
+  console.log(`  POST ${apiBasePath}/:boardId/resync-seedcards`);
   console.log(`  GET  ${apiBasePath}/:boardId/cards/:id`);
   console.log(`  PATCH ${apiBasePath}/:boardId/cards/:id`);
   console.log(`  POST ${apiBasePath}/:boardId/cards/:id/actions   <- card actions, including chat-send`);

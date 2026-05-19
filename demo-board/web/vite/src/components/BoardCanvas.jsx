@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Controls,
@@ -14,6 +14,60 @@ import { CardShell } from './CardShell.jsx';
 const NODE_WIDTH = 360;
 const COLUMN_GAP = 420;
 const ROW_GAP = 280;
+const STORAGE_VERSION = 1;
+
+function storageKeyForBoard(boardId) {
+  return `demo-board.canvas.${boardId}`;
+}
+
+function readCanvasState(boardId) {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(storageKeyForBoard(boardId));
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== STORAGE_VERSION) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCanvasState(boardId, payload) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(storageKeyForBoard(boardId), JSON.stringify({
+      version: STORAGE_VERSION,
+      ...payload,
+    }));
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
+function sameCardSet(savedCardIds, cardIds) {
+  if (!Array.isArray(savedCardIds) || savedCardIds.length !== cardIds.length) {
+    return false;
+  }
+
+  const left = [...savedCardIds].sort();
+  const right = [...cardIds].sort();
+  return left.every((cardId, index) => cardId === right[index]);
+}
+
+function tokenHandleId(kind, token) {
+  return `${kind}:${token}`;
+}
 
 function getStatusTone(status) {
   switch (status) {
@@ -34,6 +88,44 @@ function uniqueTokens(tokens = []) {
   return [...new Set((Array.isArray(tokens) ? tokens : []).filter(Boolean).map(String))];
 }
 
+function resolveRequiredTokens(card) {
+  if (Array.isArray(card?.requires)) {
+    return uniqueTokens(card.requires);
+  }
+  if (card?.requires && typeof card.requires === 'object') {
+    return uniqueTokens(Object.keys(card.requires));
+  }
+  return [];
+}
+
+function resolveProvidedTokens(card) {
+  const provideDefs = Array.isArray(card?.provides) ? card.provides : [];
+  const explicitTokens = provideDefs.map((entry) => {
+    if (typeof entry === 'string') {
+      return entry;
+    }
+    if (entry && typeof entry === 'object' && typeof entry.bindTo === 'string') {
+      return entry.bindTo;
+    }
+    return null;
+  });
+
+  return uniqueTokens(explicitTokens);
+}
+
+function resolveCanvasPosition(card) {
+  const canvasLayout = card?.view?.layout?.canvas;
+  if (!canvasLayout || typeof canvasLayout !== 'object') {
+    return null;
+  }
+  const x = Number(canvasLayout.x);
+  const y = Number(canvasLayout.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  return { x, y };
+}
+
 function buildGraph(cardIds, board) {
   const visibleIds = new Set(cardIds);
   const cards = {};
@@ -42,8 +134,8 @@ function buildGraph(cardIds, board) {
   for (const cardId of cardIds) {
     const card = board.cardContents[cardId] ?? {};
     const status = board.cardRuntimes[cardId]?.status ?? 'fresh';
-    const requires = uniqueTokens(card.requires);
-    const provides = uniqueTokens(card.provides ?? card.provides_declared);
+    const requires = resolveRequiredTokens(card);
+    const provides = resolveProvidedTokens(card);
     const providesActive = provides.filter((token) => token in (board.dataObjects ?? {}));
 
     cards[cardId] = {
@@ -78,6 +170,8 @@ function buildGraph(cardIds, board) {
           id: `${sourceId}::${cardId}::${token}`,
           source: sourceId,
           target: cardId,
+          sourceHandle: tokenHandleId('provide', token),
+          targetHandle: tokenHandleId('require', token),
           label: token,
           data: { token },
           type: 'smoothstep',
@@ -149,36 +243,50 @@ function buildLayout(cardIds, incoming, outgoing) {
 function FlowCardNode({ id, data }) {
   const statusTone = getStatusTone(data.status);
   const requiresMissing = data.requires.filter((token) => !data.availableTokens.includes(token));
+  const nodeTone = data.isDimmed ? ' is-dimmed' : data.isHighlighted ? ' is-highlighted' : '';
+
+  const renderTokenGem = (token, variant, extraClassName = '') => {
+    const active = data.selectedToken === token;
+    const handleType = variant === 'provide' ? 'source' : 'target';
+    const handlePosition = variant === 'provide' ? Position.Bottom : Position.Top;
+
+    return (
+      <div
+        key={`${variant}-${id}-${token}`}
+        className={`board-token-port board-token-port--${variant}`}
+      >
+        <Handle
+          id={tokenHandleId(variant, token)}
+          type={handleType}
+          position={handlePosition}
+          className={`board-flow-node__handle board-flow-node__handle--token board-flow-node__handle--${variant}`}
+        />
+        <button
+          type="button"
+          className={`board-token-gem board-token-gem--button board-token-gem--${variant}${extraClassName}${active ? ' is-selected' : ''}`}
+          title={`${variant === 'provide' ? 'Provides' : 'Requires'} ${token}`}
+          aria-label={`${variant === 'provide' ? 'Provides' : 'Requires'} ${token}`}
+          onClick={() => data.onTokenToggle?.(token)}
+        />
+      </div>
+    );
+  };
 
   return (
-    <div className={`board-flow-node ${statusTone}`}>
-      <Handle type="target" position={Position.Left} className="board-flow-node__handle" />
+    <div className={`board-flow-node ${statusTone}${nodeTone}`}>
       <div className="board-flow-node__tokens board-flow-node__tokens--top">
-        {data.provides.length > 0 ? data.provides.map((token) => (
-          <span
-            key={`provide-${id}-${token}`}
-            className={`board-token-gem board-token-gem--provide${data.providedTokens.includes(token) ? ' is-active' : ''}`}
-            title={`Provides ${token}`}
-          >
-            {token}
-          </span>
-        )) : <span className="board-token-gem board-token-gem--muted">source</span>}
+        {data.requires.length > 0 ? data.requires.map((token) => (
+          renderTokenGem(token, 'require', requiresMissing.includes(token) ? ' is-missing' : '')
+        )) : <span className="board-token-gem board-token-gem--muted">entry</span>}
       </div>
       <div className="board-flow-node__card">
         <CardShell boardId={data.boardId} cardId={id} />
       </div>
       <div className="board-flow-node__tokens board-flow-node__tokens--bottom">
-        {data.requires.length > 0 ? data.requires.map((token) => (
-          <span
-            key={`require-${id}-${token}`}
-            className={`board-token-gem board-token-gem--require${requiresMissing.includes(token) ? ' is-missing' : ''}`}
-            title={`Requires ${token}`}
-          >
-            {token}
-          </span>
-        )) : <span className="board-token-gem board-token-gem--muted">entry</span>}
+        {data.provides.length > 0 ? data.provides.map((token) => (
+          renderTokenGem(token, 'provide', data.providedTokens.includes(token) ? ' is-active' : '')
+        )) : <span className="board-token-gem board-token-gem--muted">source</span>}
       </div>
-      <Handle type="source" position={Position.Right} className="board-flow-node__handle" />
     </div>
   );
 }
@@ -188,42 +296,174 @@ const nodeTypes = {
 };
 
 export function BoardCanvas({ board, boardId, cardIds }) {
+  const [selectedToken, setSelectedToken] = useState(null);
+  const [reactFlowInstance, setReactFlowInstance] = useState(null);
+  const persistedCanvasState = useMemo(() => readCanvasState(boardId), [boardId]);
+  const canReusePersistedViewport = useMemo(
+    () => sameCardSet(persistedCanvasState?.cardIds, cardIds),
+    [cardIds, persistedCanvasState?.cardIds],
+  );
+  const hasRestoredViewportRef = useRef(false);
+  const previousSelectedTokenRef = useRef(null);
   const graph = useMemo(() => buildGraph(cardIds, board), [board, cardIds]);
   const baseLayout = useMemo(() => buildLayout(cardIds, graph.incoming, graph.outgoing), [cardIds, graph.incoming, graph.outgoing]);
+  const availableTokens = useMemo(() => Object.keys(board.dataObjects ?? {}), [board.dataObjects]);
 
-  const initialNodes = useMemo(() => cardIds.map((cardId) => ({
+  const highlightedEdgeIds = useMemo(() => {
+    if (!selectedToken) {
+      return new Set();
+    }
+    return new Set(
+      graph.edges
+        .filter((edge) => edge.data?.token === selectedToken)
+        .map((edge) => edge.id),
+    );
+  }, [graph.edges, selectedToken]);
+
+  const highlightedNodeIds = useMemo(() => {
+    if (!selectedToken) {
+      return new Set();
+    }
+
+    return new Set(cardIds.filter((cardId) => {
+      const card = graph.cards[cardId];
+      return card?.requires.includes(selectedToken) || card?.provides.includes(selectedToken);
+    }));
+  }, [cardIds, graph.cards, selectedToken]);
+
+  const handleTokenToggle = useCallback((token) => {
+    setSelectedToken((currentToken) => (currentToken === token ? null : token));
+  }, []);
+
+  const persistNodes = useCallback((nextNodes, viewport = null) => {
+    const positions = Object.fromEntries(nextNodes.map((node) => [node.id, node.position]));
+    writeCanvasState(boardId, {
+      cardIds: nextNodes.map((node) => node.id),
+      positions,
+      viewport,
+    });
+  }, [boardId]);
+
+  const graphNodes = useMemo(() => cardIds.map((cardId) => ({
     id: cardId,
     type: 'boardCard',
-    position: baseLayout.get(cardId) ?? { x: 0, y: 0 },
+    position: canReusePersistedViewport ? persistedCanvasState?.positions?.[cardId] : null
+      ?? resolveCanvasPosition(board.cardContents[cardId])
+      ?? baseLayout.get(cardId)
+      ?? { x: 0, y: 0 },
     draggable: true,
     data: {
       boardId,
       status: graph.cards[cardId]?.status ?? 'fresh',
       provides: graph.cards[cardId]?.provides ?? [],
       providedTokens: graph.cards[cardId]?.providesActive ?? [],
-      availableTokens: Object.keys(board.dataObjects ?? {}),
+      availableTokens,
       requires: graph.cards[cardId]?.requires ?? [],
       title: graph.cards[cardId]?.title ?? cardId,
+      selectedToken,
+      onTokenToggle: handleTokenToggle,
+      isHighlighted: !selectedToken || highlightedNodeIds.has(cardId),
+      isDimmed: !!selectedToken && !highlightedNodeIds.has(cardId),
     },
     style: { width: NODE_WIDTH },
-  })), [baseLayout, boardId, cardIds, graph.cards]);
+  })), [availableTokens, baseLayout, board.cardContents, boardId, canReusePersistedViewport, cardIds, graph.cards, handleTokenToggle, highlightedNodeIds, persistedCanvasState?.positions, selectedToken]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [nodes, setNodes, onNodesChange] = useNodesState(graphNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(graph.edges);
 
   useEffect(() => {
     setNodes((currentNodes) => {
       const positionsById = new Map(currentNodes.map((node) => [node.id, node.position]));
-      return initialNodes.map((node) => ({
+      return graphNodes.map((node) => ({
         ...node,
         position: positionsById.get(node.id) ?? node.position,
       }));
     });
-  }, [initialNodes, setNodes]);
+  }, [graphNodes, setNodes]);
 
   useEffect(() => {
-    setEdges(graph.edges);
-  }, [graph.edges, setEdges]);
+    if (!nodes.length) {
+      return;
+    }
+    const viewport = reactFlowInstance?.getViewport?.() ?? (canReusePersistedViewport ? persistedCanvasState?.viewport : null) ?? null;
+    persistNodes(nodes, viewport);
+  }, [canReusePersistedViewport, nodes, persistNodes, reactFlowInstance, persistedCanvasState?.viewport]);
+
+  useEffect(() => {
+    setEdges(graph.edges.map((edge) => ({
+      ...edge,
+      className: [
+        'board-flow__edge',
+        selectedToken ? (highlightedEdgeIds.has(edge.id) ? 'is-highlighted' : 'is-dimmed') : '',
+      ].filter(Boolean).join(' '),
+    })));
+  }, [graph.edges, highlightedEdgeIds, selectedToken, setEdges]);
+
+  useEffect(() => {
+    if (!reactFlowInstance || nodes.length === 0) {
+      return undefined;
+    }
+
+    if (!hasRestoredViewportRef.current) {
+      hasRestoredViewportRef.current = true;
+      previousSelectedTokenRef.current = selectedToken;
+
+      const frameId = window.requestAnimationFrame(() => {
+        if (canReusePersistedViewport && persistedCanvasState?.viewport) {
+          reactFlowInstance.setViewport(persistedCanvasState.viewport, { duration: 0 });
+          return;
+        }
+
+        reactFlowInstance.fitView({
+          nodes,
+          duration: 0,
+          padding: 0.18,
+          minZoom: 0.35,
+          maxZoom: 1.08,
+        });
+      });
+
+      return () => window.cancelAnimationFrame(frameId);
+    }
+
+    if (previousSelectedTokenRef.current === selectedToken) {
+      return undefined;
+    }
+
+    previousSelectedTokenRef.current = selectedToken;
+
+    const focusedNodeIds = selectedToken ? [...highlightedNodeIds] : cardIds;
+    const focusedNodes = nodes.filter((node) => focusedNodeIds.includes(node.id));
+
+    if (focusedNodes.length === 0) {
+      return undefined;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      reactFlowInstance.fitView({
+        nodes: focusedNodes,
+        duration: 280,
+        padding: selectedToken ? 0.3 : 0.18,
+        minZoom: selectedToken ? 0.5 : 0.35,
+        maxZoom: 1.08,
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [canReusePersistedViewport, cardIds, highlightedNodeIds, nodes, persistedCanvasState?.viewport, reactFlowInstance, selectedToken]);
+
+  const handleMoveEnd = useCallback((_event, viewport) => {
+    writeCanvasState(boardId, {
+      cardIds: nodes.map((node) => node.id),
+      positions: Object.fromEntries(nodes.map((node) => [node.id, node.position])),
+      viewport,
+    });
+  }, [boardId, nodes]);
+
+  const handleNodeDragStop = useCallback(() => {
+    const viewport = reactFlowInstance?.getViewport?.() ?? null;
+    persistNodes(nodes, viewport);
+  }, [nodes, persistNodes, reactFlowInstance]);
 
   return (
     <div className="board-centre-canvas__viewport">
@@ -233,8 +473,6 @@ export function BoardCanvas({ board, boardId, cardIds }) {
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        fitView
-        fitViewOptions={{ padding: 0.14, minZoom: 0.4 }}
         minZoom={0.24}
         maxZoom={1.35}
         defaultEdgeOptions={{
@@ -246,7 +484,19 @@ export function BoardCanvas({ board, boardId, cardIds }) {
         className="board-react-flow"
         panOnScroll
         selectionOnDrag
+        onInit={setReactFlowInstance}
+        onMoveEnd={handleMoveEnd}
+        onNodeDragStop={handleNodeDragStop}
       >
+        {selectedToken ? (
+          <div className="board-canvas-token-banner">
+            <span className="board-canvas-token-banner__label">Token focus</span>
+            <button type="button" className="board-token-gem board-token-gem--button is-selected" onClick={() => setSelectedToken(null)}>
+              {selectedToken}
+              <span className="board-canvas-token-banner__dismiss">×</span>
+            </button>
+          </div>
+        ) : null}
         <MiniMap pannable zoomable className="board-react-flow__minimap" />
         <Controls className="board-react-flow__controls" showInteractive={false} />
         <Background gap={24} size={1.1} color="var(--color-border-strong)" className="board-react-flow__background" />

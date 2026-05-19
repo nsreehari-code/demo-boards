@@ -1,5 +1,5 @@
 import { dispatchAction, refreshCard, patchCard, uploadFileForChat } from '../lib/client.js';
-import { resolveCanRefresh, useBoardState } from './useBoardState.js';
+import { resolveCanRefresh, resolveRequireTokens, useBoardState } from './useBoardState.js';
 
 export function useCardState(boardId, cardId) {
   const board = useBoardState(boardId);
@@ -9,7 +9,7 @@ export function useCardState(boardId, cardId) {
   const cardContent = board.cardContents[cardId] ?? null;
 
   const requiresDataObjects = {};
-  for (const token of (cardContent?.requires ?? [])) {
+  for (const token of resolveRequireTokens(cardContent)) {
     if (token in board.dataObjects) {
       requiresDataObjects[token] = board.dataObjects[token];
     }

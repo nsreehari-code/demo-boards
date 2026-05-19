@@ -1,0 +1,121 @@
+{
+  "id": "card-sentinel-demo-alert-feed",
+  "meta": {
+    "title": "Sentinel Demo Alert Feed",
+    "tags": [
+      "sentinel",
+      "demo",
+      "dependencies"
+    ],
+    "desc": "Static demo alerts used to exercise token provides/requires behavior directly on the Sentinel board."
+  },
+  "requires": [],
+  "provides": [
+    {
+      "bindTo": "sentinel_demo_alert_feed",
+      "ref": "card_data.alerts"
+    },
+    {
+      "bindTo": "sentinel_demo_workspace_summary",
+      "ref": "card_data.workspace_summary"
+    },
+    {
+      "bindTo": "sentinel_demo_watchlist_seed",
+      "ref": "card_data.watchlist_seed"
+    }
+  ],
+  "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "data": {
+          "value": "Publishes **sentinel_demo_alert_feed**, **sentinel_demo_workspace_summary**, and **sentinel_demo_watchlist_seed** for downstream demo cards."
+        }
+      },
+      {
+        "kind": "table",
+        "label": "Demo Alerts",
+        "data": {
+          "bind": "card_data.alerts",
+          "columns": [
+            "user",
+            "alertName",
+            "severity",
+            "workspace",
+            "lastSeen"
+          ],
+          "maxRows": 10
+        }
+      }
+    ],
+    "layout": {
+      "board": {
+        "col": 6,
+        "order": 5
+      },
+      "canvas": {
+        "x": 60,
+        "y": 560,
+        "w": 700,
+        "h": 320
+      }
+    },
+    "features": {
+      "refresh": false
+    }
+  },
+  "card_data": {
+    "alerts": [
+      {
+        "user": "alex@contoso.com",
+        "alertName": "Impossible travel activity",
+        "severity": "High",
+        "workspace": "prod-sec-west",
+        "lastSeen": "2026-05-18 21:40"
+      },
+      {
+        "user": "priya@contoso.com",
+        "alertName": "MFA fatigue detected",
+        "severity": "High",
+        "workspace": "prod-sec-west",
+        "lastSeen": "2026-05-18 19:12"
+      },
+      {
+        "user": "alex@contoso.com",
+        "alertName": "Anonymous IP sign-in",
+        "severity": "Medium",
+        "workspace": "prod-sec-west",
+        "lastSeen": "2026-05-18 18:02"
+      },
+      {
+        "user": "maya@contoso.com",
+        "alertName": "Unfamiliar sign-in properties",
+        "severity": "Low",
+        "workspace": "prod-sec-east",
+        "lastSeen": "2026-05-18 14:46"
+      }
+    ],
+    "workspace_summary": [
+      {
+        "workspace": "prod-sec-west",
+        "criticalUsers": 2,
+        "highSeverity": 2
+      },
+      {
+        "workspace": "prod-sec-east",
+        "criticalUsers": 1,
+        "highSeverity": 0
+      }
+    ],
+    "watchlist_seed": [
+      {
+        "user": "alex@contoso.com",
+        "reason": "Repeated impossible travel"
+      },
+      {
+        "user": "priya@contoso.com",
+        "reason": "MFA fatigue pattern"
+      }
+    ]
+  }
+}

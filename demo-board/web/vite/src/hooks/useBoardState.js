@@ -77,6 +77,16 @@ function normalizeFilterFns(filterFns) {
   return (Array.isArray(filterFns) ? filterFns : [filterFns]).filter((filterFn) => typeof filterFn === 'function');
 }
 
+export function resolveRequireTokens(cardContent) {
+  if (Array.isArray(cardContent?.requires)) {
+    return cardContent.requires.filter(Boolean).map(String);
+  }
+  if (cardContent?.requires && typeof cardContent.requires === 'object') {
+    return Object.keys(cardContent.requires).filter(Boolean);
+  }
+  return [];
+}
+
 export function resolveCanRefresh(cardContent) {
   return (cardContent?.source_defs?.length ?? 0) > 0;
 }
@@ -84,7 +94,7 @@ export function resolveCanRefresh(cardContent) {
 function buildBoardCardState(cardId, cardContents, cardRuntimes, chatStates, dataObjects) {
   const cardContent = cardContents[cardId] ?? null;
   const requiresDataObjects = {};
-  for (const token of (cardContent?.requires ?? [])) {
+  for (const token of resolveRequireTokens(cardContent)) {
     if (token in dataObjects) {
       requiresDataObjects[token] = dataObjects[token];
     }
