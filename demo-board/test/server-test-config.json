@@ -7,7 +7,7 @@
     "live": {
       "label": "Live",
       "setup": {
-        "setupRoot": "./live/.board-ws",
+        "setupRoot": "./boards/live/.board-ws",
         "cardStore": "cards/store",
         "artifactsStore": "cards/files",
         "boardRuntime": "runtime",

@@ -22,68 +22,68 @@
         "archivalStore": "runtime-archive"
       },
       "regular": {
-        "seedCardsDir": "./finbook/cards",
+        "seedCardsDir": "./boards/finbook/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       },
       "copilot-workdirs-setup": [
         { "copilot-root": "default", 
-          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./finbook/copilot/default/instructions"],
-          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./finbook/copilot/default/agents"],
-          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./finbook/copilot/default/skills"],
-          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./finbook/copilot/default/hooks"]
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./boards/finbook/copilot/default/instructions"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/finbook/copilot/default/agents"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/finbook/copilot/default/skills"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/finbook/copilot/default/hooks"]
         },
         { "copilot-root": "gandalf", 
-          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./finbook/copilot/gandalf/instructions"],
-          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./finbook/copilot/gandalf/agents"],
-          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./finbook/copilot/gandalf/skills"],
-          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./finbook/copilot/gandalf/hooks"]
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./boards/finbook/copilot/gandalf/instructions"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/finbook/copilot/gandalf/agents"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/finbook/copilot/gandalf/skills"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/finbook/copilot/gandalf/hooks"]
         }
       ]
     },
     "live": {
       "label": "Live",
-      "setupDir": "./live/.board-ws",
+      "setupDir": "./boards/live/.board-ws",
       "regular": {
-        "seedCardsDir": "./live/cards",
+        "seedCardsDir": "./boards/live/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       },
       "copilot-workdirs-setup": [
         { "copilot-root": "default", 
-          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./live/copilot/default/instructions"],
-          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./live/copilot/default/agents"],
-          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./live/copilot/default/skills"],
-          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./live/copilot/default/hooks"]
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./boards/live/copilot/default/instructions"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/live/copilot/default/agents"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/live/copilot/default/skills"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/live/copilot/default/hooks"]
         },
         { "copilot-root": "gandalf", 
-          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./live/copilot/gandalf/instructions"],
-          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./live/copilot/gandalf/agents"],
-          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./live/copilot/gandalf/skills"],
-          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./live/copilot/gandalf/hooks"]
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./boards/live/copilot/gandalf/instructions"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/live/copilot/gandalf/agents"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/live/copilot/gandalf/skills"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/live/copilot/gandalf/hooks"]
         }
       ]
     },
     "sentinel": {
       "label": "Sentinel Demo",
-      "setupDir": "./sentinel/.board-ws",
+      "setupDir": "./boards/sentinel/.board-ws",
       "regular": {
-        "seedCardsDir": "./sentinel/cards",
+        "seedCardsDir": "./boards/sentinel/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       },
       "copilot-workdirs-setup": [
         { "copilot-root": "default", 
-          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./sentinel/copilot/default/instructions"],
-          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./sentinel/copilot/default/agents"],
-          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./sentinel/copilot/default/skills"],
-          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./sentinel/copilot/default/hooks"]
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./boards/sentinel/copilot/default/instructions"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/sentinel/copilot/default/agents"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/sentinel/copilot/default/skills"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/sentinel/copilot/default/hooks"]
         },
         { "copilot-root": "gandalf", 
-          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./sentinel/copilot/gandalf/instructions"],
-          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./sentinel/copilot/gandalf/agents"],
-          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./sentinel/copilot/gandalf/skills"],
-          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./sentinel/copilot/gandalf/hooks"]
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./boards/sentinel/copilot/gandalf/instructions"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/sentinel/copilot/gandalf/agents"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/sentinel/copilot/gandalf/skills"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/sentinel/copilot/gandalf/hooks"]
         }
       ]
     }

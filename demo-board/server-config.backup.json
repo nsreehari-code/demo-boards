@@ -9,52 +9,52 @@
       "label": "Finbook",
       "setupDir": "../../data-repos-V2/finbook-data/case-workspace",
       "regular": {
-        "seedCardsDir": "./finbook/cards",
+        "seedCardsDir": "./boards/finbook/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
     "live": {
       "label": "Live",
-      "setupDir": "./live/.board-ws",
+      "setupDir": "./boards/live/.board-ws",
       "regular": {
-        "seedCardsDir": "./live/cards",
+        "seedCardsDir": "./boards/live/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
     "sentinel": {
       "label": "Sentinel",
-      "setupDir": "./sentinel/.board-ws",
+      "setupDir": "./boards/sentinel/.board-ws",
       "regular": {
-        "seedCardsDir": "./sentinel/cards",
+        "seedCardsDir": "./boards/sentinel/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
     "cpm": {
       "label": "CPM",
-      "setupDir": "./cpm/.board-ws",
+      "setupDir": "./boards/cpm/.board-ws",
       "regular": {
-        "seedCardsDir": "./cpm/cards",
+        "seedCardsDir": "./boards/cpm/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
     "cpmV2": {
       "label": "CPM V2",
-      "setupDir": "./cpmV2/.board-ws",
+      "setupDir": "./boards/cpmV2/.board-ws",
       "regular": {
-        "seedCardsDir": "./cpmV2/cards",
+        "seedCardsDir": "./boards/cpmV2/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
     },
     "optimus": {
       "label": "OPTIMUS",
-      "setupDir": "./optimus/.board-ws",
+      "setupDir": "./boards/optimus/.board-ws",
       "regular": {
-        "seedCardsDir": "./optimus/cards",
+        "seedCardsDir": "./boards/optimus/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
         "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
       }
