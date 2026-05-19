@@ -178,6 +178,10 @@ function buildMissingEntries(registry) {
       throw new Error(`Registry server ${serverName} must be an object`);
     }
     const manifestPath = resolveManifestPath(entry.manifest);
+    if (!fs.existsSync(manifestPath)) {
+      console.warn(`[sync-copilot-mcp-config] Skipping ${serverName}: manifest not found at ${manifestPath}`);
+      continue;
+    }
     const manifest = readJsonFile(manifestPath);
     entries[serverName] = toCopilotServerConfig(serverName, manifestPath, manifest, entry.connection);
   }
