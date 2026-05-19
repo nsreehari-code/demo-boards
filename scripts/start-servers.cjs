@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 
 const workspaceDir = path.resolve(__dirname, '..');
 const tempDir = path.join(workspaceDir, '.tmp');
@@ -52,6 +52,20 @@ function createNpmProcess(name, args) {
     args,
     cwd: workspaceDir,
   };
+}
+
+function runNpmCommandSync(args, options = {}) {
+  if (npmExecPath) {
+    execFileSync(process.execPath, [npmExecPath, ...args], options);
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    execFileSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/c', npmCmd, ...args], options);
+    return;
+  }
+
+  execFileSync(npmCmd, args, options);
 }
 
 function ensureDir(dirPath) {
@@ -145,12 +159,21 @@ if (liveProcesses.length > 0) {
   process.exit(1);
 }
 
+if (!isDevMode) {
+  console.log(`[${label}] Building vite frontend...`);
+  runNpmCommandSync(['--prefix', path.join('demo-board', 'web', 'vite'), 'run', 'build'], {
+    cwd: workspaceDir,
+    stdio: 'inherit',
+  });
+  console.log(`[${label}] Vite build complete.`);
+}
+
 const frontendProcess = isDevMode
   ? createNpmProcess('vite', ['--prefix', path.join('demo-board', 'web', 'vite'), 'run', 'dev'])
   : {
       name: 'frontend',
       command: process.execPath,
-      args: [httpServerCli, 'demo-board', '-p', '8000', '-c-1'],
+      args: [httpServerCli, path.join('demo-board', 'web', 'dist-vite'), '-p', '8000', '-c-1'],
       cwd: workspaceDir,
     };
 
