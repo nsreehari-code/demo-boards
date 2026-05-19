@@ -1,5 +1,6 @@
 import React from 'react';
 import { useBoardState } from '../hooks/useBoardState.js';
+import { BoardCanvas } from './BoardCanvas.jsx';
 import { CardShell } from './CardShell.jsx';
 
 const CENTRE_PANE_LAYOUTS = {
@@ -7,6 +8,11 @@ const CENTRE_PANE_LAYOUTS = {
     containerClassName: 'board-centre-pane container-fluid px-3 py-2',
     listClassName: 'board-centre-grid row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3',
     itemClassName: 'board-centre-cell col',
+  },
+  'infinite-canvas': {
+    containerClassName: 'board-centre-pane board-centre-pane--canvas',
+    listClassName: 'board-centre-canvas',
+    itemClassName: '',
   },
 };
 
@@ -29,6 +35,14 @@ export function CentrePane({ boardId, excludeFilters = [], layoutStrategy = 'flo
 
   const layout = resolveLayoutStrategy(layoutStrategy);
   const visibleCardIds = [...board.excludedCards(excludeFilters)];
+
+  if (layoutStrategy === 'infinite-canvas') {
+    return (
+      <div className={layout.containerClassName}>
+        <BoardCanvas board={board} boardId={boardId} cardIds={visibleCardIds} />
+      </div>
+    );
+  }
 
   return (
     <div className={layout.containerClassName}>

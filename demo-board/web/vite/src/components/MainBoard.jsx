@@ -8,7 +8,7 @@ export function MainBoard({ boardId }) {
   return (
     <>
       <IngestPane boardId={boardId} includeFilters={[ingestFilter]} layoutStrategy="vertical" />
-      <CentrePane boardId={boardId} excludeFilters={[ingestFilter]} layoutStrategy="flowing-cards" />
+      <CentrePane boardId={boardId} excludeFilters={[ingestFilter]} layoutStrategy="infinite-canvas" />
     </>
   );
 }
