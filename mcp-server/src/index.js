@@ -3,7 +3,7 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -135,6 +135,19 @@ function createMcpServer(loaded) {
   });
   registerManifestTools(server, loaded.tools);
   return server;
+}
+
+function createEmptyLoadedManifests() {
+  return {
+    server: {
+      name: 'demo-boards-mcp',
+      version: '0.1.0',
+      description: '',
+    },
+    connection: null,
+    tools: [],
+    manifests: [],
+  };
 }
 
 function isInitializeRequest(body) {
@@ -323,15 +336,25 @@ function loadManifestPathsFromRegistry() {
     return [];
   }
   const servers = registry?.servers || {};
-  return Object.values(servers)
-    .filter(entry => entry.manifest)
-    .map(entry => {
+  return Object.entries(servers)
+    .flatMap(([serverName, entry]) => {
+      if (!entry?.manifest) return [];
+
       const ref = entry.manifest;
-      if (path.isAbsolute(ref)) return ref;
-      if (ref.startsWith('.') || ref.includes('/') || ref.includes('\\')) {
-        return path.resolve(mcpServerDir, ref);
+      const manifestPath = path.isAbsolute(ref)
+        ? ref
+        : (ref.startsWith('.') || ref.includes('/') || ref.includes('\\'))
+          ? path.resolve(mcpServerDir, ref)
+          : path.resolve(manifestsDir, ref);
+
+      if (!existsSync(manifestPath)) {
+        process.stderr.write(
+          `[mcp-server] Skipping registry server "${serverName}": manifest not reachable at ${manifestPath}\n`
+        );
+        return [];
       }
-      return path.resolve(manifestsDir, ref);
+
+      return [manifestPath];
     });
 }
 
@@ -339,12 +362,20 @@ async function main() {
   let manifestPaths = getArgValues('--manifest');
   const transportName = getArgValue('--transport', 'stdio');
   const dryRun = hasFlag('--dry-run');
+  const useRegistryDefaults = manifestPaths.length === 0;
 
-  if (manifestPaths.length === 0) {
+  if (useRegistryDefaults) {
     manifestPaths = loadManifestPathsFromRegistry();
   }
 
-  const loaded = loadManifests(manifestPaths);
+  const loaded = manifestPaths.length > 0
+    ? loadManifests(manifestPaths)
+    : createEmptyLoadedManifests();
+
+  if (useRegistryDefaults && manifestPaths.length === 0) {
+    process.stderr.write('[mcp-server] No reachable registry manifests found, starting with no tools\n');
+  }
+
   validateTransportCompatibility(loaded.tools, transportName);
 
   if (dryRun) {
