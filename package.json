@@ -9,6 +9,7 @@
     "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt",
     "postinstall": "npm run install:foundry",
     "start": "node scripts/start-server.cjs demo-board --all",
+    "backend": "node scripts/start-server.cjs demo-board --backend",
     "start:servers": "node scripts/start-servers.cjs",
     "dev:servers": "node scripts/start-servers.cjs --dev",
     "mcp:install": "npm --prefix mcp-server install",
