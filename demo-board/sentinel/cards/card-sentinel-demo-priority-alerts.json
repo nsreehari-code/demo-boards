@@ -9,17 +9,11 @@
     ],
     "desc": "Consumes the demo alert feed and republishes only the higher-priority cases."
   },
-  "requires": {
-    "sentinel_demo_alert_feed": {
-      "role": "primary"
-    },
-    "sentinel_demo_workspace_summary": {
-      "role": "context"
-    },
-    "sentinel_demo_watchlist_seed": {
-      "role": "enrichment"
-    }
-  },
+  "requires": [
+    "sentinel_demo_alert_feed",
+    "sentinel_demo_workspace_summary",
+    "sentinel_demo_watchlist_seed"
+  ],
   "compute": [
     {
       "bindTo": "priority_alerts",

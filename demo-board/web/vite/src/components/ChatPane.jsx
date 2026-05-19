@@ -48,7 +48,27 @@ function ChatIconShell({ children }) {
   );
 }
 
-function ChatBubble({ msg }) {
+function ChatMessageText({ text, compact = false }) {
+  return (
+    <div
+      className="board-chat__message"
+      style={{
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
+        ...(compact ? {
+          display: '-webkit-box',
+          WebkitBoxOrient: 'vertical',
+          WebkitLineClamp: 8,
+          overflow: 'hidden',
+        } : null),
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+function ChatBubble({ msg, compact = false }) {
   const { role, text, files } = msg;
   if (role === 'system') {
     return <div className="text-center small text-muted fst-italic px-2 my-1">{text}</div>;
@@ -65,6 +85,9 @@ function ChatBubble({ msg }) {
             : 'var(--bs-light, #f8f9fa)',
           border: isUser ? 'none' : '1px solid var(--bs-border-color, #dee2e6)',
           whiteSpace: 'pre-wrap',
+          overflowWrap: 'anywhere',
+          wordBreak: 'break-word',
+          overflowX: 'hidden',
           lineHeight: 1.4,
           gap: '0.45rem',
         }}
@@ -73,7 +96,7 @@ function ChatBubble({ msg }) {
           {isUser ? <UserBubbleIcon /> : <AssistantBubbleIcon />}
         </ChatIconShell>
         <div className="flex-grow-1 min-w-0">
-          {text}
+          <ChatMessageText text={text} compact={compact} />
           {(files ?? []).map((f, i) => (
             <div key={i} className="badge bg-secondary-subtle text-secondary-emphasis mt-1 d-block">{f}</div>
           ))}
@@ -192,7 +215,7 @@ function ChatComposer({ chatActions, placeholder, processing }) {
   );
 }
 
-export function ChatPane({ boardId, cardId, readOnly = false }) {
+export function ChatPane({ boardId, cardId, readOnly = false, compact = false }) {
   const chat = useChatState(boardId, cardId);
   const messages = chat?.messages ?? [];
   const processing = chat?.processing ?? false;
@@ -209,9 +232,12 @@ export function ChatPane({ boardId, cardId, readOnly = false }) {
   if (!chat) return null;
 
   return (
-    <div className="d-flex flex-column h-100 min-h-0">
-      <div className="flex-grow-1 overflow-auto p-2" style={{ minHeight: 0 }}>
-        {messages.map((msg, i) => <ChatBubble key={i} msg={msg} />)}
+    <div className="d-flex flex-column h-100 min-h-0" style={{ maxHeight: '100%' }}>
+      <div
+        className="flex-grow-1 overflow-auto p-2"
+        style={{ minHeight: 0, maxHeight: '100%', overflowY: 'auto', overscrollBehavior: 'contain' }}
+      >
+        {messages.map((msg, i) => <ChatBubble key={i} msg={msg} compact={compact} />)}
         {processing && <WorkingBubble />}
         <div ref={bottomRef} />
       </div>

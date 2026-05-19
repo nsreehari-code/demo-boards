@@ -6,6 +6,7 @@ import path from 'node:path';
 import net from 'node:net';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -29,6 +30,9 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const SERVER_DIR = path.dirname(__filename);
 const BOARD_ROOT = path.resolve(SERVER_DIR, '..');
+const require = createRequire(import.meta.url);
+const YAML_FLOW_PACKAGE_JSON = require.resolve('yaml-flow/package.json');
+const YAML_FLOW_CLI_NODE_DIR = path.join(path.dirname(YAML_FLOW_PACKAGE_JSON), 'cli', 'node');
 const cliArgs = process.argv.slice(2);
 const SERVER_CONFIG = path.join(BOARD_ROOT, 'server-config.json');
 
@@ -473,6 +477,7 @@ const runtime = createMultiBoardServerRuntime({
 
     const boardSetupRootOverride = (process.env.DEMO_BOARD_SETUP_ROOT || '').trim();
     const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
+    const baseRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.setupRoot });
     const artifactsStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath });
     const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
     const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
@@ -487,6 +492,8 @@ const runtime = createMultiBoardServerRuntime({
       }),
     });
     const baseExecutionExtra = {
+      boardId,
+      baseRef,
       boardSetupRoot: boardSetupPaths.setupRoot,
       boardRuntimeDir: boardSetupPaths.boardRuntime,
       cardStore: boardSetupPaths.cardStore,
@@ -524,6 +531,7 @@ const runtime = createMultiBoardServerRuntime({
       logger,
       serverUrl: `http://127.0.0.1:${PORT}`,
       executionExtra: {
+        baseRef,
         boardSetupRoot: boardSetupPaths.setupRoot,
         boardRuntimeDir: boardSetupPaths.boardRuntime,
         cardStore: boardSetupPaths.cardStore,
@@ -575,18 +583,24 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
       if (!copilotRoot) continue;
 
       const workspaceRoot = path.join(copilotWorkspaceRoot, copilotRoot);
-      const instructionsTarget = path.join(workspaceRoot, 'copilot-instructions.md');
+      const githubRoot = path.join(workspaceRoot, '.github');
+      const instructionsTarget = path.join(githubRoot, 'copilot-instructions.md');
+      const legacyInstructionsTarget = path.join(workspaceRoot, 'copilot-instructions.md');
       const agentsTarget = path.join(workspaceRoot, '.github', 'agents');
       const hooksTarget = path.join(workspaceRoot, '.github', 'hooks');
       const skillsTarget = path.join(workspaceRoot, '.github', 'skills');
+      const scriptsTarget = path.join(workspaceRoot, '.github', 'scripts');
 
       fs.mkdirSync(workspaceRoot, { recursive: true });
+      fs.mkdirSync(githubRoot, { recursive: true });
       fs.rmSync(agentsTarget, { recursive: true, force: true });
       fs.rmSync(hooksTarget, { recursive: true, force: true });
       fs.rmSync(skillsTarget, { recursive: true, force: true });
+      fs.rmSync(scriptsTarget, { recursive: true, force: true });
       fs.mkdirSync(agentsTarget, { recursive: true });
       fs.mkdirSync(hooksTarget, { recursive: true });
       fs.mkdirSync(skillsTarget, { recursive: true });
+      fs.mkdirSync(scriptsTarget, { recursive: true });
 
       const instructionDirs = Array.isArray(entry.instructionsDirs) ? entry.instructionsDirs : [];
       const instructionParts = [];
@@ -600,8 +614,10 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
 
       if (instructionParts.length > 0) {
         fs.writeFileSync(instructionsTarget, instructionParts.join('\n===============\n') + '\n', 'utf-8');
+        fs.rmSync(legacyInstructionsTarget, { force: true });
       } else {
         fs.rmSync(instructionsTarget, { force: true });
+        fs.rmSync(legacyInstructionsTarget, { force: true });
       }
 
       const agentsDirs = Array.isArray(entry.agentsDirs) ? entry.agentsDirs : [];
@@ -633,6 +649,13 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
           fs.copyFileSync(filePath, targetPath);
         }
       }
+
+      for (const fileName of fs.readdirSync(YAML_FLOW_CLI_NODE_DIR)) {
+        const sourcePath = path.join(YAML_FLOW_CLI_NODE_DIR, fileName);
+        const stat = fs.statSync(sourcePath);
+        if (!stat.isFile()) continue;
+        fs.copyFileSync(sourcePath, path.join(scriptsTarget, fileName));
+      }
     }
     return;
   }
@@ -647,7 +670,10 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
     if (fs.existsSync(fpath)) parts.push(fs.readFileSync(fpath, 'utf-8').trimEnd());
   }
   if (parts.length > 0) {
-    fs.writeFileSync(path.join(boardSetupRoot, 'copilot-instructions.md'), parts.join('\n\n') + '\n', 'utf-8');
+    const githubRoot = path.join(boardSetupRoot, '.github');
+    fs.mkdirSync(githubRoot, { recursive: true });
+    fs.writeFileSync(path.join(githubRoot, 'copilot-instructions.md'), parts.join('\n\n') + '\n', 'utf-8');
+    fs.rmSync(path.join(boardSetupRoot, 'copilot-instructions.md'), { force: true });
   }
 }
 

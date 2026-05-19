@@ -24,6 +24,10 @@
     {
       "bindTo": "status",
       "expr": "$type(fetched_sources.workspaces) = 'string' ? '**Sentinel workspace lookup failed:** ' & fetched_sources.workspaces : ''"
+    },
+    {
+      "bindTo": "workspacesView",
+      "expr": "fetched_sources.workspaces"
     }
   ],
   "view": {
@@ -38,7 +42,7 @@
         "kind": "table",
         "label": "Available Workspaces",
         "data": {
-          "bind": "fetched_sources.workspaces",
+          "bind": "computed_values.workspacesView",
           "maxRows": 25
         }
       }

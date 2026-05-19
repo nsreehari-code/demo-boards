@@ -549,6 +549,10 @@ a {
   color: var(--color-text);
 }
 
+.board-chat__message {
+  position: relative;
+}
+
 .board-ingest-layer {
   isolation: isolate;
 }

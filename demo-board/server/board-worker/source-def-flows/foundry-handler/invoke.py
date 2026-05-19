@@ -24,6 +24,7 @@ No API keys required.
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 
@@ -123,16 +124,50 @@ def tool_patch_json_file(arguments, allowed_dirs):
 
 def _validate_card(filepath):
     import subprocess
-    validate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "validate-card.cjs")
-    if not os.path.exists(validate_script):
+
+    def _find_repo_root(start_dir):
+        current = start_dir
+        while True:
+            if os.path.exists(os.path.join(current, "package.json")) and os.path.exists(os.path.join(current, "node_modules")):
+                return current
+            parent = os.path.dirname(current)
+            if parent == current:
+                return None
+            current = parent
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = _find_repo_root(script_dir)
+    if not repo_root:
         return {"ok": True, "errors": []}
+
+    cli_js = os.path.join(repo_root, "node_modules", "yaml-flow", "cli", "node", "board-live-cards-cli.js")
+    node_bin = shutil.which("node")
+    if not node_bin or not os.path.exists(cli_js):
+        return {"ok": True, "errors": []}
+
     try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            card_json = f.read()
         result = subprocess.run(
-            ["node", validate_script, filepath],
-            capture_output=True, text=True, timeout=10,
-            cwd=os.path.dirname(validate_script),
+            [node_bin, cli_js, "validate-card-preflight"],
+            input=card_json,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=repo_root,
         )
-        return json.loads(result.stdout.strip()) if result.stdout.strip() else {"ok": True, "errors": []}
+        if not result.stdout.strip():
+            return {"ok": True, "errors": []}
+
+        parsed = json.loads(result.stdout.strip())
+        if parsed.get("status") == "success":
+            data = parsed.get("data") or {}
+            return {
+                "ok": data.get("isValid", True),
+                "errors": data.get("issues") or [],
+            }
+
+        return {"ok": False, "errors": [parsed.get("error") or "validation failed"]}
     except Exception:
         return {"ok": True, "errors": []}
 

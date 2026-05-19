@@ -123,9 +123,9 @@
       }
     },
     "copilot_assistant": {
-      "description": "Run the Copilot-backed assistant logic to generate the reply from the resolved chat history",
-      "expects_data": ["userText", "chatMessages", "boardId", "cardId", "boardSetupRoot", "boardRuntimeDir", "cardStore", "cardStoreRef", "chatStore", "chatStoreRef", "runtimeStatusDir", "artifactsStore", "artifactsStoreRef", "scratchStore", "scratchStoreRef", "projectRoot", "chatFlowRoot", "chatCopilotTimeoutMs"],
-      "produces_data": ["replyText"],
+      "description": "Run the Copilot-backed assistant logic, which persists its own assistant reply into chat storage",
+      "expects_data": ["userText", "chatMessages", "boardId", "cardId", "baseRef", "boardSetupRoot", "boardRuntimeDir", "cardStore", "cardStoreRef", "chatStore", "chatStoreRef", "runtimeStatusDir", "artifactsStore", "artifactsStoreRef", "scratchStore", "scratchStoreRef", "projectRoot", "chatFlowRoot", "chatCopilotTimeoutMs"],
+      "produces_data": ["assistantHandled"],
       "input_validations": [
         "$type(userText) = \"string\"",
         "$type(chatMessages) = \"array\""
@@ -139,12 +139,12 @@
         },
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/copilot-chat/assistant.js'"],
-          "stdinTemplate": "{ 'cardId': cardId, 'boardSetupRoot': boardSetupRoot, 'boardRuntimeDir': boardRuntimeDir, 'cardStore': cardStore, 'cardStoreRef': cardStoreRef, 'chatStore': chatStore, 'chatStoreRef': chatStoreRef, 'runtimeStatusDir': runtimeStatusDir, 'artifactsStore': artifactsStore, 'artifactsStoreRef': artifactsStoreRef, 'scratchStore': scratchStore, 'scratchStoreRef': scratchStoreRef, 'chatMessages': chatMessages, 'userText': userText, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs }"
+          "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'baseRef': baseRef, 'boardSetupRoot': boardSetupRoot, 'boardRuntimeDir': boardRuntimeDir, 'cardStore': cardStore, 'cardStoreRef': cardStoreRef, 'chatStore': chatStore, 'chatStoreRef': chatStoreRef, 'runtimeStatusDir': runtimeStatusDir, 'artifactsStore': artifactsStore, 'artifactsStoreRef': artifactsStoreRef, 'scratchStore': scratchStore, 'scratchStoreRef': scratchStoreRef, 'chatMessages': chatMessages, 'userText': userText, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs }"
         },
         "meta": "chat-handler"
       },
       "transitions": {
-        "success": "write_reply",
+        "success": "assistant_clear_processing",
         "failure": "cleanup_failure",
         "error": "cleanup_failure"
       }
@@ -191,6 +191,31 @@
         },
         "outputTransforms": {
           "dataTemplate": "{ 'replyId': output.data.results[0].data.id }"
+        }
+      },
+      "transitions": {
+        "success": "completed",
+        "failure": "cleanup_failure",
+        "error": "cleanup_failure"
+      }
+    },
+    "assistant_clear_processing": {
+      "description": "Clear processing after the Copilot assistant has already appended the final assistant reply",
+      "expects_data": ["boardSetupRoot", "chatStore", "cardId"],
+      "input_validations": [
+        "$type(boardSetupRoot) = \"string\" and $length(boardSetupRoot) > 0",
+        "$type(cardId) = \"string\" and $length(cardId) > 0"
+      ],
+      "handler": {
+        "type": "ref",
+        "howToRun": "local-node",
+        "whatToRun": {
+          "kind": "yaml-flow-cli",
+          "value": "chat-store-cli.js"
+        },
+        "meta": "chat-handler",
+        "argsMassaging": {
+          "stdinTemplate": "{ 'boardDir': boardSetupRoot & '/' & chatStore, 'cardId': cardId, 'commands': [{ 'command': 'set-processing', 'active': false }] }"
         }
       },
       "transitions": {

@@ -9,20 +9,12 @@
     ],
     "desc": "Builds a downstream response plan from the priority alert token published by the demo chain."
   },
-  "requires": {
-    "sentinel_demo_alert_feed": {
-      "role": "baseline"
-    },
-    "sentinel_demo_priority_alerts": {
-      "role": "priority"
-    },
-    "sentinel_demo_watchlist_candidates": {
-      "role": "watchlist"
-    },
-    "sentinel_demo_priority_workspace_summary": {
-      "role": "workspace"
-    }
-  },
+  "requires": [
+    "sentinel_demo_alert_feed",
+    "sentinel_demo_priority_alerts",
+    "sentinel_demo_watchlist_candidates",
+    "sentinel_demo_priority_workspace_summary"
+  ],
   "compute": [
     {
       "bindTo": "triage_users",

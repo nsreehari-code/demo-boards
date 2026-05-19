@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createBoardLiveCardsNonCorePublic } from 'yaml-flow/board-live-cards-public';
-import { createFsBoardNonCorePlatformAdapter } from 'yaml-flow/board-live-cards-node';
+import { createCardStore, createCardStorePublic, createFsBoardNonCorePlatformAdapter } from 'yaml-flow/board-live-cards-node';
 
 const HANDLER_DIR = path.dirname(fileURLToPath(import.meta.url));
 const WRAPPER_BAT = path.join(HANDLER_DIR, 'copilot_wrapper.bat');
@@ -29,7 +29,9 @@ function readJsonStdin() {
 
 const extra = readJsonStdin();
 const {
+  boardId = '',
   cardId = '',
+  baseRef = '',
   boardSetupRoot = '',
   boardRuntimeDir = '',
   cardStore = 'cards-store',
@@ -53,25 +55,45 @@ const chatCopilotTimeoutMs = Number.isFinite(Number(rawChatCopilotTimeoutMs)) &&
 
 
 function buildPrompt(cId, historyDump, currentUserText) {
-  const cardSetupDirRel = path.join(artifactsStore, cId).replace(/\\/g, '/');
-  const runtimeDirRel = boardRuntimeDir;
-  const statusDirRel = runtimeStatusDir;
-
-  const contextBlock = [
-    'We are currently doing a three way orchestration.',
-    'You are the responder who has context of the cards in ' + cardSetupDirRel + ',',
-    'card runtime statuses in ' + runtimeDirRel + ',',
-    'and computed outputs in ' + statusDirRel + '.',
-    'I am just a mediator passing on the query.',
-    'The user sees the data available in cards which is rendered, and the status from ' + statusDirRel + '.',
-    'Everything else is internal detail not to be exposed to the user.',
-    'The conversation history is provided below exactly as received from the runtime API as a string dump.',
-    'The current user query is: ' + currentUserText,
-    'Return only the assistant response text for the user.',
-    'Do not write files, and do not include any internal notes, logs, or orchestration details in the response.',
+  const chatBoardDir = boardSetupRoot && chatStore
+    ? path.join(boardSetupRoot, chatStore)
+    : '';
+  const instructionsBlock = [
+    'You are the responder in a three way orchestration.',
+    'I am only a mediator passing the runtime context and the user query to you.',
+    'The user only sees rendered card data (card definitions from card-store-cli and runtime outputs from board-live-cards-cli)  and exposed board status.',
+    'Do not expose internal orchestration details, logs, handles, refs, paths, directory names, or implementation notes.',
+    'Use the runtime handles below directly when you need operational context.',
+    'Do not spend time rediscovering these handles from files, directories, or scans.',
+    'When you are ready to reply to the user, append exactly one assistant message to chat-store using chat-store-cli append with the provided chatBoardDir and cardId.',
+    'The appended message text is the user-visible final answer. Do not append partial drafts, status updates, tool transcripts, or internal notes.',
+    'Do not call chat-store set-processing; orchestration clears processing after you finish.',
+    'After appending the final assistant message, return only a short completion acknowledgement for orchestration.',
+    'Do not write files, and do not include markdown fences or internal notes in the returned acknowledgement.',
   ].join(' ');
 
+  const runtimeHandlesBlock = [
+    'Runtime handles:',
+    `- boardId: ${boardId || '(not provided)'}`,
+    `- cardId: ${cId}`,
+    `- baseRef: ${baseRef || '(not provided)'}`,
+    `- chatBoardDir: ${chatBoardDir || '(not provided)'}`,
+    `- cardStoreRef: ${cardStoreRef || '(not provided)'}`,
+    `- chatStoreRef: ${chatStoreRef || '(not provided)'}`,
+    `- artifactsStoreRef: ${artifactsStoreRef || '(not provided)'}`,
+    `- scratchStoreRef: ${scratchStoreRef || '(not provided)'}`,
+  ].join('\n');
+
+  const contextBlock = [
+    'Current user query:',
+    currentUserText,
+  ].join('\n');
+
   return [
+    instructionsBlock,
+    '',
+    runtimeHandlesBlock,
+    '',
     contextBlock,
     '',
     'Chat history dump:',
@@ -92,24 +114,26 @@ function runCopilot(prompt, workingDir) {
   const ts = Date.now();
   const promptFile = path.join(os.tmpdir(), `asst-prompt-${ts}.txt`);
   const outFile = path.join(os.tmpdir(), `asst-out-${ts}.txt`);
+  const execArgs = [
+    '/d', '/c', WRAPPER_BAT,
+    outFile,
+    os.tmpdir(),
+    workingDir || process.cwd(),
+    '@' + promptFile,
+    'raw',
+    'demo-chat',
+  ];
   fs.writeFileSync(promptFile, prompt, 'utf-8');
   try {
-    execFileSync('cmd.exe', [
-      '/d', '/c', WRAPPER_BAT,
-      outFile,
-      os.tmpdir(),
-      workingDir || process.cwd(),
-      '@' + promptFile,
-      'raw',
-      'demo-chat',
-    ], {
+    execFileSync('cmd.exe', execArgs, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 10 * 1024 * 1024,
       timeout: chatCopilotTimeoutMs,
       windowsHide: true,
     });
-    return fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf-8').trim() : '';
+    const outputText = fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf-8').trim() : '';
+    return outputText;
   } finally {
     try { fs.unlinkSync(promptFile); } catch {}
     try { fs.unlinkSync(outFile); } catch {}
@@ -161,6 +185,90 @@ function readAllStoredCards(storeRef) {
     return Array.isArray(parsed) ? parsed.filter((card) => card && typeof card === 'object') : [];
   } catch {
     return [];
+  }
+}
+
+function createCardStoreSnapshot(setupRoot, storeRef) {
+  if (!setupRoot || !storeRef) {
+    return null;
+  }
+
+  const boardRef = { kind: 'fs-path', value: setupRoot };
+  const boardAdapter = createFsBoardNonCorePlatformAdapter(boardRef);
+  const kvStorage = boardAdapter.kvStorageForRef(storeRef);
+  const cardAdminStore = createCardStore({
+    readIndex() {
+      const value = kvStorage.read('_index');
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+    },
+    writeIndex(index) {
+      kvStorage.write('_index', index);
+    },
+    readCard(key) {
+      const value = kvStorage.read(key);
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+    },
+    writeCard(key, card) {
+      kvStorage.write(key, card);
+      return JSON.stringify(card);
+    },
+    cardExists(key) {
+      return kvStorage.read(key) !== null;
+    },
+    defaultCardKey(currentCardId) {
+      return currentCardId;
+    },
+  });
+  const cardStorePublic = createCardStorePublic(cardAdminStore);
+  const cardsResult = cardStorePublic.get({});
+  const cards = cardsResult.status === 'success' && Array.isArray(cardsResult.data?.cards)
+    ? cardsResult.data.cards.filter((card) => card && typeof card === 'object')
+    : [];
+
+  return {
+    boardApi: createBoardLiveCardsNonCorePublic(boardRef, boardAdapter),
+    cardAdminStore,
+    cardsById: new Map(
+      cards
+        .filter((card) => typeof card.id === 'string' && card.id.length > 0)
+        .map((card) => [card.id, card])
+    ),
+    checksumIndex: cardAdminStore.readChecksumIndex(),
+  };
+}
+
+function syncChangedCardsToBoard(snapshot) {
+  if (!snapshot) {
+    return;
+  }
+
+  const changedCardIds = snapshot.cardAdminStore.changedSince(snapshot.checksumIndex);
+  for (const changedCardId of changedCardIds) {
+    if (!changedCardId) {
+      continue;
+    }
+
+    const currentCard = snapshot.cardAdminStore.readCard(changedCardId);
+    if (currentCard) {
+      const upsertResult = snapshot.boardApi.upsertCard({
+        params: { cardId: changedCardId, restart: true },
+      });
+      if (upsertResult.status !== 'success') {
+        throw new Error(upsertResult.error ?? `Failed to refresh changed card "${changedCardId}"`);
+      }
+      continue;
+    }
+
+    if (!snapshot.cardsById.has(changedCardId)) {
+      continue;
+    }
+
+    const removeResult = snapshot.boardApi.removeCard({
+      params: { id: changedCardId },
+    });
+    if (removeResult.status !== 'success') {
+      throw new Error(removeResult.error ?? `Failed to remove deleted card "${changedCardId}" from board runtime`);
+    }
   }
 }
 
@@ -227,12 +335,12 @@ function runValidationRepair(workingDir, issuesByCardId) {
 }
 
 function runCopilotWithValidationRetries(prompt, workingDir, setupRoot, storeRef) {
+  const initialCardSnapshot = createCardStoreSnapshot(setupRoot, storeRef);
   const responseParts = [];
   const initialResponse = runCopilot(prompt, workingDir).trim();
-  if (!initialResponse) {
-    throw new Error('Copilot returned an empty response');
+  if (initialResponse) {
+    responseParts.push(initialResponse);
   }
-  responseParts.push(initialResponse);
 
   let retries = 0;
   while (retries < 3) {
@@ -242,10 +350,9 @@ function runCopilotWithValidationRetries(prompt, workingDir, setupRoot, storeRef
     }
 
     const repairResponse = runValidationRepair(workingDir, validationIssuesByCardId);
-    if (!repairResponse) {
-      throw new Error('Copilot returned an empty repair response');
+    if (repairResponse) {
+      responseParts.push(repairResponse);
     }
-    responseParts.push(repairResponse);
     retries += 1;
   }
 
@@ -253,6 +360,8 @@ function runCopilotWithValidationRetries(prompt, workingDir, setupRoot, storeRef
   if (hasValidationIssues(finalValidationIssuesByCardId)) {
     throw new Error(`Card validation failed after Copilot run\n${JSON.stringify(finalValidationIssuesByCardId)}`);
   }
+
+  syncChangedCardsToBoard(initialCardSnapshot);
 
   return responseParts.join('\n\n');
 }
@@ -284,13 +393,13 @@ const workingDir = resolveCopilotWorkingDir(boardSetupRoot, cardStoreRef, cardId
 const prompt = buildPrompt(cardId, historyDump, userText.trim());
 
 try {
-  const replyText = runCopilotWithValidationRetries(
+  runCopilotWithValidationRetries(
     prompt,
     workingDir,
     boardSetupRoot,
     cardStoreRef
   );
-  process.stdout.write(JSON.stringify({ replyText }));
+  process.stdout.write(JSON.stringify({ assistantHandled: true }));
 } catch (err) {
   process.stderr.write((err?.message ?? String(err)) + '\n');
   process.exit(1);

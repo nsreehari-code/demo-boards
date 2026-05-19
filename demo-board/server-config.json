@@ -37,16 +37,16 @@
       },
       "copilot-workdirs-setup": [
         { "copilot-root": "default", 
-          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./sentinel/copilot-instructions"],
-          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./sentinel/copilot-agents"],
-          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./sentinel/copilot-skills"],
-          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./sentinel/copilot-hooks"]
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./sentinel/copilot/default/instructions"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./sentinel/copilot/default/agents"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./sentinel/copilot/default/skills"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./sentinel/copilot/default/hooks"]
         },
         { "copilot-root": "gandalf", 
-          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./sentinel/copilot-instructions-gandalf"],
-          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./sentinel/copilot-agents-gandalf"],
-          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./sentinel/copilot-skills-gandalf"],
-          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./sentinel/copilot-hooks-gandalf"]
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./sentinel/copilot/gandalf/instructions"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./sentinel/copilot/gandalf/agents"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./sentinel/copilot/gandalf/skills"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./sentinel/copilot/gandalf/hooks"]
         }
       ]
     }

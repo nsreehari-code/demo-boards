@@ -44,11 +44,13 @@
     "files": [
       {
         "name": "income-summary.csv",
-        "path": "uploads/income-summary.csv"
+        "stored_name": "001-income-summary.csv",
+        "path": "card-ingest-sample-upload/files/001-income-summary.csv"
       },
       {
         "name": "source-notes.md",
-        "path": "uploads/source-notes.md"
+        "stored_name": "002-source-notes.md",
+        "path": "card-ingest-sample-upload/files/002-source-notes.md"
       }
     ],
     "messages": [

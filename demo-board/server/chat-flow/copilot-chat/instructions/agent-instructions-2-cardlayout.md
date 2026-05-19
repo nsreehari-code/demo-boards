@@ -29,28 +29,12 @@
 
 ---
 
-## LLM View-Type Guidance (for `kind: "ref"`)
+## Dynamic `ref` Rendering
 
-When a source uses Copilot/LLM and the card renders via a `ref` element, the model should emit a `_view` hint alongside the data.
+When layout depends on a dynamic `ref` view, keep only the presentation goal in
+mind here.
 
-- Keep `_view.kind` within the renderer whitelist only:
-  `table`, `editable-table`, `chart`, `metric`, `list`, `badge`, `text`, `narrative`, `markdown`, `form`, `filter`, `todo`, `alert`
-- Default to `table` when uncertain.
-- Use `editable-table` for user-adjustable tabular rows and include `data.writeTo` to a `card_data` path.
-- Use `chart` only when one clear category/value mapping exists; include `data.chartType` and `data.columns: [labelField, valueField]`.
-- Keep `_view.data` minimal. Static card JSON may override it for safety.
+Use:
 
-Recommended response shape:
-
-```json
-{
-  "<data_key>": [ ... ],
-  "_view": {
-    "kind": "editable-table",
-    "data": {
-      "writeTo": "card_data.<key>",
-      "columns": ["field1", "field2"]
-    }
-  }
-}
-```
+- [agent-instructions.md](c:\Users\sreenaga\ADO\demo-boards\demo-board\server\chat-flow\copilot-chat\instructions\agent-instructions.md) for the supported dynamic view kinds and shared runtime rules
+- `card-authoring` for `_view` authoring heuristics and `ref`-driven card patterns

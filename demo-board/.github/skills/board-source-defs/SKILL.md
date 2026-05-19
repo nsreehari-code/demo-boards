@@ -129,6 +129,6 @@ The last line is machine-readable:
 1. Run `describe-task-executor-capabilities` to see supported kinds.
 2. Pick the appropriate kind for your data source.
 3. Build the `source_defs` entry using the `inputSchema` fields.
-4. Validate the card with the `board-validate-card` skill.
+4. Validate the card with the `ensure-card-correctness` skill.
 5. Probe the source with `probe-source` (and mock projections if needed)
    to confirm it fetches data correctly.

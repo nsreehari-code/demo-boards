@@ -48,6 +48,14 @@
     {
       "bindTo": "sourceError",
       "expr": "$type(fetched_sources.userSummary) = 'string' ? '**Sentinel query failed:** ' & fetched_sources.userSummary : $type(fetched_sources.alertDetails) = 'string' ? '**Sentinel query failed:** ' & fetched_sources.alertDetails : ''"
+    },
+    {
+      "bindTo": "userSummaryView",
+      "expr": "fetched_sources.userSummary"
+    },
+    {
+      "bindTo": "alertDetailsView",
+      "expr": "fetched_sources.alertDetails"
     }
   ],
   "provides": [
@@ -89,7 +97,7 @@
         "kind": "table",
         "label": "Suspected Compromised Users",
         "data": {
-          "bind": "fetched_sources.userSummary",
+          "bind": "computed_values.userSummaryView",
           "columns": [
             "user",
             "alertCount",
@@ -104,7 +112,7 @@
         "kind": "table",
         "label": "Related Alerts Per User",
         "data": {
-          "bind": "fetched_sources.alertDetails",
+          "bind": "computed_values.alertDetailsView",
           "columns": [
             "user",
             "alertName",

@@ -1,7 +1,7 @@
 {
   "id": "card-sentinel-table-search",
   "meta": {
-    "title": "Sentinel Table Search",
+    "title": "Sentinel Table Advanced Search",
     "tags": [
       "sentinel",
       "schema",
@@ -30,6 +30,10 @@
     {
       "bindTo": "status",
       "expr": "$type(fetched_sources.tables) = 'string' ? '**Sentinel table search failed:** ' & fetched_sources.tables : ''"
+    },
+    {
+      "bindTo": "tablesView",
+      "expr": "fetched_sources.tables"
     }
   ],
   "view": {
@@ -63,7 +67,7 @@
         "kind": "table",
         "label": "Matching Tables",
         "data": {
-          "bind": "fetched_sources.tables",
+          "bind": "computed_values.tablesView",
           "maxRows": 20
         }
       }
