@@ -81,7 +81,7 @@ function CardFrame({ label, kind, children }) {
   const showLabel = label && kind !== 'metric' && kind !== 'alert';
   return (
     <div className="w-100 d-flex flex-column">
-      {showLabel ? <div className="small text-muted fw-medium mb-1">{label}</div> : null}
+      {showLabel ? <div className="board-card-frame__label mb-2">{label}</div> : null}
       <div>{children}</div>
     </div>
   );
@@ -99,7 +99,7 @@ function TableView({ data, renderDef }) {
   }, [data]);
 
   if (!Array.isArray(data) || !data.length) {
-    return <p className="text-muted small mb-0">{viewData.placeholder ?? 'No data'}</p>;
+    return <p className="board-text-muted small mb-0">{viewData.placeholder ?? 'No data'}</p>;
   }
 
   const limit = Math.min(data.length, viewData.maxRows ?? 200);
@@ -126,7 +126,7 @@ function TableView({ data, renderDef }) {
   return (
     <div className="d-flex flex-column">
       <div className="table-responsive">
-        <table className="table table-sm table-striped table-hover mb-0">
+        <table className="table table-sm table-striped table-hover board-data-table">
           <thead>
             <tr>
               {columns.map((column, index) => {
@@ -164,7 +164,7 @@ function TableView({ data, renderDef }) {
         </table>
       </div>
       {data.length > limit ? (
-        <p className="text-muted small mt-1 mb-0">Showing {limit} of {data.length} rows</p>
+        <p className="board-text-muted small mt-2 mb-0">Showing {limit} of {data.length} rows</p>
       ) : null}
     </div>
   );
@@ -177,7 +177,7 @@ function FilterView({ data, renderDef, onSave }) {
   const keys = data && typeof data === 'object' && !Array.isArray(data) ? Object.keys(data) : [];
 
   if (!keys.length) {
-    return <p className="text-muted small mb-0">No filter options</p>;
+    return <p className="board-text-muted small mb-0">No filter options</p>;
   }
 
   return (
@@ -187,9 +187,9 @@ function FilterView({ data, renderDef, onSave }) {
         const label = fields[key]?.title ?? key;
         return (
           <div key={key} className="col-12 col-sm-6 col-md-4">
-            <label className="form-label small mb-1">{label}</label>
+            <label className="form-label small mb-1 board-text-muted">{label}</label>
             <select
-              className="form-select form-select-sm"
+              className="form-select form-select-sm board-select"
               value={String(writeValues?.[key] ?? '')}
               onChange={(event) => {
                 const next = {};
@@ -226,10 +226,10 @@ function MetricView({ data, renderDef }) {
   }
 
   return (
-    <div className="text-center py-2">
-      {title ? <div className="text-muted small">{title}</div> : null}
-      <div style={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1.2 }}>{value}</div>
-      {detail ? <div className="small mt-1">{detail}</div> : null}
+    <div className="board-metric">
+      {title ? <div className="board-metric__label">{title}</div> : null}
+      <div className="board-metric__value">{value}</div>
+      {detail ? <div className="board-metric__detail">{detail}</div> : null}
     </div>
   );
 }
@@ -241,7 +241,7 @@ function ListView({ data, renderDef }) {
 
   if (Array.isArray(data)) {
     if (!data.length) {
-      return <p className="text-muted small mb-0">{viewData.placeholder ?? 'Empty'}</p>;
+      return <p className="board-text-muted small mb-0">{viewData.placeholder ?? 'Empty'}</p>;
     }
     if (typeof data[0] === 'string' || typeof data[0] === 'number') {
       const max = viewData.maxRows ?? data.length;
@@ -261,7 +261,7 @@ function ListView({ data, renderDef }) {
       <dl className="row mb-0">
         {Object.entries(data).map(([key, value]) => (
           <React.Fragment key={key}>
-            <dt className="col-sm-5 small text-muted text-truncate">{key}</dt>
+            <dt className="col-sm-5 small board-text-muted text-truncate">{key}</dt>
             <dd className="col-sm-7 small mb-1">{value != null ? String(value) : '—'}</dd>
           </React.Fragment>
         ))}
@@ -274,13 +274,13 @@ function ListView({ data, renderDef }) {
 
 function ChartView({ data, renderDef }) {
   if (!Array.isArray(data) || !data.length) {
-    return <p className="text-muted small mb-0">No chart data</p>;
+    return <p className="board-text-muted small mb-0">No chart data</p>;
   }
 
   const chartType = renderDef?.data?.chartType ?? detectChartType(data);
   return (
     <div className="h-100 d-flex flex-column min-h-0">
-      <div className="small text-muted mb-2">Chart preview ({chartType})</div>
+      <div className="small board-text-muted mb-2">Chart preview ({chartType})</div>
       <TableView data={data} renderDef={renderDef} />
     </div>
   );
@@ -349,10 +349,10 @@ function FormView({ data, renderDef, onSave }) {
               </div>
             ) : (
               <>
-                <label className="form-label small mb-1">{prop.title ?? key}</label>
+                <label className="form-label small mb-1 board-text-muted">{prop.title ?? key}</label>
                 {prop.enum ? (
                   <select
-                    className="form-select form-select-sm"
+                    className="form-select form-select-sm board-select"
                     value={value ?? ''}
                     onChange={(event) => setFieldValue(key, prop, event.target.value)}
                     required={isRequired}
@@ -364,7 +364,7 @@ function FormView({ data, renderDef, onSave }) {
                 ) : (
                   <input
                     type={prop.format === 'date' ? 'date' : (prop.type === 'number' || prop.type === 'integer' ? 'number' : 'text')}
-                    className="form-control form-control-sm"
+                    className="form-control form-control-sm board-input"
                     value={prop.format === 'date' ? (value != null ? String(value).slice(0, 10) : '') : (value ?? '')}
                     min={prop.minimum}
                     max={prop.maximum}
@@ -382,12 +382,12 @@ function FormView({ data, renderDef, onSave }) {
       <div className="col-12 mt-1">
         <button
           type="button"
-          className={`btn btn-sm btn-outline-secondary me-2${dirty ? '' : ' d-none'}`}
+          className={`btn btn-sm btn-outline-secondary board-button me-2${dirty ? '' : ' d-none'}`}
           onClick={() => setJournal({})}
         >
           Discard
         </button>
-        <button type="submit" className={`btn btn-sm btn-primary${dirty ? '' : ' d-none'}`}>
+        <button type="submit" className={`btn btn-sm btn-primary board-button${dirty ? '' : ' d-none'}`}>
           Save
         </button>
       </div>
@@ -409,7 +409,7 @@ function NotesView({ data, renderDef, onSave }) {
   return (
     <div className="h-100 d-flex flex-column min-h-0">
       <textarea
-        className="form-control form-control-sm flex-grow-1"
+        className="form-control form-control-sm board-textarea flex-grow-1"
         rows={8}
         placeholder="Write markdown..."
         value={effectiveContent}
@@ -421,14 +421,14 @@ function NotesView({ data, renderDef, onSave }) {
       <div className="mt-2">
         <button
           type="button"
-          className={`btn btn-sm btn-outline-secondary me-2${dirty ? '' : ' d-none'}`}
+          className={`btn btn-sm btn-outline-secondary board-button me-2${dirty ? '' : ' d-none'}`}
           onClick={() => setJournal(null)}
         >
           Discard
         </button>
         <button
           type="button"
-          className={`btn btn-sm btn-primary${dirty ? '' : ' d-none'}`}
+          className={`btn btn-sm btn-primary board-button${dirty ? '' : ' d-none'}`}
           onClick={() => onSave?.(effectiveContent, { kind: 'notes', renderDef, writeTo: renderDef?.data?.writeTo })}
         >
           Save
@@ -461,10 +461,10 @@ function EditableTableView({ data, renderDef, onSave }) {
   return (
     <div className="h-100 d-flex flex-column min-h-0">
       {(!columns.length && !canAdd) ? (
-        <p className="text-muted small mb-0">{viewData.placeholder ?? 'No data'}</p>
+        <p className="board-text-muted small mb-0">{viewData.placeholder ?? 'No data'}</p>
       ) : (
         <div className="table-responsive flex-grow-1 min-h-0">
-          <table className="table table-sm table-bordered mb-0">
+          <table className="table table-sm table-bordered mb-0 board-data-table">
             <thead>
               <tr>
                 {columns.map((column) => <th key={column} className="small text-nowrap">{column}</th>)}
@@ -481,7 +481,7 @@ function EditableTableView({ data, renderDef, onSave }) {
                       <td key={column} className="p-0">
                         <input
                           type={isNumber ? 'number' : 'text'}
-                          className="form-control form-control-sm border-0 rounded-0"
+                          className="form-control form-control-sm board-input border-0 rounded-0"
                           value={row?.[column] ?? ''}
                           step={isNumber ? 'any' : undefined}
                           onChange={(event) => {
@@ -499,7 +499,8 @@ function EditableTableView({ data, renderDef, onSave }) {
                     <td className="text-center align-middle p-0">
                       <button
                         type="button"
-                        className="btn btn-sm btn-link text-danger p-0"
+                        className="btn btn-sm btn-link p-0"
+                        style={{ color: 'var(--status-failed)' }}
                         title="Remove row"
                         onClick={() => updateRows(effectiveRows.filter((_, index) => index !== rowIndex))}
                       >
@@ -510,7 +511,7 @@ function EditableTableView({ data, renderDef, onSave }) {
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={columns.length + (canDelete ? 1 : 0)} className="text-muted small text-center">
+                  <td colSpan={columns.length + (canDelete ? 1 : 0)} className="board-text-muted small text-center">
                     {viewData.placeholder ?? 'No rows'}
                   </td>
                 </tr>
@@ -523,7 +524,7 @@ function EditableTableView({ data, renderDef, onSave }) {
         {canAdd ? (
           <button
             type="button"
-            className="btn btn-sm btn-outline-secondary me-1"
+            className="btn btn-sm btn-outline-secondary board-button me-1"
             onClick={() => {
               const nextRow = {};
               columns.forEach((column) => {
@@ -537,14 +538,14 @@ function EditableTableView({ data, renderDef, onSave }) {
         ) : null}
         <button
           type="button"
-          className={`btn btn-sm btn-outline-secondary me-1${dirty ? '' : ' d-none'}`}
+          className={`btn btn-sm btn-outline-secondary board-button me-1${dirty ? '' : ' d-none'}`}
           onClick={() => setJournalRows(null)}
         >
           Discard
         </button>
         <button
           type="button"
-          className={`btn btn-sm btn-primary${dirty ? '' : ' d-none'}`}
+          className={`btn btn-sm btn-primary board-button${dirty ? '' : ' d-none'}`}
           onClick={() => onSave?.(effectiveRows, { kind: 'editable-table', renderDef, writeTo: viewData.writeTo })}
         >
           Save
@@ -591,7 +592,8 @@ function TodoView({ data, renderDef, onSave }) {
             <span className={`small flex-grow-1${item.done ? ' text-decoration-line-through text-muted' : ''}`}>{item.text}</span>
             <button
               type="button"
-              className="btn btn-sm btn-link text-danger p-0"
+              className="btn btn-sm btn-link p-0"
+              style={{ color: 'var(--status-failed)' }}
               title="Remove"
               onClick={() => save(state.pending.filter((_, itemIndex) => itemIndex !== index))}
             >
@@ -617,7 +619,7 @@ function TodoComposer({ onAdd }) {
     <div className="input-group input-group-sm mt-2">
       <input
         type="text"
-        className="form-control"
+        className="form-control board-input"
         placeholder="Add item..."
         value={value}
         onChange={(event) => setValue(event.target.value)}
@@ -632,7 +634,7 @@ function TodoComposer({ onAdd }) {
       />
       <button
         type="button"
-        className="btn btn-outline-secondary"
+        className="btn btn-outline-secondary board-button"
         onClick={() => {
           const text = value.trim();
           if (!text) return;
@@ -651,28 +653,28 @@ function AlertView({ data, renderDef }) {
   const value = typeof data === 'number' ? data : (data?.value ?? null);
 
   let level = 'unknown';
-  let color = 'secondary';
+  let tone = 'board-tone--unknown';
   if (value != null) {
     if (thresholds.green && evalThreshold(value, thresholds.green)) {
       level = 'green';
-      color = 'success';
+      tone = 'board-tone--green';
     } else if (thresholds.amber && evalThreshold(value, thresholds.amber)) {
       level = 'amber';
-      color = 'warning';
+      tone = 'board-tone--amber';
     } else {
       level = 'red';
-      color = 'danger';
+      tone = 'board-tone--red';
     }
   }
 
   return (
-    <div className="d-flex align-items-center gap-3 py-2">
-      <span className={`rounded-circle bg-${color}`} style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+    <div className={`board-alert ${tone}`}>
+      <span className="board-alert__dot" />
       <div className="flex-grow-1">
-        <div className="fw-bold">{value != null ? String(value) : '—'}</div>
-        {renderDef?.label ? <div className="text-muted small">{renderDef.label}</div> : null}
+        <div className="board-alert__value">{value != null ? String(value) : '—'}</div>
+        {renderDef?.label ? <div className="board-alert__label">{renderDef.label}</div> : null}
       </div>
-      <span className={`badge bg-${color} fs-6`}>{level}</span>
+      <span className={`board-badge ${tone}`}>{level}</span>
     </div>
   );
 }
@@ -680,7 +682,7 @@ function AlertView({ data, renderDef }) {
 function NarrativeView({ data }) {
   const text = typeof data === 'string' ? data : (data?.text ?? '');
   if (!text) {
-    return <p className="text-muted small fst-italic mb-0">No narrative yet. Click refresh to generate.</p>;
+    return <p className="board-text-muted small fst-italic mb-0">No narrative yet. Click refresh to generate.</p>;
   }
   return <div className="small">{text}</div>;
 }
@@ -688,9 +690,20 @@ function NarrativeView({ data }) {
 function BadgeView({ data, renderDef }) {
   const colorMap = renderDef?.data?.colorMap ?? {};
   const value = data != null ? String(data) : '';
-  const bootstrapMap = { green: 'success', amber: 'warning', red: 'danger', blue: 'primary' };
-  const color = bootstrapMap[colorMap[value]] ?? colorMap[value] ?? 'secondary';
-  return <span className={`badge bg-${color}`}>{value}</span>;
+  const toneKey = colorMap[value] ?? 'secondary';
+  const toneMap = {
+    green: 'board-tone--green',
+    amber: 'board-tone--amber',
+    red: 'board-tone--red',
+    blue: 'board-tone--running',
+    primary: 'board-tone--running',
+    success: 'board-tone--green',
+    warning: 'board-tone--amber',
+    danger: 'board-tone--red',
+    secondary: 'board-tone--secondary',
+  };
+  const tone = toneMap[toneKey] ?? `board-tone--${toneKey}`;
+  return <span className={`board-badge ${tone}`}>{value}</span>;
 }
 
 function TextView({ data, renderDef }) {
@@ -703,7 +716,7 @@ function TextView({ data, renderDef }) {
 
   if (format === 'file-links') {
     if (!Array.isArray(data) || data.length === 0) {
-      return <div className="text-muted small">No files uploaded</div>;
+      return <div className="board-text-muted small">No files uploaded</div>;
     }
     return (
       <div>
@@ -715,9 +728,9 @@ function TextView({ data, renderDef }) {
           return (
             <div key={`${file.stored_name}-${index}`} className="mb-2">
               {href ? (
-                <a href={href} className="btn btn-sm btn-outline-secondary">{name}{size}</a>
+                <a href={href} className="btn btn-sm btn-outline-secondary board-file-link">{name}{size}</a>
               ) : (
-                <span className="btn btn-sm btn-outline-secondary disabled">{name}{size}</span>
+                <span className="btn btn-sm btn-outline-secondary board-file-link disabled">{name}{size}</span>
               )}
             </div>
           );
@@ -728,9 +741,9 @@ function TextView({ data, renderDef }) {
 
   const Tag = style === 'heading' ? 'h4' : 'div';
   const className = style === 'muted'
-    ? 'text-muted small'
+    ? 'board-text-muted small'
     : style === 'muted-italic'
-      ? 'text-muted small fst-italic'
+      ? 'board-text-muted small fst-italic'
       : style === 'heading'
         ? 'fw-bold'
         : 'small';
@@ -752,39 +765,39 @@ function MarkdownView({ data }) {
   if (!normalizedText) return null;
 
   return (
-    <div className="small mb-0 markdown-body lh-sm" style={{ color: 'var(--bs-body-color)' }}>
+    <div className="small mb-0 markdown-body lh-sm board-markdown" style={{ color: 'var(--color-text)' }}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ node, ...props }) => <h1 className="h5 fw-bold mb-2 pb-1 border-bottom" {...props} />,
-          h2: ({ node, ...props }) => <h2 className="fs-6 fw-bold text-uppercase text-secondary mb-2 mt-3" {...props} />,
+          h2: ({ node, ...props }) => <h2 className="fs-6 fw-bold text-uppercase board-text-soft mb-2 mt-3" {...props} />,
           h3: ({ node, ...props }) => <h3 className="fs-6 fw-semibold mb-2 mt-2" {...props} />,
-          h4: ({ node, ...props }) => <h4 className="small fw-semibold text-body mb-1 mt-2" {...props} />,
-          h5: ({ node, ...props }) => <h5 className="small fw-semibold text-body mb-1 mt-2" {...props} />,
-          h6: ({ node, ...props }) => <h6 className="small fw-semibold text-secondary mb-1 mt-2" {...props} />,
+          h4: ({ node, ...props }) => <h4 className="small fw-semibold mb-1 mt-2" {...props} />,
+          h5: ({ node, ...props }) => <h5 className="small fw-semibold mb-1 mt-2" {...props} />,
+          h6: ({ node, ...props }) => <h6 className="small fw-semibold board-text-soft mb-1 mt-2" {...props} />,
           p: ({ node, ...props }) => <p className="mb-1" {...props} />,
           ul: ({ node, ...props }) => <ul className="mb-1 ps-3" {...props} />,
           ol: ({ node, ...props }) => <ol className="mb-1 ps-3" {...props} />,
           li: ({ node, ...props }) => <li className="mb-1" {...props} />,
           a: ({ node, ...props }) => <a className="link-primary text-decoration-none" target="_blank" rel="noreferrer" {...props} />,
-          blockquote: ({ node, ...props }) => <blockquote className="border-start border-3 border-secondary-subtle ps-2 text-muted fst-italic my-2" {...props} />,
+          blockquote: ({ node, ...props }) => <blockquote className="border-start border-3 ps-2 board-text-muted fst-italic my-2" style={{ borderColor: 'var(--color-border-strong)' }} {...props} />,
           hr: ({ node, ...props }) => <hr className="my-2 opacity-25" {...props} />,
-          strong: ({ node, ...props }) => <strong className="fw-semibold text-body" {...props} />,
+          strong: ({ node, ...props }) => <strong className="fw-semibold" {...props} />,
           code: ({ inline, className, children, ...props }) => (
             inline ? (
-              <code className="bg-body-tertiary rounded px-1 py-0 text-body" {...props}>{children}</code>
+              <code className="board-code rounded px-1 py-0" style={{ background: 'rgba(255, 255, 255, 0.06)' }} {...props}>{children}</code>
             ) : (
-              <code className={`${className ?? ''} small`.trim()} {...props}>{children}</code>
+              <code className={`${className ?? ''} board-code small`.trim()} {...props}>{children}</code>
             )
           ),
-          pre: ({ node, ...props }) => <pre className="bg-body-tertiary border rounded p-2 mb-2 overflow-auto" style={{ lineHeight: 1.4 }} {...props} />,
+          pre: ({ node, ...props }) => <pre className="board-code-block p-2 mb-2 overflow-auto" style={{ lineHeight: 1.4 }} {...props} />,
           table: ({ node, ...props }) => (
             <div className="table-responsive my-2">
-              <table className="table table-sm table-striped align-middle mb-0" {...props} />
+              <table className="table table-sm table-striped align-middle mb-0 board-data-table" {...props} />
             </div>
           ),
-          thead: ({ node, ...props }) => <thead className="table-light" {...props} />,
-          img: ({ node, ...props }) => <img className="img-fluid rounded border my-2" loading="lazy" {...props} />,
+          thead: ({ node, ...props }) => <thead {...props} />,
+          img: ({ node, ...props }) => <img className="img-fluid rounded my-2" style={{ border: '1px solid var(--color-border)' }} loading="lazy" {...props} />,
         }}
       >
         {normalizedText}
@@ -808,7 +821,7 @@ function ActionsView({ data, renderDef, onSave }) {
         <button
           key={button.id}
           type="button"
-          className={`btn btn-${button.style ?? 'outline-secondary'} btn-${button.size ?? 'sm'}`}
+          className={`btn btn-${button.style ?? 'outline-secondary'} btn-${button.size ?? 'sm'} board-action-button`}
           disabled={!!button.disabled}
           onClick={() => onSave?.(null, { kind: 'actions', renderDef, buttonId: button.id, elemId: renderDef?.id })}
         >

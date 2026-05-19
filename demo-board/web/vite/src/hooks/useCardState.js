@@ -1,5 +1,5 @@
 import { dispatchAction, refreshCard, patchCard, uploadFileForChat } from '../lib/client.js';
-import { useBoardState } from './useBoardState.js';
+import { resolveCanRefresh, useBoardState } from './useBoardState.js';
 
 export function useCardState(boardId, cardId) {
   const board = useBoardState(boardId);
@@ -15,8 +15,10 @@ export function useCardState(boardId, cardId) {
     }
   }
 
+  const canRefresh = resolveCanRefresh(cardContent);
+
   const cardActions = {
-    refresh: () => refreshCard(boardId, cardId),
+    refresh: () => (canRefresh ? refreshCard(boardId, cardId) : Promise.resolve(null)),
     patch: (patch) => patchCard(boardId, cardId, patch),
     dispatchAction: (type, payload = {}) => dispatchAction(boardId, cardId, type, payload),
     uploadFileForChat: (file) => uploadFileForChat(boardId, cardId, file),
@@ -30,6 +32,7 @@ export function useCardState(boardId, cardId) {
   return {
     boardSseClientId: board.sseClientId ?? null,
     cardContent,
+    canRefresh,
     cardData,
     cardRuntime: board.cardRuntimes[cardId] ?? null,
     chatState,

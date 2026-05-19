@@ -8,18 +8,18 @@ const CHAT_PROCESSING_PULSE_STYLE = {
   transformOrigin: 'center',
 };
 
-function getStatusBadgeClass(status) {
+function getStatusTone(status) {
   switch (status) {
     case 'completed':
-      return 'bg-success-subtle text-success-emphasis';
+      return 'board-tone--completed';
     case 'running':
-      return 'bg-primary-subtle text-primary-emphasis';
+      return 'board-tone--running';
     case 'failed':
-      return 'bg-danger-subtle text-danger-emphasis';
+      return 'board-tone--failed';
     case 'blocked':
-      return 'bg-warning-subtle text-warning-emphasis';
+      return 'board-tone--blocked';
     default:
-      return 'bg-secondary-subtle text-secondary-emphasis';
+      return 'board-tone--fresh';
   }
 }
 
@@ -35,22 +35,22 @@ function ChatModal({ boardId, cardId, title, onClose }) {
 
   return (
     <div
-      className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
-      style={{ background: 'rgba(0, 0, 0, 0.45)', zIndex: 1200, padding: '1rem' }}
+      className="board-modal position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+      style={{ zIndex: 1200, padding: '1rem' }}
       onClick={onClose}
     >
       <div
-        className="card border-0 shadow-lg w-100"
+        className="board-modal__dialog w-100"
         style={{ maxWidth: '960px', height: 'min(90vh, 720px)' }}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="card-header d-flex align-items-center justify-content-between gap-2 bg-transparent">
-          <div className="fw-semibold text-truncate">Chat: {title}</div>
-          <button type="button" className="btn btn-sm btn-outline-secondary" onClick={onClose} title="Close chat">
+        <div className="board-modal__header d-flex align-items-center justify-content-between gap-2 px-3 py-3">
+          <div className="board-modal__title text-truncate">Chat: {title}</div>
+          <button type="button" className="board-icon-button" onClick={onClose} title="Close chat">
             <i className="bi bi-x-lg" />
           </button>
         </div>
-        <div className="card-body p-0 min-h-0">
+        <div className="p-0 min-h-0" style={{ height: 'calc(100% - 65px)' }}>
           <ChatPane boardId={boardId} cardId={cardId} />
         </div>
       </div>
@@ -66,25 +66,29 @@ export function CardShell({ boardId, cardId }) {
 
   const title = cardState.cardContent.meta?.title ?? cardId;
   const status = cardState.cardRuntime?.status ?? 'fresh';
+  const statusTone = getStatusTone(status);
   const refreshDisabled = cardState.cardRuntime?.status === 'running';
   const chatProcessing = cardState.chatState?.processing === true;
-  const showRefresh = (cardState.cardContent.source_defs?.length ?? 0) > 0;
-  console.log(cardState);
+  const showRefresh = cardState.canRefresh === true;
 
   return (
     <>
       <style>{`@keyframes card-shell-chat-pulse { 0%, 100% { opacity: 0.35; transform: scale(1); } 50% { opacity: 1; transform: scale(1.24); } }`}</style>
-      <div className="card h-100 shadow-sm border-0 rounded-3">
-        <div className="card-header d-flex align-items-center justify-content-between gap-2 py-2 px-3 bg-transparent border-bottom">
-          <div className="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
-            <div className="fw-semibold text-truncate min-w-0">{title}</div>
-            <span className={`badge rounded-pill small flex-shrink-0 ${getStatusBadgeClass(status)}`}>{status}</span>
+      <div className={`board-card ${statusTone}`}>
+        <div className="board-card__header">
+          <div className="board-card__title-wrap">
+            <div className="board-card__title-block">
+              <div className="board-card__title text-truncate">{title}</div>
+              <div className="board-card__meta">
+                <span className={`board-status-pill ${statusTone}`}>{status}</span>
+              </div>
+            </div>
           </div>
-          <div className="d-flex align-items-center gap-1 flex-shrink-0">
+          <div className="board-card__actions">
             {showRefresh ? (
               refreshDisabled ? (
                 <span
-                  className="btn btn-sm border-0 bg-transparent text-secondary py-0 px-2 disabled d-inline-flex align-items-center justify-content-center"
+                  className="board-icon-button disabled"
                   aria-label="Refreshing"
                   title="Refreshing"
                 >
@@ -93,7 +97,7 @@ export function CardShell({ boardId, cardId }) {
               ) : (
                 <button
                   type="button"
-                  className="btn btn-sm border-0 bg-transparent text-secondary py-0 px-2"
+                  className="board-icon-button"
                   onClick={() => cardState.cardActions?.refresh()}
                   title="Refresh"
                 >
@@ -103,7 +107,7 @@ export function CardShell({ boardId, cardId }) {
             ) : null}
             <button
               type="button"
-              className="btn btn-sm border-0 bg-transparent text-secondary py-0 px-2"
+              className="board-icon-button"
               onClick={() => setChatOpen(true)}
               title={chatProcessing ? 'Chat processing' : 'Open chat'}
             >
@@ -111,7 +115,7 @@ export function CardShell({ boardId, cardId }) {
             </button>
           </div>
         </div>
-        <div className="card-body p-3">
+        <div className="board-card__body">
           <CardCore boardId={boardId} cardId={cardId} />
         </div>
       </div>

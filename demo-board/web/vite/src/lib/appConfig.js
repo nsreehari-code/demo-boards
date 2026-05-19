@@ -1,5 +1,7 @@
 import serverConfig from '../../../../server-config.json';
 
+const DEFAULT_REFRESH_ALL_INTERVAL_MS = 5 * 60 * 1000;
+
 function resolveDefaultBoard(config) {
   if (typeof config?.defaultBoard === 'string' && config.defaultBoard.trim()) {
     return config.defaultBoard.trim();
@@ -45,10 +47,29 @@ function resolvePageTitle(config) {
   return 'Live Boards';
 }
 
+function resolvePageSubtitle(config) {
+  if (typeof config?.subtitle === 'string' && config.subtitle.trim()) {
+    return config.subtitle.trim();
+  }
+
+  return 'Live operational intelligence for agent workflows';
+}
+
+function resolveRefreshAllIntervalMs(config) {
+  const configured = Number(config?.refreshAllIntervalMs);
+  if (Number.isFinite(configured) && configured > 0) {
+    return configured;
+  }
+
+  return DEFAULT_REFRESH_ALL_INTERVAL_MS;
+}
+
 export const DEFAULT_BOARD_ID = resolveDefaultBoard(serverConfig);
 export const DEFAULT_BOARD = resolveDefaultBoardConfig(serverConfig);
 export const DEFAULT_BOARD_LABEL = typeof DEFAULT_BOARD?.label === 'string' && DEFAULT_BOARD.label.trim()
   ? DEFAULT_BOARD.label.trim()
   : DEFAULT_BOARD_ID;
 export const PAGE_TITLE = resolvePageTitle(serverConfig);
+export const PAGE_SUBTITLE = resolvePageSubtitle(serverConfig);
+export const REFRESH_ALL_INTERVAL_MS = resolveRefreshAllIntervalMs(serverConfig);
 export const SERVER = resolveServerOrigin(serverConfig);

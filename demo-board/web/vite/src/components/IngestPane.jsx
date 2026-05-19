@@ -6,9 +6,9 @@ const INGEST_PANE_LAYOUTS = {
   vertical: {
     asideStyle: {
       position: 'fixed',
-      top: '68px',
+      top: 'calc(var(--nav-height) + 0.5rem)',
       left: '12px',
-      height: 'calc(100dvh - 80px)',
+      height: 'calc(100dvh - var(--nav-height) - 1rem)',
       zIndex: 1040,
       display: 'flex',
       alignItems: 'flex-start',
@@ -40,34 +40,34 @@ function IngestPaneNav({ cards, idx, onPrev, onNext }) {
   const title = card?.meta?.title ?? card?.id ?? '—';
   const phase = card?.card_data?.phase ?? 'active';
   const total = cards.length;
+  const phaseTone = phase === 'done' ? 'board-tone--done' : 'board-tone--active';
 
   return (
-    <div
-      className="d-flex align-items-center gap-2 px-3 py-2 border-bottom"
-      style={{ borderColor: 'rgba(0,0,0,.08)' }}
-    >
-      <span className="fw-semibold text-truncate flex-grow-1 small">{title}</span>
-      <span className={`badge rounded-pill small ${phase === 'done' ? 'bg-success-subtle text-success-emphasis' : 'bg-primary-subtle text-primary-emphasis'}`}>
+    <div className="board-ingest-nav">
+      <div className="min-w-0 flex-grow-1">
+        <div className="board-ingest-nav__title text-truncate">{title}</div>
+      </div>
+      <span className={`board-phase-pill ${phaseTone}`}>
         {phase}
       </span>
       <button
-        className="btn btn-sm btn-link text-secondary-emphasis py-0 px-1 opacity-55"
-        style={{ textDecoration: 'none' }}
+        type="button"
+        className="board-icon-button"
         onClick={onPrev}
         disabled={idx === 0}
         aria-label="Previous card"
       >
-        ▲
+        <i className="bi bi-chevron-up" />
       </button>
-      <span className="small text-muted">{total > 0 ? `${idx + 1} / ${total}` : '—'}</span>
+      <span className="board-ingest-nav__counter">{total > 0 ? `${idx + 1} / ${total}` : '—'}</span>
       <button
-        className="btn btn-sm btn-link text-secondary-emphasis py-0 px-1 opacity-55"
-        style={{ textDecoration: 'none' }}
+        type="button"
+        className="board-icon-button"
         onClick={onNext}
         disabled={idx >= total - 1}
         aria-label="Next card"
       >
-        ▼
+        <i className="bi bi-chevron-down" />
       </button>
     </div>
   );
@@ -100,30 +100,39 @@ export function IngestPane({ boardId, includeFilters = [], layoutStrategy = 'ver
   if (!board) return null;
 
   return (
-    <aside aria-label="Ingest pane" style={layout.asideStyle}>
+    <aside aria-label="Ingest pane" className={`board-ingest-layer${visible ? ' is-open' : ''}`} style={layout.asideStyle}>
       <button
         type="button"
-        className="btn btn-sm btn-secondary me-1 mt-1"
-        style={{ pointerEvents: 'auto', zIndex: 1050 }}
+        className={`board-ingest-toggle d-inline-flex align-items-center justify-content-center${visible ? ' is-open' : ''}`}
         onClick={() => setVisible((current) => !current)}
         aria-pressed={visible}
         title={visible ? 'Hide ingest pane' : 'Show ingest pane'}
       >
-        {visible ? '‹' : '›'}
+        <i className={`bi ${visible ? 'bi-chevron-left' : 'bi-chevron-right'}`} />
       </button>
 
       {visible ? (
-        <div className="card border-0 shadow-lg rounded-3 d-flex flex-column" style={layout.railStyle}>
-          <IngestPaneNav
-            cards={cards}
-            idx={safeIdx}
-            onPrev={() => setIdx((current) => Math.max(0, current - 1))}
-            onNext={() => setIdx((current) => Math.min(ingestCardIds.length - 1, current + 1))}
-          />
-          <div className="flex-grow-1 min-h-0 p-3">
-            {cardId ? <IngestCard boardId={boardId} cardId={cardId} /> : null}
+        <>
+          <div className="board-ingest-backdrop" aria-hidden="true" />
+          <div className="board-ingest-pane d-flex flex-column" style={layout.railStyle}>
+            <div className="board-ingest-pane__header">
+              <div>
+                <div className="board-ingest-pane__eyebrow">Ingest</div>
+                <div className="board-ingest-pane__title">Active intake queue</div>
+              </div>
+              <div className="board-ingest-pane__count">{ingestCardIds.length} cards</div>
+            </div>
+            <IngestPaneNav
+              cards={cards}
+              idx={safeIdx}
+              onPrev={() => setIdx((current) => Math.max(0, current - 1))}
+              onNext={() => setIdx((current) => Math.min(ingestCardIds.length - 1, current + 1))}
+            />
+            <div className="board-ingest-pane__body flex-grow-1 min-h-0">
+              {cardId ? <IngestCard boardId={boardId} cardId={cardId} /> : null}
+            </div>
           </div>
-        </div>
+        </>
       ) : null}
     </aside>
   );

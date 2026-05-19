@@ -1,5 +1,6 @@
 {
   "port": 7799,
+  "subtitle": "Live operational intelligence for agent workflows",
   "prestart": [
     "node ./server/sync-copilot-mcp-config.js --refresh"
   ],

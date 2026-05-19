@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import { SERVER, initBoard } from '../lib/client.js';
+import { SERVER, initBoard, refreshCard } from '../lib/client.js';
 
 const boardStores = new Map();
 
@@ -77,6 +77,10 @@ function normalizeFilterFns(filterFns) {
   return (Array.isArray(filterFns) ? filterFns : [filterFns]).filter((filterFn) => typeof filterFn === 'function');
 }
 
+export function resolveCanRefresh(cardContent) {
+  return (cardContent?.source_defs?.length ?? 0) > 0;
+}
+
 function buildBoardCardState(cardId, cardContents, cardRuntimes, chatStates, dataObjects) {
   const cardContent = cardContents[cardId] ?? null;
   const requiresDataObjects = {};
@@ -89,6 +93,7 @@ function buildBoardCardState(cardId, cardContents, cardRuntimes, chatStates, dat
   return {
     cardId,
     cardContent,
+    canRefresh: resolveCanRefresh(cardContent),
     cardData: cardContent?.card_data ?? {},
     cardRuntime: cardRuntimes[cardId] ?? null,
     chatState: chatStates[cardId] ?? null,
@@ -248,6 +253,13 @@ export function useBoardState(boardId) {
   // chatStates: chat state keyed by cardId
   const chatStates = raw.chatsById ?? {};
 
+  const refreshableCardIds = [];
+  for (const cardId of (raw.cardIds ?? [])) {
+    if (resolveCanRefresh(cardContents[cardId])) {
+      refreshableCardIds.push(cardId);
+    }
+  }
+
   const filterCards = (filterFns = []) => {
     const filters = normalizeFilterFns(filterFns);
     const matchedCardIds = new Set();
@@ -277,6 +289,9 @@ export function useBoardState(boardId) {
 
   const boardActions = {
     initBoard: () => initBoard(boardId),
+    refreshAll: () => Promise.allSettled(
+      refreshableCardIds.map((cardId) => refreshCard(boardId, cardId)),
+    ),
   };
 
   return {
@@ -288,6 +303,8 @@ export function useBoardState(boardId) {
     boardStatus,
     dataObjects,
     chatStates,
+    refreshableCardIds,
+    hasRefreshableCards: refreshableCardIds.length > 0,
     filterCards,
     excludedCards,
     boardActions,
