@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn, spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 
 const workspaceDir = path.resolve(__dirname, '..');
 const tempDir = path.join(workspaceDir, '.tmp');
@@ -15,6 +15,26 @@ const npmExecPath = typeof process.env.npm_execpath === 'string' && process.env.
 const httpServerCli = require.resolve('http-server/bin/http-server');
 const isDevMode = process.argv.includes('--dev');
 const label = isDevMode ? 'dev:servers' : 'start:servers';
+
+function getExpectedEndpoint(name) {
+  if (name === 'board-server') {
+    return 'http://127.0.0.1:7799';
+  }
+
+  if (name === 'mcp-server') {
+    return 'http://127.0.0.1:7801/mcp';
+  }
+
+  if (name === 'vite') {
+    return 'http://127.0.0.1:5510';
+  }
+
+  if (name === 'frontend') {
+    return 'http://127.0.0.1:8000';
+  }
+
+  return 'n/a';
+}
 
 function createNpmProcess(name, args) {
   if (npmExecPath) {
@@ -71,89 +91,40 @@ function getLiveProcesses(state) {
   return state.processes.filter((entry) => isPidAlive(entry.pid));
 }
 
-function toPowerShellSingleQuoted(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
-function spawnHiddenWindowsProcess(definition, stdoutLogPath, stderrLogPath) {
-  const command = [
-    `$env:FORCE_COLOR = '1'`,
-    `$process = Start-Process -FilePath ${toPowerShellSingleQuoted(definition.command)} `
-      + `-ArgumentList @(${definition.args.map(toPowerShellSingleQuoted).join(', ')}) `
-      + `-WorkingDirectory ${toPowerShellSingleQuoted(definition.cwd)} `
-      + `-WindowStyle Hidden `
-      + `-RedirectStandardOutput ${toPowerShellSingleQuoted(stdoutLogPath)} `
-      + `-RedirectStandardError ${toPowerShellSingleQuoted(stderrLogPath)} `
-      + `-PassThru`,
-    '$process.Id',
-  ].join('; ');
-  const encodedCommand = Buffer.from(command, 'utf16le').toString('base64');
-  const result = spawnSync('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-EncodedCommand',
-    encodedCommand,
-  ], {
-    cwd: definition.cwd,
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-
-  if (result.status !== 0) {
-    throw new Error((result.stderr || result.stdout || 'Failed to start hidden Windows process.').trim());
-  }
-
-  const pid = Number.parseInt(String(result.stdout).trim(), 10);
-  if (!Number.isInteger(pid) || pid <= 0) {
-    throw new Error(`Failed to capture pid for ${definition.name}.`);
-  }
-
-  return pid;
-}
-
 function spawnDetachedProcess(definition) {
   const logPath = path.join(logDir, `${definition.name}.log`);
   const errorLogPath = path.join(logDir, `${definition.name}.err.log`);
 
-  if (process.platform === 'win32') {
-    const pid = spawnHiddenWindowsProcess(definition, logPath, errorLogPath);
+  let command = definition.command;
+  let args = definition.args;
 
-    return {
-      name: definition.name,
-      pid,
-      logPath: path.relative(workspaceDir, logPath).replace(/\\/g, '/'),
-      errorLogPath: path.relative(workspaceDir, errorLogPath).replace(/\\/g, '/'),
-      command: definition.command,
-      args: definition.args,
-      cwd: path.relative(workspaceDir, definition.cwd).replace(/\\/g, '/'),
-    };
+  // On Windows, .cmd/.bat files must be wrapped in cmd.exe so that windowsHide:true
+  // suppresses the console window. Using shell:true is unreliable with detached processes.
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(command)) {
+    args = ['/d', '/c', command, ...args];
+    command = process.env.COMSPEC || 'cmd.exe';
   }
 
-  const outputFd = fs.openSync(logPath, 'a');
-  const spawnOptions = {
+  const outFd = fs.openSync(logPath, 'a');
+  const errFd = fs.openSync(errorLogPath, 'a');
+
+  const child = spawn(command, args, {
     cwd: definition.cwd,
     detached: true,
-    stdio: ['ignore', outputFd, outputFd],
-    env: {
-      ...process.env,
-      FORCE_COLOR: '1',
-    },
+    stdio: ['ignore', outFd, errFd],
+    env: { ...process.env, FORCE_COLOR: '1' },
     windowsHide: true,
-  };
-  const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(definition.command);
-  const child = needsShell
-    ? spawn([definition.command, ...definition.args].join(' '), {
-        ...spawnOptions,
-        shell: true,
-      })
-    : spawn(definition.command, definition.args, spawnOptions);
+  });
 
+  fs.closeSync(outFd);
+  fs.closeSync(errFd);
   child.unref();
 
   return {
     name: definition.name,
     pid: child.pid,
     logPath: path.relative(workspaceDir, logPath).replace(/\\/g, '/'),
+    errorLogPath: path.relative(workspaceDir, errorLogPath).replace(/\\/g, '/'),
     command: definition.command,
     args: definition.args,
     cwd: path.relative(workspaceDir, definition.cwd).replace(/\\/g, '/'),
@@ -203,9 +174,11 @@ const state = {
 
 fs.writeFileSync(pidFile, JSON.stringify(state, null, 2) + '\n', 'utf-8');
 
-console.log(`[${label}] Started background processes:`);
+console.log(`[${label}] Started services:`);
 for (const processInfo of startedProcesses) {
-  console.log(`- ${processInfo.name}: pid ${processInfo.pid}, log ${processInfo.logPath}`);
+  console.log(
+    `- ${processInfo.name}: pid ${processInfo.pid}, endpoint ${getExpectedEndpoint(processInfo.name)}, log ${processInfo.logPath}`
+  );
 }
 console.log(`[${label}] Expected endpoints:`);
 console.log('- board-server: http://127.0.0.1:7799');
