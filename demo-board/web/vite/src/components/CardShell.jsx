@@ -50,7 +50,7 @@ function ChatModal({ boardId, cardId, title, onClose }) {
             <i className="bi bi-x-lg" />
           </button>
         </div>
-        <div className="p-0 min-h-0" style={{ height: 'calc(100% - 65px)' }}>
+        <div className="board-modal__body p-0" style={{ height: 'calc(100% - 65px)' }}>
           <ChatPane boardId={boardId} cardId={cardId} />
         </div>
       </div>
@@ -80,7 +80,7 @@ export function CardShell({ boardId, cardId }) {
             <div className="board-card__title-block">
               <div className="board-card__title text-truncate">{title}</div>
               <div className="board-card__meta">
-                <span className={`board-status-pill ${statusTone}`}>{status}</span>
+                {status !== 'completed' ? <span className={`board-status-pill ${statusTone}`}>{status}</span> : null}
               </div>
             </div>
           </div>

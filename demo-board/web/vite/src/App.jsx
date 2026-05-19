@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useBoardState } from './hooks/useBoardState.js';
 import { MainBoard }  from './components/MainBoard.jsx';
 import { DEFAULT_BOARD_ID, PAGE_SUBTITLE, PAGE_TITLE, REFRESH_ALL_INTERVAL_MS } from './lib/appConfig.js';
@@ -18,6 +18,14 @@ export default function App() {
   const canRefreshAll = board?.hasRefreshableCards === true;
   const [remainingMs, setRemainingMs] = useState(REFRESH_ALL_INTERVAL_MS);
   const [refreshingAll, setRefreshingAll] = useState(false);
+  const refreshAllRef = useRef(null);
+  const isMountedRef = useRef(true);
+
+  refreshAllRef.current = board?.boardActions?.refreshAll ?? null;
+
+  useEffect(() => () => {
+    isMountedRef.current = false;
+  }, []);
 
   useEffect(() => {
     if (refreshingAll) {
@@ -37,18 +45,16 @@ export default function App() {
   }, [refreshingAll]);
 
   useEffect(() => {
-    if (remainingMs > 0 || refreshingAll) {
+    if (remainingMs > 0 || refreshingAll || !canRefreshAll) {
       return;
     }
-
-    let cancelled = false;
 
     const runRefreshAll = async () => {
       setRefreshingAll(true);
       try {
-        await board?.boardActions?.refreshAll?.();
+        await refreshAllRef.current?.();
       } finally {
-        if (!cancelled) {
+        if (isMountedRef.current) {
           setRefreshingAll(false);
           setRemainingMs(REFRESH_ALL_INTERVAL_MS);
         }
@@ -56,11 +62,7 @@ export default function App() {
     };
 
     runRefreshAll();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [board, refreshingAll, remainingMs]);
+  }, [canRefreshAll, refreshingAll, remainingMs]);
 
   const handleRefreshAll = async () => {
     if (refreshingAll) {
@@ -69,7 +71,7 @@ export default function App() {
 
     setRefreshingAll(true);
     try {
-      await board?.boardActions?.refreshAll?.();
+      await refreshAllRef.current?.();
     } finally {
       setRefreshingAll(false);
       setRemainingMs(REFRESH_ALL_INTERVAL_MS);

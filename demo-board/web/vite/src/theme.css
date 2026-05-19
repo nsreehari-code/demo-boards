@@ -263,7 +263,7 @@ a {
   transform: translateX(-50%);
   width: 0.7rem;
   height: 0.7rem;
-  border-width: 1.5px;
+  border-width: 0.75px;
   opacity: 0.95;
 }
 
@@ -280,11 +280,12 @@ a {
   flex-wrap: wrap;
   gap: 0.38rem;
   align-items: center;
-  margin-bottom: 0.45rem;
+  justify-content: center;
+  margin-bottom: 0.28rem;
 }
 
 .board-flow-node__tokens--bottom {
-  margin-top: 0.45rem;
+  margin-top: 0.28rem;
   margin-bottom: 0;
 }
 
@@ -296,11 +297,11 @@ a {
 }
 
 .board-token-port--require {
-  padding-top: 0.52rem;
+  padding-top: 0.34rem;
 }
 
 .board-token-port--provide {
-  padding-bottom: 0.52rem;
+  padding-bottom: 0.34rem;
 }
 
 .board-token-gem {
@@ -312,8 +313,8 @@ a {
   min-height: 0;
   padding: 0;
   border-radius: 999px;
-  border: 1px solid rgba(74, 102, 136, 0.16);
-  background: rgba(248, 251, 253, 0.82);
+  border: 1px solid rgba(74, 102, 136, 0.09);
+  background: rgba(248, 251, 253, 0.94);
   color: transparent;
   font-size: 0;
   line-height: 0;
@@ -337,8 +338,8 @@ a {
 }
 
 .board-token-gem--provide {
-  border-color: rgba(44, 149, 114, 0.2);
-  background: rgba(226, 247, 239, 0.9);
+  border-color: rgba(44, 149, 114, 0.12);
+  background: rgba(226, 247, 239, 0.97);
   color: #177451;
 }
 
@@ -347,38 +348,98 @@ a {
 }
 
 .board-token-gem--require {
-  border-color: rgba(72, 116, 168, 0.2);
-  background: rgba(228, 237, 248, 0.88);
+  border-color: rgba(72, 116, 168, 0.12);
+  background: rgba(228, 237, 248, 0.96);
   color: #345d95;
 }
 
 .board-token-gem--require.is-missing {
-  border-color: rgba(188, 105, 76, 0.24);
-  background: rgba(252, 235, 227, 0.94);
+  border-color: rgba(188, 105, 76, 0.14);
+  background: rgba(252, 235, 227, 0.98);
   color: #9a4f34;
 }
 
+.board-token-gem--require.is-running {
+  animation: board-token-require-run 1.05s ease-in-out infinite;
+  box-shadow: 0 0 0 1px rgba(72, 116, 168, 0.08), 0 0 0 5px rgba(166, 216, 220, 0.18);
+}
+
 .board-token-gem--muted {
-  background: rgba(245, 248, 251, 0.76);
+  background: rgba(245, 248, 251, 0.92);
 }
 
-.board-flow__edge .react-flow__edge-path {
-  stroke: rgba(77, 124, 172, 0.72);
-  stroke-width: 1.5;
+.board-flow__edge-main {
+  filter: none;
 }
 
-.board-flow__edge.is-highlighted .react-flow__edge-path {
-  stroke: rgba(45, 103, 170, 0.96);
-  stroke-width: 2.4;
+.board-flow__edge-flow {
+  fill: none;
+  stroke-dasharray: 10 12;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: board-flow-edge-run 1.05s linear infinite;
 }
 
-.board-flow__edge.is-highlighted .react-flow__edge-text text {
-  fill: #214d83;
-}
-
-.board-flow__edge.is-dimmed .react-flow__edge-path,
-.board-flow__edge.is-dimmed .react-flow__edge-text text {
+.board-flow__edge.is-dimmed .board-flow__edge-main,
+.board-flow__edge.is-dimmed .board-flow__edge-flow,
+.board-flow__edge.is-dimmed .board-flow__edge-label {
   opacity: 0.18;
+}
+
+.board-flow__edge.is-dimmed .board-flow__edge-label {
+  opacity: 0.12;
+}
+
+.board-flow__edge-label {
+  position: absolute;
+  pointer-events: none;
+  z-index: 4;
+  padding: 0.16rem 0.45rem;
+  border: 1px solid rgba(84, 119, 160, 0.18);
+  border-radius: 999px;
+  background: rgba(247, 250, 252, 0.92);
+  color: #476a90;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(70, 95, 122, 0.12);
+  backdrop-filter: blur(6px);
+}
+
+.board-flow__edge-label.is-highlighted {
+  color: #214d83;
+  border-color: rgba(45, 103, 170, 0.28);
+  box-shadow: 0 8px 20px rgba(44, 89, 138, 0.16);
+}
+
+.board-flow__edge-label.is-running {
+  color: #1d5a90;
+  border-color: rgba(69, 145, 219, 0.26);
+  box-shadow: 0 8px 22px rgba(63, 129, 191, 0.18);
+}
+
+@keyframes board-flow-edge-run {
+  from {
+    stroke-dashoffset: 44;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes board-token-require-run {
+  0%, 100% {
+    transform: scale(1);
+    border-color: rgba(72, 116, 168, 0.12);
+  }
+
+  50% {
+    transform: scale(1.08);
+    border-color: rgba(72, 116, 168, 0.22);
+  }
 }
 
 .board-canvas-token-banner {
@@ -412,9 +473,43 @@ a {
 }
 
 .board-react-flow__minimap {
-  background: rgba(244, 248, 251, 0.9);
-  border: 1px solid rgba(72, 103, 137, 0.14);
+  background: linear-gradient(180deg, rgba(247, 250, 252, 0.9), rgba(235, 242, 247, 0.82));
+  border: 1px solid rgba(118, 147, 179, 0.24);
   border-radius: calc(var(--surface-radius-sm) + 2px);
+  backdrop-filter: blur(10px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 10px 24px rgba(80, 104, 129, 0.12);
+}
+
+.board-react-flow__minimap .react-flow__minimap-svg {
+  border-radius: calc(var(--surface-radius-sm) + 1px);
+}
+
+.board-react-flow__minimap .react-flow__minimap-mask {
+  fill: rgba(198, 212, 226, 0.24);
+  stroke: rgba(117, 144, 173, 0.36);
+  stroke-width: 1.2;
+}
+
+.board-react-flow__minimap .react-flow__minimap-node {
+  transition: fill 160ms ease, stroke 160ms ease, opacity 160ms ease;
+}
+
+.board-react-flow__minimap .react-flow__minimap-node.is-running {
+  animation: board-minimap-node-pulse 1.05s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes board-minimap-node-pulse {
+  0%, 100% {
+    opacity: 0.72;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
 }
 
 .board-react-flow__controls {
@@ -604,6 +699,18 @@ a {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.board-modal__dialog {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.board-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .board-app-shell[data-theme='mist-ops'] .board-modal__header {
   background: rgba(232, 239, 245, 0.9);
 }
@@ -611,6 +718,77 @@ a {
 .board-modal__title {
   color: var(--color-text);
   font-weight: 700;
+}
+
+.board-chat-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.board-chat-pane__messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(102, 136, 171, 0.55) rgba(207, 218, 229, 0.36);
+}
+
+.board-chat-pane__messages::-webkit-scrollbar {
+  width: 10px;
+}
+
+.board-chat-pane__messages::-webkit-scrollbar-track {
+  background: rgba(207, 218, 229, 0.28);
+  border-radius: 999px;
+}
+
+.board-chat-pane__messages::-webkit-scrollbar-thumb {
+  background: rgba(102, 136, 171, 0.52);
+  border-radius: 999px;
+  border: 2px solid rgba(207, 218, 229, 0.22);
+}
+
+.board-chat-pane__composer {
+  background: linear-gradient(180deg, rgba(227, 235, 243, 0.56), rgba(220, 229, 238, 0.68));
+}
+
+.board-chat-pane__dropzone {
+  border-color: rgba(115, 142, 173, 0.18) !important;
+  background: linear-gradient(180deg, rgba(244, 248, 251, 0.96), rgba(236, 242, 247, 0.96));
+  color: #49667f;
+  transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease;
+}
+
+.board-chat-pane__dropzone.is-active {
+  border-color: rgba(83, 133, 137, 0.34) !important;
+  background: linear-gradient(180deg, rgba(229, 243, 242, 0.98), rgba(217, 235, 233, 0.98));
+}
+
+.board-chat-pane__dropzone.is-disabled {
+  opacity: 0.58;
+}
+
+.board-chat-pane__input-row {
+  padding: 0.32rem;
+  border: 1px solid rgba(124, 149, 178, 0.16);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(232, 239, 246, 0.98), rgba(223, 232, 240, 0.98));
+}
+
+.board-chat-pane__textarea {
+  border-color: rgba(124, 149, 178, 0.18);
+  background: rgba(251, 253, 255, 0.98);
+}
+
+.board-chat-pane__textarea:focus {
+  border-color: rgba(83, 133, 137, 0.28);
+  box-shadow: 0 0 0 0.15rem rgba(166, 216, 220, 0.2);
 }
 
 .board-ingest-toggle {
@@ -718,10 +896,14 @@ a {
 
 .board-ingest-pane__body {
   padding: 0.75rem;
+  min-height: 0;
+  overflow: hidden;
   background: linear-gradient(180deg, rgba(211, 220, 229, 0.42), rgba(222, 230, 237, 0.08));
 }
 
 .board-ingest-card {
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid rgba(56, 88, 120, 0.18);
   border-radius: var(--surface-radius);
   background: linear-gradient(180deg, rgba(248, 251, 253, 0.98), rgba(240, 245, 249, 0.98));
@@ -737,6 +919,8 @@ a {
 .board-ingest-card__body {
   padding: 0;
   flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .board-card-frame__label {

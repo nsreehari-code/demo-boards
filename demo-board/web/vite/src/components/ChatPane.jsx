@@ -160,9 +160,9 @@ function ChatComposer({ chatActions, placeholder, processing }) {
   };
 
   return (
-    <div className="border-top p-2 d-flex flex-column gap-2 flex-shrink-0">
+    <div className="board-chat-pane__composer border-top p-2 d-flex flex-column gap-2 flex-shrink-0">
       <div
-        className={`border rounded-3 p-2 small text-center ${processing ? 'border-secondary-subtle bg-body-tertiary opacity-50' : dragActive ? 'border-primary bg-primary-subtle' : 'border-secondary-subtle bg-body-tertiary'}`}
+        className={`board-chat-pane__dropzone border rounded-3 p-2 small text-center${processing ? ' is-disabled' : dragActive ? ' is-active' : ''}`}
         role="button"
         tabIndex={0}
         aria-disabled={processing}
@@ -196,10 +196,10 @@ function ChatComposer({ chatActions, placeholder, processing }) {
         />
       </div>
 
-      <div className="d-flex gap-2 align-items-end">
+      <div className="board-chat-pane__input-row d-flex gap-2 align-items-end">
         <textarea
           ref={textareaRef}
-          className="form-control form-control-sm"
+          className="board-chat-pane__textarea form-control form-control-sm"
           rows={1}
           value={text}
           placeholder={placeholder ?? 'Send a message…'}
@@ -207,7 +207,7 @@ function ChatComposer({ chatActions, placeholder, processing }) {
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           style={{ resize: 'none', minHeight: '38px', maxHeight: '160px' }}
         />
-        <button className="btn btn-sm btn-primary flex-shrink-0" onClick={send} disabled={processing || !text.trim()}>
+        <button className="board-chat-pane__send btn btn-sm btn-primary flex-shrink-0" onClick={send} disabled={processing || !text.trim()}>
           <i className="bi bi-send" />
         </button>
       </div>
@@ -232,10 +232,9 @@ export function ChatPane({ boardId, cardId, readOnly = false, compact = false })
   if (!chat) return null;
 
   return (
-    <div className="d-flex flex-column h-100 min-h-0" style={{ maxHeight: '100%' }}>
+    <div className="board-chat-pane">
       <div
-        className="flex-grow-1 overflow-auto p-2"
-        style={{ minHeight: 0, maxHeight: '100%', overflowY: 'auto', overscrollBehavior: 'contain' }}
+        className="board-chat-pane__messages p-2"
       >
         {messages.map((msg, i) => <ChatBubble key={i} msg={msg} compact={compact} />)}
         {processing && <WorkingBubble />}

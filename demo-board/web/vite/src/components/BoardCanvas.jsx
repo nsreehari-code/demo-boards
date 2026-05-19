@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BaseEdge,
   Background,
   Controls,
   Handle,
   MiniMap,
   Position,
   ReactFlow,
+  getBezierPath,
   useEdgesState,
   useNodesState,
 } from '@xyflow/react';
@@ -15,6 +17,9 @@ const NODE_WIDTH = 360;
 const COLUMN_GAP = 420;
 const ROW_GAP = 280;
 const STORAGE_VERSION = 1;
+const EDGE_CURVATURE_SUBTLE = 0.26;
+const EDGE_CURVATURE_BASE = 0.46;
+const EDGE_CURVATURE_DRAMATIC = 0.68;
 
 function storageKeyForBoard(boardId) {
   return `demo-board.canvas.${boardId}`;
@@ -166,6 +171,7 @@ function buildGraph(cardIds, board) {
         if (sourceId === cardId || !visibleIds.has(sourceId)) {
           continue;
         }
+        const isRunningEdge = card.status === 'running';
         edges.push({
           id: `${sourceId}::${cardId}::${token}`,
           source: sourceId,
@@ -173,9 +179,9 @@ function buildGraph(cardIds, board) {
           sourceHandle: tokenHandleId('provide', token),
           targetHandle: tokenHandleId('require', token),
           label: token,
-          data: { token },
-          type: 'smoothstep',
-          animated: cards[sourceId].status === 'running' || card.status === 'running',
+          data: { token, isRunning: isRunningEdge },
+          type: 'leaderLine',
+          animated: isRunningEdge,
           className: 'board-flow__edge',
         });
         incoming.get(cardId)?.add(sourceId);
@@ -240,8 +246,154 @@ function buildLayout(cardIds, incoming, outgoing) {
   return positions;
 }
 
+function sameStringArray(left = [], right = []) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+}
+
+function sameNodeView(left, right) {
+  if (!left || !right) {
+    return false;
+  }
+
+  return left.id === right.id
+    && left.type === right.type
+    && left.position?.x === right.position?.x
+    && left.position?.y === right.position?.y
+    && left.style?.width === right.style?.width
+    && left.data?.boardId === right.data?.boardId
+    && left.data?.status === right.data?.status
+    && left.data?.title === right.data?.title
+    && left.data?.selectedToken === right.data?.selectedToken
+    && left.data?.isHighlighted === right.data?.isHighlighted
+    && left.data?.isDimmed === right.data?.isDimmed
+    && left.data?.onTokenToggle === right.data?.onTokenToggle
+    && sameStringArray(left.data?.provides, right.data?.provides)
+    && sameStringArray(left.data?.providedTokens, right.data?.providedTokens)
+    && sameStringArray(left.data?.availableTokens, right.data?.availableTokens)
+    && sameStringArray(left.data?.requires, right.data?.requires);
+}
+
+function resolveLeaderCurve(sourceX, sourceY, targetX, targetY, emphasis = 'base') {
+  const horizontalDistance = Math.abs(targetX - sourceX);
+  const verticalDistance = Math.abs(targetY - sourceY);
+
+  if (horizontalDistance < 180 && verticalDistance < 120) {
+    return EDGE_CURVATURE_SUBTLE;
+  }
+
+  if (horizontalDistance > 520 || verticalDistance > 320) {
+    return emphasis === 'dramatic' ? EDGE_CURVATURE_DRAMATIC : 0.58;
+  }
+
+  return emphasis === 'dramatic' ? 0.58 : EDGE_CURVATURE_BASE;
+}
+
+function LeaderLineEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  className,
+  data,
+  style,
+}) {
+  const isHighlighted = className?.includes('is-highlighted');
+  const isDimmed = className?.includes('is-dimmed');
+  const isRunning = Boolean(data?.isRunning);
+  const curvature = resolveLeaderCurve(
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    isHighlighted || isRunning ? 'dramatic' : 'base',
+  );
+  const [edgePath] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    curvature,
+  });
+  const baseStrokeColor = 'rgba(83, 133, 137, 0.58)';
+  const highlightStrokeColor = 'rgba(71, 122, 136, 0.78)';
+  const dimStrokeColor = 'rgba(83, 133, 137, 0.2)';
+  const strokeColor = isHighlighted
+    ? highlightStrokeColor
+    : isDimmed
+      ? dimStrokeColor
+      : baseStrokeColor;
+  const flowColor = isHighlighted ? 'rgba(146, 208, 213, 0.86)' : 'rgba(166, 216, 220, 0.74)';
+  const plugMarkerId = `${id}-plug`;
+  const endPlugMarkerId = `${id}-end-plug`;
+  const mainStrokeWidth = isHighlighted ? 2.4 : 1.7;
+
+  return (
+    <>
+      <defs>
+        <marker
+          id={plugMarkerId}
+          viewBox="0 0 10 10"
+          markerWidth="6"
+          markerHeight="6"
+          refX="5"
+          refY="5"
+        >
+          <circle cx="5" cy="5" r="3" fill={strokeColor} />
+        </marker>
+        <marker
+          id={endPlugMarkerId}
+          viewBox="0 0 12 12"
+          markerWidth="8.5"
+          markerHeight="8.5"
+          refX="6"
+          refY="6"
+          orient="auto-start-reverse"
+        >
+          <circle cx="6" cy="6" r="3.9" fill={strokeColor} />
+        </marker>
+      </defs>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        className="board-flow__edge-main"
+        markerStart={`url(#${plugMarkerId})`}
+        markerEnd={markerEnd ?? `url(#${endPlugMarkerId})`}
+        style={{
+          ...style,
+          stroke: strokeColor,
+          strokeWidth: mainStrokeWidth,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        }}
+      />
+      {isRunning ? (
+        <BaseEdge
+          id={`${id}-flow`}
+          path={edgePath}
+          className="board-flow__edge-flow"
+          style={{
+            stroke: flowColor,
+            strokeWidth: mainStrokeWidth + 0.35,
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function FlowCardNode({ id, data }) {
   const statusTone = getStatusTone(data.status);
+  const isRunningCard = data.status === 'running';
   const requiresMissing = data.requires.filter((token) => !data.availableTokens.includes(token));
   const nodeTone = data.isDimmed ? ' is-dimmed' : data.isHighlighted ? ' is-highlighted' : '';
 
@@ -276,8 +428,12 @@ function FlowCardNode({ id, data }) {
     <div className={`board-flow-node ${statusTone}${nodeTone}`}>
       <div className="board-flow-node__tokens board-flow-node__tokens--top">
         {data.requires.length > 0 ? data.requires.map((token) => (
-          renderTokenGem(token, 'require', requiresMissing.includes(token) ? ' is-missing' : '')
-        )) : <span className="board-token-gem board-token-gem--muted">entry</span>}
+          renderTokenGem(
+            token,
+            'require',
+            `${requiresMissing.includes(token) ? ' is-missing' : ''}${isRunningCard ? ' is-running' : ''}`,
+          )
+        )) : null}
       </div>
       <div className="board-flow-node__card">
         <CardShell boardId={data.boardId} cardId={id} />
@@ -285,7 +441,7 @@ function FlowCardNode({ id, data }) {
       <div className="board-flow-node__tokens board-flow-node__tokens--bottom">
         {data.provides.length > 0 ? data.provides.map((token) => (
           renderTokenGem(token, 'provide', data.providedTokens.includes(token) ? ' is-active' : '')
-        )) : <span className="board-token-gem board-token-gem--muted">source</span>}
+        )) : null}
       </div>
     </div>
   );
@@ -294,6 +450,22 @@ function FlowCardNode({ id, data }) {
 const nodeTypes = {
   boardCard: FlowCardNode,
 };
+
+const edgeTypes = {
+  leaderLine: LeaderLineEdge,
+};
+
+function getMiniMapNodeColor(node) {
+  return node?.data?.status === 'running' ? 'rgba(111, 192, 154, 0.92)' : 'rgba(125, 149, 171, 0.58)';
+}
+
+function getMiniMapNodeStrokeColor(node) {
+  return node?.data?.status === 'running' ? 'rgba(34, 132, 93, 0.96)' : 'rgba(97, 122, 147, 0.34)';
+}
+
+function getMiniMapNodeClassName(node) {
+  return node?.data?.status === 'running' ? 'is-running' : '';
+}
 
 export function BoardCanvas({ board, boardId, cardIds }) {
   const [selectedToken, setSelectedToken] = useState(null);
@@ -374,10 +546,16 @@ export function BoardCanvas({ board, boardId, cardIds }) {
   useEffect(() => {
     setNodes((currentNodes) => {
       const positionsById = new Map(currentNodes.map((node) => [node.id, node.position]));
-      return graphNodes.map((node) => ({
+      const nextNodes = graphNodes.map((node) => ({
         ...node,
         position: positionsById.get(node.id) ?? node.position,
       }));
+
+      if (currentNodes.length === nextNodes.length && currentNodes.every((node, index) => sameNodeView(node, nextNodes[index]))) {
+        return currentNodes;
+      }
+
+      return nextNodes;
     });
   }, [graphNodes, setNodes]);
 
@@ -471,14 +649,14 @@ export function BoardCanvas({ board, boardId, cardIds }) {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         minZoom={0.24}
         maxZoom={1.35}
         defaultEdgeOptions={{
-          type: 'smoothstep',
+          type: 'leaderLine',
           style: { stroke: 'var(--color-accent)', strokeWidth: 1.5 },
-          labelStyle: { fill: 'var(--color-text-soft)', fontSize: 11, fontWeight: 700 },
         }}
         proOptions={{ hideAttribution: true }}
         className="board-react-flow"
@@ -497,7 +675,15 @@ export function BoardCanvas({ board, boardId, cardIds }) {
             </button>
           </div>
         ) : null}
-        <MiniMap pannable zoomable className="board-react-flow__minimap" />
+        <MiniMap
+          pannable
+          zoomable
+          className="board-react-flow__minimap"
+          nodeColor={getMiniMapNodeColor}
+          nodeStrokeColor={getMiniMapNodeStrokeColor}
+          nodeStrokeWidth={1.5}
+          nodeClassName={getMiniMapNodeClassName}
+        />
         <Controls className="board-react-flow__controls" showInteractive={false} />
         <Background gap={24} size={1.1} color="var(--color-border-strong)" className="board-react-flow__background" />
       </ReactFlow>
