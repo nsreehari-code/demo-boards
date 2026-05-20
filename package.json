@@ -7,7 +7,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt",
-    "postinstall": "npm run install:foundry",
+    "install:vite": "npm --prefix demo-board/web/vite install",
+    "postinstall": "npm run install:foundry && npm run install:vite",
     "start": "node scripts/start-server.cjs demo-board --all",
     "backend": "node scripts/start-server.cjs demo-board --backend",
     "frontend": "node ./node_modules/http-server/bin/http-server demo-board/web/dist-vite -p 8000 -c-1",

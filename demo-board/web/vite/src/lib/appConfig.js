@@ -48,6 +48,11 @@ function resolvePageTitle(config) {
 }
 
 function resolvePageSubtitle(config) {
+  const defaultBoardConfig = resolveDefaultBoardConfig(config);
+  if (typeof defaultBoardConfig?.subtitle === 'string' && defaultBoardConfig.subtitle.trim()) {
+    return defaultBoardConfig.subtitle.trim();
+  }
+
   if (typeof config?.subtitle === 'string' && config.subtitle.trim()) {
     return config.subtitle.trim();
   }

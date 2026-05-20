@@ -1,6 +1,5 @@
 {
   "port": 7799,
-  "subtitle": "Live operational intelligence for agent workflows",
   "prestart": [
     "node ./server/sync-copilot-mcp-config.js --refresh"
   ],
@@ -11,6 +10,7 @@
   "boards": {
     "finbook": {
       "label": "Finbook",
+      "subtitle": "Live operational intelligence for agent workflows",
       "setup": {
         "setupRoot": "../data-repos-VX/case-workspace",
         "cardStore": "ingest/cards-store",
@@ -43,6 +43,7 @@
     },
     "live": {
       "label": "Live",
+      "subtitle": "Live operational intelligence for agent workflows",
       "setupDir": "./boards/live/.board-ws",
       "regular": {
         "seedCardsDir": "./boards/live/cards",
@@ -66,6 +67,7 @@
     },
     "sentinel": {
       "label": "Sentinel Demo",
+      "subtitle": "Live operational intelligence for agent workflows",
       "setupDir": "./boards/sentinel/.board-ws",
       "regular": {
         "seedCardsDir": "./boards/sentinel/cards",
