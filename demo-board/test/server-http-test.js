@@ -45,6 +45,7 @@ function isCopilotAvailable() {
 
 const skipT3a = cliArgs.includes('--skip-t3a') || !isCopilotAvailable();
 const skipT3b = cliArgs.includes('--skip-t3b');
+const skipT3c = cliArgs.includes('--skip-t3c') || !isCopilotAvailable();
 const RUN_ID = `run-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 
 const BOARD_ID = 'live';
@@ -535,6 +536,7 @@ try {
     const t2UploadedFile = t2UploadRes.data?.file;
     assert(t2UploadedFile && typeof t2UploadedFile === 'object', 'T2 upload response missing file metadata');
     assert(String(t2UploadedFile?.name || '') === t2UploadName, 'T2 uploaded file name mismatch');
+    assert(!Object.prototype.hasOwnProperty.call(t2UploadedFile, 'path'), 'T2 uploaded file metadata should not expose path');
 
     const t2CardAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}`);
     assert(t2CardAfter.status === 200, `T2 post card read returned ${t2CardAfter.status}`);
@@ -545,6 +547,9 @@ try {
 
     const t2FileIndex = t2FilesAfter.findIndex((f) => String(f?.stored_name || '') === String(t2UploadedFile?.stored_name || ''));
     assert(t2FileIndex >= 0, 'T2 uploaded file metadata not found in card_data.files');
+    const t2StoredFile = t2FilesAfter[t2FileIndex];
+    assert(t2StoredFile?.chat === false, 'T2 stored file should be marked as card-origin');
+    assert(!Object.prototype.hasOwnProperty.call(t2StoredFile || {}, 'path'), 'T2 stored file metadata should not expose path');
 
     const t2DownloadRes = await httpGetRaw(
       `${BASE}/cards/${CHAT_CARD_ID}/files/${t2FileIndex}?sn=${encodeURIComponent(String(t2UploadedFile?.stored_name || ''))}`,
@@ -611,52 +616,6 @@ try {
   console.log(`[${new Date().toISOString()}] [T3] ok: ordered probe lifecycle observed (user+processing, in-progress, assistant+processing clear)`);
     }
 
-  // ── T3a: non-probe chat protocol over API + SSE ──
-  // Disabled in the public example unless explicitly requested — requires a
-  // configured Azure Foundry endpoint and agent_id in server-config.json.
-  if (skipT3a) {
-    console.log('\n=== T3a: skipped (--skip-t3a) ===');
-  } else {
-    console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');
-    const t2aBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-    assert(t2aBefore.status === 200, `T3a pre chats returned ${t2aBefore.status}`);
-    const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
-    const t2aBeforeCount = t2aBeforeMessages.length;
-    const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
-
-    const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-      actionType: 'chat-send',
-      payload: {
-        text: JSON.stringify({
-          prompt: t2aPrompt,
-          chatTimeoutMs: 180000,
-        }),
-      },
-    });
-    assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
-
-    const t2aAssistant = await waitForChatPredicate((events) => {
-      for (let i = events.length - 1; i >= 0; i -= 1) {
-        const e = events[i];
-        if (e.messageCount < t2aBeforeCount + 2) continue;
-        const last = e.messages[e.messages.length - 1];
-        if (last?.role === 'assistant' && /paris/i.test(String(last.text || ''))) return e;
-      }
-      return false;
-    }, 240_000, 'T3a assistant response with paris');
-    assert(!!t2aAssistant, 'T3a assistant response with paris not observed on SSE');
-
-    const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-    assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
-    const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
-    const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
-    assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat messages, got ${t2aNewMessages.length}`);
-    const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
-    assert(!!t2aAssistantMsg && typeof t2aAssistantMsg.id === 'string', 'T3a assistant chat message missing id');
-    assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T3a assistant file content missing paris');
-    console.log('[T3a] ok: non-probe response contains paris');
-  }
-
   // ── T3b: probe-echo chat + file upload protocol over API + SSE ──
   if (skipT3b) {
     console.log('\n=== T3b: skipped (--skip-t3b) ===');
@@ -675,6 +634,17 @@ try {
     assert(t2bUploadRes.status === 200, `T3b file upload returned ${t2bUploadRes.status}`);
     const uploadedFile = t2bUploadRes.data?.file;
     assert(uploadedFile && typeof uploadedFile === 'object', 'T3b upload response missing file metadata');
+    assert(!Object.prototype.hasOwnProperty.call(uploadedFile, 'path'), 'T3b uploaded file metadata should not expose path');
+
+    const t2bCardAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}`);
+    assert(t2bCardAfterUpload.status === 200, `T3b card after upload returned ${t2bCardAfterUpload.status}`);
+    const t2bStoredFiles = Array.isArray(t2bCardAfterUpload.data?.card_data?.files)
+      ? t2bCardAfterUpload.data.card_data.files
+      : [];
+    const t2bStoredFile = t2bStoredFiles.find((f) => String(f?.stored_name || '') === String(uploadedFile?.stored_name || ''));
+    assert(!!t2bStoredFile, 'T3b stored file metadata missing after upload');
+    assert(t2bStoredFile?.chat === true, 'T3b stored file should be marked as chat-origin');
+    assert(!Object.prototype.hasOwnProperty.call(t2bStoredFile || {}, 'path'), 'T3b stored file metadata should not expose path');
 
     const t2bAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
     assert(t2bAfterUpload.status === 200, `T3b chats after upload returned ${t2bAfterUpload.status}`);
@@ -683,6 +653,7 @@ try {
     const t2bUploadSystem = t2bUploadNewMessages.find((m) => m?.role === 'system');
     assert(!!t2bUploadSystem, 'T3b upload protocol missing system chat file');
     assert(String(t2bUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3b upload system message does not describe uploaded file');
+    assert(/#\d+\s*$/.test(String(t2bUploadSystem?.text || '')), 'T3b upload system message should include merged file index');
 
     const t2bSendBaseline = t2bUploadMessages.length;
     const t2bEventStart = NS.chatEvents.length;
@@ -721,8 +692,131 @@ try {
     assert(!!t2bInProgress && typeof t2bInProgress.id === 'string', 'T3b missing in-progress system chat message');
     assert(!!t2bAssistantMsg && typeof t2bAssistantMsg.id === 'string', 'T3b missing assistant chat message notification');
     assert(Array.isArray(t2bUser?.files) && t2bUser.files.length === 1, 'T3b user chat message missing uploaded file metadata');
+    assert(!Object.prototype.hasOwnProperty.call(t2bUser?.files?.[0] || {}, 'path'), 'T3b user chat file metadata should not expose path');
     assert(String(t2bAssistantMsg?.text || '').includes(`Echo: ${t2bPrompt}`), 'T3b assistant file content mismatch');
     console.log('[T3b] ok: upload protocol and ordered probe lifecycle observed (user+processing, in-progress, assistant+processing clear)');
+  }
+
+  // ── T3c: non-probe chat + file upload protocol over API + SSE ──
+  if (skipT3c) {
+    console.log('\n=== T3c: skipped (--skip-t3c) ===');
+  } else {
+    console.log('\n=== T3c: non-probe chat with file upload protocol (expect tokyo) ===');
+    const t2cBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2cBefore.status === 200, `T3c pre chats returned ${t2cBefore.status}`);
+    const t2cBeforeMessages = Array.isArray(t2cBefore.data?.messages) ? t2cBefore.data.messages : [];
+    const t2cBeforeCount = t2cBeforeMessages.length;
+
+    const t2cUploadRes = await httpUploadChatFile(
+      `${BASE}/cards/${CHAT_CARD_ID}/files?inChat=true`,
+      'q2.txt',
+      'What is the captial of Japan',
+    );
+    assert(t2cUploadRes.status === 200, `T3c file upload returned ${t2cUploadRes.status}`);
+    const t2cUploadedFile = t2cUploadRes.data?.file;
+    assert(t2cUploadedFile && typeof t2cUploadedFile === 'object', 'T3c upload response missing file metadata');
+    assert(!Object.prototype.hasOwnProperty.call(t2cUploadedFile, 'path'), 'T3c uploaded file metadata should not expose path');
+
+    const t2cCardAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}`);
+    assert(t2cCardAfterUpload.status === 200, `T3c card after upload returned ${t2cCardAfterUpload.status}`);
+    const t2cStoredFiles = Array.isArray(t2cCardAfterUpload.data?.card_data?.files)
+      ? t2cCardAfterUpload.data.card_data.files
+      : [];
+    const t2cStoredFile = t2cStoredFiles.find((f) => String(f?.stored_name || '') === String(t2cUploadedFile?.stored_name || ''));
+    assert(!!t2cStoredFile, 'T3c stored file metadata missing after upload');
+    assert(t2cStoredFile?.chat === true, 'T3c stored file should be marked as chat-origin');
+    assert(!Object.prototype.hasOwnProperty.call(t2cStoredFile || {}, 'path'), 'T3c stored file metadata should not expose path');
+
+    const t2cAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2cAfterUpload.status === 200, `T3c chats after upload returned ${t2cAfterUpload.status}`);
+    const t2cUploadMessages = Array.isArray(t2cAfterUpload.data?.messages) ? t2cAfterUpload.data.messages : [];
+    const t2cUploadNewMessages = t2cUploadMessages.slice(t2cBeforeCount);
+    const t2cUploadSystem = t2cUploadNewMessages.find((m) => m?.role === 'system');
+    assert(!!t2cUploadSystem, 'T3c upload protocol missing system chat file');
+    assert(String(t2cUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3c upload system message does not describe uploaded file');
+    assert(/#\d+\s*$/.test(String(t2cUploadSystem?.text || '')), 'T3c upload system message should include merged file index');
+
+    const t2cSendBaseline = t2cUploadMessages.length;
+    const t2cPrompt = 'Answer the question in the attached file in one word';
+
+    const t2cSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+      actionType: 'chat-send',
+      payload: {
+        text: t2cPrompt,
+        files: [t2cUploadedFile],
+      },
+    });
+    assert(t2cSendRes.status === 200, `T3c chat-send returned ${t2cSendRes.status}`);
+
+    const t2cAssistant = await waitForChatPredicate((events) => {
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        const e = events[i];
+        if (e.messageCount < t2cSendBaseline + 2) continue;
+        const last = e.messages[e.messages.length - 1];
+        if (last?.role === 'assistant' && /tokyo/i.test(String(last.text || ''))) return e;
+      }
+      return false;
+    }, 240_000, 'T3c assistant response with tokyo');
+    assert(!!t2cAssistant, 'T3c assistant response with tokyo not observed on SSE');
+
+    const t2cAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2cAfter.status === 200, `T3c post chats returned ${t2cAfter.status}`);
+    const t2cAfterMessages = Array.isArray(t2cAfter.data?.messages) ? t2cAfter.data.messages : [];
+    const t2cNewMessages = t2cAfterMessages.slice(t2cSendBaseline);
+    assert(t2cNewMessages.length >= 2, `T3c expected at least 2 new chat messages, got ${t2cNewMessages.length}`);
+    const t2cUser = t2cNewMessages.find((m) => m?.role === 'user');
+    const t2cAssistantMsg = [...t2cNewMessages].reverse().find((m) => m?.role === 'assistant');
+    assert(!!t2cUser && typeof t2cUser.id === 'string', 'T3c user chat message missing id');
+    assert(Array.isArray(t2cUser?.files) && t2cUser.files.length === 1, 'T3c user chat message missing uploaded file metadata');
+    assert(!Object.prototype.hasOwnProperty.call(t2cUser?.files?.[0] || {}, 'path'), 'T3c user chat file metadata should not expose path');
+    assert(!!t2cAssistantMsg && typeof t2cAssistantMsg.id === 'string', 'T3c assistant chat message missing id');
+    assert(/tokyo/i.test(String(t2cAssistantMsg?.text || '')), 'T3c assistant file content missing tokyo');
+    console.log('[T3c] ok: non-probe file-upload response contains tokyo');
+  }
+
+  // ── T3a: non-probe chat protocol over API + SSE ──
+  // Disabled in the public example unless explicitly requested — requires a
+  // configured Azure Foundry endpoint and agent_id in server-config.json.
+  if (skipT3a) {
+    console.log('\n=== T3a: skipped (--skip-t3a) ===');
+  } else {
+    console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');
+    const t2aBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2aBefore.status === 200, `T3a pre chats returned ${t2aBefore.status}`);
+    const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
+    const t2aBeforeCount = t2aBeforeMessages.length;
+    const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
+
+    const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+      actionType: 'chat-send',
+      payload: {
+        text: JSON.stringify({
+          prompt: t2aPrompt,
+        }),
+      },
+    });
+    assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
+
+    const t2aAssistant = await waitForChatPredicate((events) => {
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        const e = events[i];
+        if (e.messageCount < t2aBeforeCount + 2) continue;
+        const last = e.messages[e.messages.length - 1];
+        if (last?.role === 'assistant' && /paris/i.test(String(last.text || ''))) return e;
+      }
+      return false;
+    }, 240_000, 'T3a assistant response with paris');
+    assert(!!t2aAssistant, 'T3a assistant response with paris not observed on SSE');
+
+    const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
+    const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
+    const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
+    assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat messages, got ${t2aNewMessages.length}`);
+    const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
+    assert(!!t2aAssistantMsg && typeof t2aAssistantMsg.id === 'string', 'T3a assistant chat message missing id');
+    assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T3a assistant file content missing paris');
+    console.log('[T3a] ok: non-probe response contains paris');
   }
   }
 
@@ -738,7 +832,6 @@ try {
   await new Promise((r) => serverProc.on('exit', r));
   if (sseWorker) await sseWorker.terminate();
 
-  // Clean up the test setup directory
   if (fs.existsSync(SETUP_DIR)) {
     fs.rmSync(SETUP_DIR, { recursive: true, force: true });
   }

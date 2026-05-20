@@ -63,7 +63,7 @@ correctness checks.
 
 ## Command Surface
 
-Run these commands from the repo root, using the current JS CLI entrypoint:
+Run these commands from the Copilot workspace root using the local standalone CLI copy:
 
 ```bash
 node ./.github/scripts/board-live-cards-cli.js validate-card-preflight

@@ -2,7 +2,7 @@
 name: chat-store-commands
 description: >
   Read board card chat history through the current yaml-flow chat store CLI
-  using `board-dir` and card id. Use when a task needs to inspect the current
+  using `store-ref` and card id. Use when a task needs to inspect the current
   card's chat session, consult another card's chats, or append the final
   assistant reply into chat storage.
 ---
@@ -16,7 +16,7 @@ for a board card, or persist the final assistant reply into the chat store.
 
 Use it especially when the task already has:
 
-- `board-dir`
+- `storeRef`
 - `cardId`
 - a reason to inspect the current card chat or another card's chat history
 
@@ -34,7 +34,7 @@ node ./.github/scripts/chat-store-cli.js <subcommand>
 ### Read the full chat history for one card
 
 ```bash
-node ./.github/scripts/chat-store-cli.js read-all --board-dir <board-dir> --card-id <card-id>
+node ./.github/scripts/chat-store-cli.js read-all --store-ref <store-ref> --card-id <card-id>
 ```
 
 Use this as the default way to inspect the complete stored chat session for one
@@ -43,7 +43,7 @@ card.
 ### Append the final assistant reply for one card
 
 ```bash
-node ./.github/scripts/chat-store-cli.js append --board-dir <board-dir> --card-id <card-id> --role assistant --text "<final-user-reply>" --files-json "[]"
+node ./.github/scripts/chat-store-cli.js append --store-ref <store-ref> --card-id <card-id> --role assistant --text "<final-user-reply>" --files-json "[]"
 ```
 
 Use this only once per completed assistant turn, after the final user-visible
@@ -59,7 +59,7 @@ reply text is ready.
 
 ## Recommended Workflow
 
-1. Identify the exact `board-dir` and `cardId` whose chat session matters.
+1. Identify the exact `storeRef` and `cardId` whose chat session matters.
 2. Use `read-all` to materialize the relevant chat history.
 3. If the task requires delivering a final user reply, append exactly one assistant message with `append`.
 4. Leave processing-state changes to orchestration.

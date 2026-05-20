@@ -24,7 +24,10 @@ import {
   serializeRef,
 } from 'yaml-flow/board-live-cards-node';
 import {
-  createStepMachineChatFlowRunner,
+  MemoryStore,
+  buildStepHandlersForFlow,
+  createStepMachine,
+  loadStepFlow,
 } from 'yaml-flow/step-machine-public';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -113,6 +116,12 @@ function normalizeTimeoutMs(value, fallback = null) {
   return Math.floor(n);
 }
 
+function normalizeNonNegativeTimeoutMs(value, fallback = null) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.floor(n);
+}
+
 function normalizePrestartCommands(configValue) {
   if (!Array.isArray(configValue)) return [];
   return configValue
@@ -147,6 +156,89 @@ function listFilesRecursive(dirPath) {
   };
   walk(dirPath);
   return out;
+}
+
+function resolveLastUserText(chatStorage, cardId, lastChatEntryId) {
+  if (!chatStorage || typeof chatStorage.readAll !== 'function') return '';
+  if (typeof cardId !== 'string' || !cardId.trim()) return '';
+  if (typeof lastChatEntryId !== 'string' || !lastChatEntryId.trim()) return '';
+  try {
+    const messages = chatStorage.readAll(cardId);
+    if (!Array.isArray(messages)) return '';
+    const entry = messages.find((message) => (
+      message
+      && message.id === lastChatEntryId
+      && message.role === 'user'
+      && typeof message.text === 'string'
+    ));
+    return entry ? entry.text.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+function createLocalStepMachineChatFlowRunner(invokeRef) {
+  return {
+    async run(flowSpec, args) {
+      try {
+        const flow = await loadStepFlow(flowSpec);
+        const handlers = buildStepHandlersForFlow(flow, {
+          invoke: (ref, stepArgs) => invokeRef(ref, stepArgs, {
+            timeoutMs: resolveInvokeTimeoutMs(flow),
+          }),
+        });
+        const machine = createStepMachine(flow, handlers, { store: new MemoryStore() });
+        const run = await machine.run(args && typeof args === 'object' && !Array.isArray(args) ? args : {});
+
+        if (run.status !== 'completed') {
+          const reason = run.error?.message ?? run.intent ?? run.status;
+          return { dispatched: false, error: String(reason || 'flow execution failed') };
+        }
+
+        if (run.intent !== 'success') {
+          const reason = typeof run.data?.error === 'string'
+            ? run.data.error
+            : `flow returned intent: ${run.intent}`;
+          return { dispatched: false, error: reason };
+        }
+
+        return { dispatched: true, runId: run.runId };
+      } catch (error) {
+        return {
+          dispatched: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  };
+}
+
+function createUserTextAwareChatFlowRunner(chatStorage, invokeRef) {
+  const innerRunner = createLocalStepMachineChatFlowRunner(invokeRef);
+  return {
+    run(flow, args, ...rest) {
+      const flowArgs = args && typeof args === 'object' && !Array.isArray(args)
+        ? { ...args }
+        : {};
+      if (typeof flowArgs.userText !== 'string' || !flowArgs.userText.trim()) {
+        const derivedUserText = resolveLastUserText(chatStorage, flowArgs.cardId, flowArgs.lastChatEntryId);
+        if (derivedUserText) {
+          flowArgs.userText = derivedUserText;
+        }
+      }
+      return innerRunner.run(flow, flowArgs, ...rest);
+    },
+  };
+}
+
+function resolveInvokeTimeoutMs(flow) {
+  const flowTimeoutMs = normalizeNonNegativeTimeoutMs(flow?.settings?.invoke_timeout_ms, null);
+  if (flowTimeoutMs !== null) return flowTimeoutMs;
+
+  const envTimeoutMs = normalizeNonNegativeTimeoutMs(process.env.YAML_FLOW_STEP_INVOKE_TIMEOUT_MS, null);
+  if (envTimeoutMs !== null) return envTimeoutMs;
+
+  return 300000;
 }
 
 async function runPrestartCommands(commands) {
@@ -187,26 +279,34 @@ function pickTimeoutMs(...values) {
   return null;
 }
 
-function applyFlowTimeout(flow, timeoutMs) {
+function applyFlowTimeout(flow, timeoutMs, invokeTimeoutMs = null) {
   if (!flow || typeof flow !== 'object') return flow;
   const normalized = normalizeTimeoutMs(timeoutMs, null);
-  if (normalized === null) return flow;
+  const normalizedInvoke = normalizeNonNegativeTimeoutMs(invokeTimeoutMs, null);
+  if (normalized === null && normalizedInvoke === null) return flow;
   return {
     ...flow,
     settings: {
       ...(flow.settings && typeof flow.settings === 'object' ? flow.settings : {}),
-      timeout_ms: normalized,
+      ...(normalized !== null ? { timeout_ms: normalized } : {}),
+      ...(normalizedInvoke !== null ? { invoke_timeout_ms: normalizedInvoke } : {}),
     },
   };
 }
 
-function buildChatHandlerFlowFromScript(scriptPath, timeoutMs = null) {
+function buildChatHandlerFlowFromScript(scriptPath, timeoutMs = null, invokeTimeoutMs = null) {
   if (!scriptPath) return null;
   const resolved = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(BOARD_ROOT, scriptPath);
   const resolvedTimeoutMs = normalizeTimeoutMs(timeoutMs, 300000);
+  const resolvedInvokeTimeoutMs = normalizeNonNegativeTimeoutMs(invokeTimeoutMs, 300000);
   return {
     id: 'demo-chat-script-handler',
-    settings: { start_step: 'respond', max_total_steps: 5, timeout_ms: resolvedTimeoutMs },
+    settings: {
+      start_step: 'respond',
+      max_total_steps: 5,
+      timeout_ms: resolvedTimeoutMs,
+      invoke_timeout_ms: resolvedInvokeTimeoutMs,
+    },
     steps: {
       respond: {
         description: 'Run the demo board chat responder from a script path',
@@ -228,7 +328,7 @@ function buildChatHandlerFlowFromScript(scriptPath, timeoutMs = null) {
 
 const serverConfig = loadServerConfig();
 const configuredChatFlowTimeoutMs = normalizeTimeoutMs(serverConfig.chatFlowTimeoutMs, null);
-const configuredInvokeRefTimeoutMs = normalizeTimeoutMs(serverConfig.chatInvokeRefTimeoutMs, 300000);
+const configuredInvokeRefTimeoutMs = normalizeNonNegativeTimeoutMs(serverConfig.chatInvokeRefTimeoutMs, 300000);
 const configuredCopilotTimeoutMs = normalizeTimeoutMs(serverConfig.chatCopilotTimeoutMs, 300000);
 
 // Resolve top-level config defaults (used as fallbacks for per-board config)
@@ -236,8 +336,9 @@ const configuredTaskExecutorPath = resolveFromConfig(serverConfig.taskExecutorPa
 const configuredChatHandlerPath = resolveFromConfig(serverConfig.chatHandlerPath);
 const configuredFlowFromPath = loadJsonFromConfig(serverConfig.chatHandlerFlowPath);
 const configuredChatHandlerFlow = applyFlowTimeout(
-  configuredFlowFromPath || buildChatHandlerFlowFromScript(configuredChatHandlerPath, configuredChatFlowTimeoutMs),
+  configuredFlowFromPath || buildChatHandlerFlowFromScript(configuredChatHandlerPath, configuredChatFlowTimeoutMs, configuredInvokeRefTimeoutMs),
   configuredChatFlowTimeoutMs,
+  configuredInvokeRefTimeoutMs,
 );
 const configuredInferenceAdapterPath = resolveFromConfig(serverConfig.inferenceAdapterPath);
 const configuredStepMachineCliPath = resolveFromConfig(serverConfig.stepMachineCliPath);
@@ -456,16 +557,17 @@ const runtime = createMultiBoardServerRuntime({
     const taskExecPath = resolveFromConfig(regular.taskExecutorPath) || (entry?.taskExecutorPath || configuredTaskExecutorPath);
     const chatHandlerPath = resolveFromConfig(regular.chatHandlerPath) || (entry?.chatHandlerPath || configuredChatHandlerPath);
     const boardFlowTimeoutMs = configuredChatFlowTimeoutMs;
+    const chatInvokeRefTimeoutMs = configuredInvokeRefTimeoutMs;
     const chatHandlerFlow = applyFlowTimeout(
       loadJsonFromConfig(regular.chatHandlerFlowPath)
         || entry?.chatHandlerFlow
-        || buildChatHandlerFlowFromScript(chatHandlerPath, boardFlowTimeoutMs)
+        || buildChatHandlerFlowFromScript(chatHandlerPath, boardFlowTimeoutMs, chatInvokeRefTimeoutMs)
         || configuredChatHandlerFlow,
       boardFlowTimeoutMs,
+      chatInvokeRefTimeoutMs,
     );
     const infAdapterPath = resolveFromConfig(regular.inferenceAdapterPath) || (entry?.inferenceAdapterPath || configuredInferenceAdapterPath);
     const stepMachinePath = resolveFromConfig(regular.stepMachineCliPath || cfg?.stepMachineCliPath) || (entry?.stepMachineCliPath || configuredStepMachineCliPath);
-    const chatInvokeRefTimeoutMs = configuredInvokeRefTimeoutMs;
     const chatCopilotTimeoutMs = configuredCopilotTimeoutMs;
 
     if (chatHandlerPath && !process.env.DEMO_CHAT_HANDLER_PATH) {
@@ -484,21 +586,21 @@ const runtime = createMultiBoardServerRuntime({
     const scratchStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath });
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
     fs.mkdirSync(boardSetupPaths.setupRoot, { recursive: true });
-    const flowRunner = createStepMachineChatFlowRunner({
-      invokeRef: (ref, stepArgs) => invokeExecutionRefAsync(ref, stepArgs, {
+    const chatStorage = createFsBoardChatStorage(boardSetupPaths.chatStorePath);
+    const flowRunner = createUserTextAwareChatFlowRunner(
+      chatStorage,
+      (ref, stepArgs, opts) => invokeExecutionRefAsync(ref, stepArgs, {
         cliDir: BOARD_ROOT,
         cwd: BOARD_ROOT,
-        timeoutMs: chatInvokeRefTimeoutMs,
+        timeoutMs: opts?.timeoutMs,
       }),
-    });
+    );
     const baseExecutionExtra = {
       boardId,
       baseRef,
       boardSetupRoot: boardSetupPaths.setupRoot,
       boardRuntimeDir: boardSetupPaths.boardRuntime,
-      cardStore: boardSetupPaths.cardStore,
       cardStoreRef,
-      chatStore: boardSetupPaths.chatStore,
       chatStoreRef,
       runtimeStatusDir: boardSetupPaths.boardOutputsStore,
       artifactsStore: boardSetupPaths.artifactsStore,
@@ -518,8 +620,6 @@ const runtime = createMultiBoardServerRuntime({
 
     demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot: boardSetupPaths.setupRoot });
 
-    const chatStorage = createFsBoardChatStorage(boardSetupPaths.chatStorePath);
-
     const singleBoardRuntime = createSingleBoardServerRuntime({
       apiBasePath: `${apiBasePath}/${boardId}`,
       boardId,
@@ -534,9 +634,7 @@ const runtime = createMultiBoardServerRuntime({
         baseRef,
         boardSetupRoot: boardSetupPaths.setupRoot,
         boardRuntimeDir: boardSetupPaths.boardRuntime,
-        cardStore: boardSetupPaths.cardStore,
         cardStoreRef,
-        chatStore: boardSetupPaths.chatStore,
         chatStoreRef,
         runtimeStatusDir: boardSetupPaths.boardOutputsStore,
         artifactsStore: boardSetupPaths.artifactsStore,
