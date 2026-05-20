@@ -137,8 +137,7 @@ export function IngestPane({ boardId, includeFilters = [], layoutStrategy = 'ver
           <div className="board-ingest-pane d-flex flex-column" style={layout.railStyle}>
             <div className="board-ingest-pane__header">
               <div>
-                <div className="board-ingest-pane__eyebrow">Ingest</div>
-                <div className="board-ingest-pane__title">Active intake queue</div>
+                <div className="board-ingest-pane__eyebrow">Board Manager</div>
               </div>
               <button
                 type="button"
