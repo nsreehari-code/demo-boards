@@ -3,7 +3,7 @@ name: cards-runtime-status
 description: >
   Inspect live board and cards runtime status, published outputs, and computed values
   through the current yaml-flow board-live-cards CLI using `base-ref`. Use
-  this when a task needs runtime state rather than stored card JSON.
+  this when a task needs runtime state rather than stored card definitions.
 ---
 
 # Cards Runtime Status
@@ -16,7 +16,7 @@ Use this skill whenever the task is about live runtime state on a board:
 - check whether cards are completed, blocked, failed, or in progress
 - read published output objects from the runtime outputs store
 - read computed values written for a specific card or for all cards
-- understand whether a runtime issue is in live execution rather than stored card JSON
+- understand whether a runtime issue is in live execution rather than stored card definitions
 
 Do not use this skill when the real task is to edit cards in storage. Use
 `card-store-commands`, `card-editing`, or `card-authoring` for that.
@@ -31,7 +31,7 @@ These commands inspect live runtime artifacts, not the source card definition.
 
 ## Command Surface
 
-Run these commands from the Copilot workspace root using the local standalone CLI copy:
+Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
 node ./.github/scripts/board-live-cards-cli.js <subcommand>
@@ -88,7 +88,7 @@ node ./.github/scripts/board-live-cards-cli.js get-outputs --base-ref <board-ref
 
 Use this only when you need a board-wide computed-values inspection.
 
-## Operational Rules
+## Command Rules
 
 - Always use `base-ref` for this skill. These are board-runtime commands.
 - Prefer `status` first when the task is general runtime diagnosis.

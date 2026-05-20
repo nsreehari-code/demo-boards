@@ -25,7 +25,7 @@ use it for internal notes, status updates, or orchestration state changes.
 
 ## Command Surface
 
-Run these commands from the Copilot workspace root using the local standalone CLI copy:
+Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
 node ./.github/scripts/chat-store-cli.js <subcommand>
@@ -49,7 +49,7 @@ node ./.github/scripts/chat-store-cli.js append --store-ref <store-ref> --card-i
 Use this only once per completed assistant turn, after the final user-visible
 reply text is ready.
 
-## Operational Rules
+## Command Rules
 
 - Prefer reading the current card's chat first unless the task clearly depends on another card's chat history.
 - Use `append` only for the final assistant reply that the user should see.

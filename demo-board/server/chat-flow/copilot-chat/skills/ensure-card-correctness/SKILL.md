@@ -2,7 +2,7 @@
 name: ensure-card-correctness
 description: >
   Validate and repair a board card end to end using the current yaml-flow
-  preflight CLI. Use after creating or editing card JSON, especially when the
+  preflight CLI. Use after creating or editing a card definition, especially when the
   change touches `source_defs`, `compute`, `card_data`, `requires`, `provides`, or `card layout`.
 ---
 
@@ -25,12 +25,12 @@ Use it especially when the change affects:
 - `provides[]`
 - `view`
 
-This skill is the operational runbook for the current yaml-flow CLI surface.
-Use the commands in this file as the authoritative workflow.
+This skill is the command reference for the current yaml-flow CLI commands.
+Use the commands in this file as the authoritative validation and repair workflow.
 
 If a validation or repair task depends on decisions captured in another card's discussion, use `chat-store-commands` to read that chat history before making further changes.
 
-Use the returned card JSON as the basis for validation, source probe payloads,
+Use the returned card object as the basis for validation, source probe payloads,
 compute payloads, and simulation payloads. If a repair changes the stored card,
 use `card-store-commands` to write the repaired full card back before re-running
 correctness checks.
@@ -63,7 +63,7 @@ correctness checks.
 
 ## Command Surface
 
-Run these commands from the Copilot workspace root using the local standalone CLI copy:
+Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
 node ./.github/scripts/board-live-cards-cli.js validate-card-preflight
@@ -71,23 +71,15 @@ node ./.github/scripts/board-live-cards-cli.js validate-card-preflight
 
 The commands below are payload-driven and read JSON from stdin.
 
-For a cross-platform file-to-stdin pattern, use:
-
-```bash
-node -e "process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8'))" <payload.json> | node ./.github/scripts/board-live-cards-cli.js <subcommand>
-```
-
-Replace `<payload.json>` and `<subcommand>` as needed.
-
 ### 1. Validate card structure and semantics
 
 ```bash
-node -e "process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8'))" <card.json> | node ./.github/scripts/board-live-cards-cli.js validate-card-preflight
+node ./.github/scripts/board-live-cards-cli.js validate-card-preflight
 ```
 
 Accepted stdin shapes:
 
-- raw card JSON
+- raw card object
 - `{ "card-content": <card-json> }`
 
 Actual payload contract:
@@ -112,10 +104,10 @@ Expected result shape:
 ### 2. Probe one source preflight
 
 ```bash
-node -e "process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8'))" <payload.json> | node ./.github/scripts/board-live-cards-cli.js probe-source-preflight --source-idx 0
+node ./.github/scripts/board-live-cards-cli.js probe-source-preflight --source-idx 0
 ```
 
-`payload.json` should contain either the raw card object or:
+The stdin payload should contain either the raw card object or:
 
 ```json
 {
@@ -150,7 +142,7 @@ Expected result includes fields like:
 ### 3. Evaluate compute without running a full board
 
 ```bash
-node -e "process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8'))" <payload.json> | node ./.github/scripts/board-live-cards-cli.js eval-card-compute
+node ./.github/scripts/board-live-cards-cli.js eval-card-compute
 ```
 
 Optional payload fields:
@@ -175,7 +167,7 @@ Expected result includes:
 ### 4. Simulate the full card cycle
 
 ```bash
-node -e "process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8'))" <payload.json> | node ./.github/scripts/board-live-cards-cli.js simulate-card-cycle
+node ./.github/scripts/board-live-cards-cli.js simulate-card-cycle
 ```
 
 Use this when the card couples validation, projections, sources, and compute and
@@ -206,7 +198,7 @@ Actual payload contract:
 Follow this exact order.
 
 1. Run `validate-card-preflight` first.
-2. If it reports issues, repair the card JSON first. Do not move to probing or compute until validation is clean.
+2. If it reports issues, repair the card definition first. Do not move to probing or compute until validation is clean.
 3. If the changed card has `source_defs[]`, build the smallest payload that exercises only the touched source and run `probe-source-preflight` for each changed source index.
 4. If the changed card has `compute[]`, build the smallest representative mocks and run `eval-card-compute`.
 5. If targeted checks are individually clean but the card is still suspicious, run `simulate-card-cycle` to surface cross-layer inconsistencies.
@@ -235,7 +227,7 @@ Common repair routing:
 - If a source probe fails because projections are wrong, repair the `projections` expressions or the source-specific fields that consume them.
 - If validation fails on duplicate `bindTo` or `outputFile`, fix the card contract first; probing and compute checks come later.
 
-## Operational Rules
+## Command Rules
 
 - Use the payload-driven commands in this skill for authoring-time correctness checks.
 - Prefer minimal mock payloads. Only include the fields needed to exercise the touched source or compute path.
@@ -245,7 +237,7 @@ Common repair routing:
 
 ## Payload Construction Rules
 
-- If only validation is needed, stdin can be the raw card JSON.
+- If only validation is needed, stdin can be the raw card object.
 - If probing a source, prefer `{ "card-content": <card>, "mock-projections": { ... } }`.
 - If evaluating compute, prefer `{ "card-content": <card>, "mock-fetched-sources": { ... }, "mock-requires": { ... } }`.
 - If simulating a full cycle, prefer `{ "card-content": <card>, "mock-requires": { ... } }`.

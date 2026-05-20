@@ -20,7 +20,7 @@ Use this skill when the task is about board-level presence and runtime effects:
 - reason about downstream recompute after a card changes
 
 Do not use this skill when the real task is to create, edit, or validate card
-JSON in the card store.
+definitions in the card store.
 
 ## What a Board Is
 
@@ -30,7 +30,7 @@ JSON in the card store.
 - A card participates in the board by declaring what it `requires` and what it
   `provides`.
 
-When you add a card to the board, you are not just making JSON available. You
+When you add a card to the board, you are not just making a definition available. You
 are adding a node to the live dependency graph.
 
 ## What a Card Contributes
@@ -90,14 +90,14 @@ propagation.
 
 Board-level meaning:
 
-- `upsert-card` adds or resyncs a card node into the live graph from stored card JSON.
+- `upsert-card` adds or resyncs a card node into the live graph from stored card definitions.
 - `remove-card` removes that node from the live graph.
 - For board behavior, deleting the card from the board is what matters; that is the operation that changes the live dependency graph.
 - Neither command is a substitute for card authoring or correctness validation.
 
 ## Command Surface
 
-Run these commands from the Copilot workspace root using the local standalone CLI copy:
+Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
 node ./.github/scripts/board-live-cards-cli.js <subcommand>
@@ -128,6 +128,7 @@ a material change.
 Typical reasons:
 
 - the stored card JSON changed materially
+- the stored card definition changed materially
 - its runtime should be re-evaluated immediately
 - you want downstream dependents to see the fresh graph state
 
@@ -151,14 +152,14 @@ inactive in the live runtime.
 This removes the card's live presence and stops it from publishing tokens into
 the board graph. For graph semantics, this is the deletion that matters.
 
-## Operational Rules
+## Command Rules
 
 - Before `upsert-card`, make sure the target card already exists in the card store.
 - Prefer single-card operations over `--all` unless the task is explicitly board-wide.
 - If a card was just authored or edited, persist it first through `card-store-commands`, then upsert it into the board.
 - If a card publishes tokens consumed by other cards, expect board behavior to change when it is removed.
 - If a changed card should affect downstream dependents immediately, prefer `upsert-card --restart`.
-- Do not describe board membership changes as mere file operations; they change the live graph.
+- Do not describe board membership changes as mere storage changes; they change the live graph.
 
 ## How to Think About Add vs Remove
 

@@ -29,6 +29,14 @@ shared reference:
 - `card-store-commands` for stored card CRUD
 - `artifacts-store-commands` for uploaded or attached files
 - `chat-store-commands` for card chat history
+- `lore-commands` for durable board-level and user-level lore
+
+Treat the `*-commands` skills as the authoritative command surfaces for their
+respective stores and runtime operations.
+
+Treat `ensure-card-correctness` as the authoritative correctness skill for any
+material card change. A card create/edit/repair task is not complete until the
+relevant `ensure-card-correctness` checks have passed for the changed card.
 
 ## Board Model At A Glance
 
@@ -129,11 +137,25 @@ Source definitions may be:
 - sources that emit both data and dynamic `_view` hints
 
 The executor exposes capability discovery, validation, source preflight, and
-fetch execution. Use `ensure-card-correctness` for the operational workflow.
+fetch execution. Use `ensure-card-correctness` for the authoritative validation,
+source-preflight, compute-check, and repair workflow.
 
 ## Agentic Chat And Context
 
 Card chat is agentic and card-scoped, not a generic detached assistant.
+
+The user is usually looking at a live visual board while chatting. That visible
+board context matters.
+
+Assume the user's chat is grounded in what they can already see on the board,
+including:
+
+- card titles, layout, and visual grouping on the board
+- card view content rendered through the supported view kinds
+- published data objects and computed values visible through runtime-backed cards
+- overall board runtime status and whether cards look complete, blocked, failed, or stale
+- prior chat turns and any uploaded or attached artifacts tied to the card
+- and the board layout of the cards in an intuitive way for users
 
 The assistant receives rich context including:
 
@@ -149,6 +171,62 @@ This means an agent can reason over the current card, inspect nearby cards,
 read prior chat, inspect artifacts, and then decide whether to explain data,
 edit cards, add cards, remove cards, or suggest dynamic views.
 
+When the visible board context or prior interaction context matters, reconstruct
+it through the command skills instead of guessing:
+
+- use `card-store-commands` to inspect stored card definitions and nearby card context
+- use `cards-runtime-status` to inspect board status, published data objects, and computed values
+- use `chat-store-commands` to inspect the current card chat or relevant nearby card chats
+- use `artifacts-store-commands` to inspect uploaded or attached artifacts
+
+Treat these sources together as the main way to recover the user's working
+context when the current request depends on what they are seeing on the board.
+
+## Durable Lore
+
+Some knowledge should accumulate beyond a single card or one immediate task.
+
+Treat lore as durable board-level and user-level memory for confirmed knowledge
+that should remain useful across cards, chats, and future sessions.
+
+Typical lore candidates include:
+
+- standing user preferences or recurring instructions
+- board-level conventions and stable operating assumptions
+- identity resolvers for recurring names, entities, or accounts
+- durable decisions that resolve recurring ambiguity
+
+Do not treat transient card state, one-off task notes, or extracted record data
+as lore.
+
+Use `lore-commands` when a task needs lore commands to inspect or update that durable memory.
+
+## Lore Maintenance Workflow
+
+Treat durable lore review as a workflow phase, not as passive background behavior.
+
+For tasks that uncover confirmed durable user, board, identity, or decision
+knowledge:
+
+1. complete the main card/chat task first
+2. identify any durable lore candidates from the resolved task outcome
+3. delegate to `lore-keeper` agent to inspect, deduplicate, and update lore
+4. treat the task as complete only after `lore-keeper` agent either updates lore or
+  returns that no durable lore change is needed
+
+`lore-keeper` agent  owns updates to the workspace lore knowledge base. Do not update
+lore directly from the main agent when `lore-keeper` agent is available.
+
+Typical lore-keeper delegation triggers include:
+
+- the user corrected a recurring preference or standing instruction
+- a recurring identity, entity, account, or document-name mapping was resolved
+- a board-level convention or stable operating assumption was confirmed
+- a durable decision removed recurring ambiguity for future tasks
+- prior chat or artifacts established reusable context that should persist across cards or sessions
+
+If none of these durable-memory conditions are met, ignore lore updates.
+
 ## Dynamic Card Generation And Removal
 
 Agents are allowed to change the live board by operating on cards as data:
@@ -157,7 +235,7 @@ Agents are allowed to change the live board by operating on cards as data:
 - upsert that card into the live board
 - remove a card from the live board
 
-Use `add-remove-card-from-board` for the runtime meaning of add/remove.
+Use `add-remove-card-from-board` for the board live-card commands that add, upsert, restart, or remove cards.
 
 ## Dynamic Views Of Known Kinds
 
@@ -268,6 +346,19 @@ for validating or probing those sources.
 
 Do not use this file as the correctness runbook anymore.
 
+Always route card validation and repair through `ensure-card-correctness`.
+
+If you create, edit, or repair a card and the change can affect behavior,
+assume `ensure-card-correctness` is required before treating the task as done.
+This is especially important for changes to:
+
+- `source_defs[]`
+- `compute[]`
+- `requires[]`
+- `provides[]`
+- `view`
+- `card_data` when it affects runtime behavior or validation
+
 Use `ensure-card-correctness` for:
 
 - validation order
@@ -276,6 +367,10 @@ Use `ensure-card-correctness` for:
 - compute evaluation
 - full-cycle simulation
 - repair routing
+
+Use narrower card-store or board-runtime commands to inspect or persist state,
+but use `ensure-card-correctness` to prove that the changed card is valid and
+behaves correctly.
 
 When in doubt about allowed card fields, consult the canonical schema:
 

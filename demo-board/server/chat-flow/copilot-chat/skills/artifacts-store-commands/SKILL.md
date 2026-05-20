@@ -1,16 +1,16 @@
 ---
 name: artifacts-store-commands
 description: >
-  Read uploaded or attached files for a card/chat from the current yaml-flow artifacts store
+  Read uploaded or attached artifacts for a card/chat from the current yaml-flow artifacts store
   using `store-ref` and artifact keys. Use for card or chat attachments when an
-  agent needs to inspect files.
+  agent needs to inspect artifacts.
 ---
 
 # Artifacts Store Commands
 
 ## When to Use
 
-Use this skill whenever a task needs to inspect files uploaded or attached by a
+Use this skill whenever a task needs to inspect artifacts uploaded or attached by a
 user for a card or chat.
 
 For both card uploads and chat attachments, the artifact key should normally
@@ -27,7 +27,7 @@ artifacts store CLI in this workflow.
 
 ## Command Surface
 
-Run these commands from the Copilot workspace root using the local standalone CLI copy:
+Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
 node ./.github/scripts/artifacts-store-cli.js <subcommand>
@@ -41,19 +41,13 @@ node ./.github/scripts/artifacts-store-cli.js get --store-ref <store-ref> --key 
 
 Use this for text-like artifacts such as JSON, Markdown, logs, YAML, or source files.
 
-### Read one artifact as bytes metadata or save it to a file
+### Read one artifact as bytes metadata
 
 ```bash
 node ./.github/scripts/artifacts-store-cli.js get --store-ref <store-ref> --key <key>
 ```
 
 This returns artifact metadata plus byte length when printed to stdout.
-
-To save the artifact locally for inspection:
-
-```bash
-node ./.github/scripts/artifacts-store-cli.js get --store-ref <store-ref> --key <key> --out <local-path>
-```
 
 ### Read artifact metadata only
 
@@ -78,7 +72,7 @@ node ./.github/scripts/artifacts-store-cli.js list --store-ref <store-ref> --pre
 Use this only when the needed file is not already discoverable from the stored
 card metadata.
 
-## Operational Rules
+## Command Rules
 
 - Treat this skill as read-only.
 - For both card uploads and chat attachments, prefer reading the stored card first and taking the artifact key from `card_data.files`.

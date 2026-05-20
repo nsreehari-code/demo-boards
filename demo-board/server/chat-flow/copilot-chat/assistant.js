@@ -78,6 +78,7 @@ function buildPrompt(cId, historyDump) {
     'Write the final user-visible assistant reply to chat store only.',
     'Do not write files and do not include markdown fences.',
     'Use the current skill command surfaces; do not invent alternate CLI forms.',
+    'After completing the main task, use the `lore-keeper` agent when the interaction could potentially have durable board-level, user-level, identity, or decision knowledge that should persist across future tasks.',
   ].join(' ');
 
   const runtimeHandlesBlock = [

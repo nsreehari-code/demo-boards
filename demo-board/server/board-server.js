@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -668,6 +668,43 @@ const runtime = createMultiBoardServerRuntime({
 function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
   fs.mkdirSync(boardSetupRoot, { recursive: true });
 
+  const seedWorkspaceLore = ({ workspaceRoot, copilotRoot }) => {
+    const loreCliPath = path.join(workspaceRoot, '.github', 'scripts', 'lore-cli.js');
+    if (!fs.existsSync(loreCliPath)) return;
+
+    const boardLore = {
+      boardId,
+      label: typeof cfg?.label === 'string' ? cfg.label : boardId,
+      description: typeof cfg?.subtitle === 'string' && cfg.subtitle.trim()
+        ? cfg.subtitle.trim()
+        : `Board workspace for ${typeof cfg?.label === 'string' && cfg.label.trim() ? cfg.label.trim() : boardId}`,
+    };
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        loreCliPath,
+        'set',
+        '--key',
+        'board.bootstrap.profile',
+        '--value-json',
+        JSON.stringify(boardLore),
+      ],
+      {
+        cwd: workspaceRoot,
+        encoding: 'utf-8',
+        windowsHide: true,
+      },
+    );
+
+    if (result.status !== 0) {
+      const details = String(result.stderr || result.stdout || '').trim();
+      console.warn(
+        `[board-server] copilot workspace "${copilotRoot}" lore bootstrap failed${details ? `: ${details}` : ''}`,
+      );
+    }
+  };
+
   const workspaceSetup = Array.isArray(cfg?.['copilot-workdirs-setup'])
     ? cfg['copilot-workdirs-setup'].filter((entry) => entry && typeof entry === 'object')
     : [];
@@ -700,14 +737,25 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
       fs.mkdirSync(skillsTarget, { recursive: true });
       fs.mkdirSync(scriptsTarget, { recursive: true });
 
+      const logCopiedFiles = (label, dirPath, copiedCount) => {
+        console.log(
+          `[board-server] copilot workspace "${copilotRoot}" ${label} dir: ${dirPath} (${copiedCount} files copied)`,
+        );
+      };
+
       const instructionDirs = Array.isArray(entry.instructionsDirs) ? entry.instructionsDirs : [];
       const instructionParts = [];
       for (const dir of instructionDirs) {
         const resolvedDir = resolveFromConfig(dir);
+        if (!resolvedDir || !fs.existsSync(resolvedDir)) {
+          logCopiedFiles('instructionsDirs', resolvedDir, 0);
+          continue;
+        }
         const files = listFilesInDir(resolvedDir);
         for (const filePath of files) {
           instructionParts.push(fs.readFileSync(filePath, 'utf-8').trimEnd());
         }
+        logCopiedFiles('instructionsDirs', resolvedDir, files.length);
       }
 
       if (instructionParts.length > 0) {
@@ -721,24 +769,38 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
       const agentsDirs = Array.isArray(entry.agentsDirs) ? entry.agentsDirs : [];
       for (const dir of agentsDirs) {
         const resolvedDir = resolveFromConfig(dir);
+        if (!resolvedDir || !fs.existsSync(resolvedDir)) {
+          logCopiedFiles('agentsDirs', resolvedDir, 0);
+          continue;
+        }
         const files = listFilesRecursive(resolvedDir);
         for (const filePath of files) {
           fs.copyFileSync(filePath, path.join(agentsTarget, path.basename(filePath)));
         }
+        logCopiedFiles('agentsDirs', resolvedDir, files.length);
       }
 
       const agentsHooks = Array.isArray(entry.agentsHooks) ? entry.agentsHooks : [];
       for (const dir of agentsHooks) {
         const resolvedDir = resolveFromConfig(dir);
+        if (!resolvedDir || !fs.existsSync(resolvedDir)) {
+          logCopiedFiles('agentsHooks', resolvedDir, 0);
+          continue;
+        }
         const files = listFilesRecursive(resolvedDir);
         for (const filePath of files) {
           fs.copyFileSync(filePath, path.join(hooksTarget, path.basename(filePath)));
         }
+        logCopiedFiles('agentsHooks', resolvedDir, files.length);
       }
 
       const agentsSkills = Array.isArray(entry.agentsSkills) ? entry.agentsSkills : [];
       for (const dir of agentsSkills) {
         const resolvedDir = resolveFromConfig(dir);
+        if (!resolvedDir || !fs.existsSync(resolvedDir)) {
+          logCopiedFiles('agentsSkills', resolvedDir, 0);
+          continue;
+        }
         const files = listFilesRecursive(resolvedDir);
         for (const filePath of files) {
           const relativePath = path.relative(resolvedDir, filePath);
@@ -746,14 +808,34 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
           fs.mkdirSync(path.dirname(targetPath), { recursive: true });
           fs.copyFileSync(filePath, targetPath);
         }
+        logCopiedFiles('agentsSkills', resolvedDir, files.length);
       }
 
-      for (const fileName of fs.readdirSync(YAML_FLOW_CLI_NODE_DIR)) {
-        const sourcePath = path.join(YAML_FLOW_CLI_NODE_DIR, fileName);
-        const stat = fs.statSync(sourcePath);
-        if (!stat.isFile()) continue;
-        fs.copyFileSync(sourcePath, path.join(scriptsTarget, fileName));
+      const copyScriptDirs = Array.isArray(entry.copyScripts)
+        ? entry.copyScripts
+            .map((dir) => resolveFromConfig(dir))
+            .filter(Boolean)
+        : [];
+      console.log(
+        `[board-server] copilot workspace "${copilotRoot}" copyScripts: ${copyScriptDirs.length > 0 ? copyScriptDirs.join(', ') : '(none)'}`,
+      );
+      for (const scriptsDir of copyScriptDirs) {
+        if (!scriptsDir || !fs.existsSync(scriptsDir)) {
+          logCopiedFiles('copyScripts', scriptsDir, 0);
+          continue;
+        }
+        let copiedCount = 0;
+        for (const fileName of fs.readdirSync(scriptsDir)) {
+          const sourcePath = path.join(scriptsDir, fileName);
+          const stat = fs.statSync(sourcePath);
+          if (!stat.isFile()) continue;
+          fs.copyFileSync(sourcePath, path.join(scriptsTarget, fileName));
+          copiedCount += 1;
+        }
+        logCopiedFiles('copyScripts', scriptsDir, copiedCount);
       }
+
+      seedWorkspaceLore({ workspaceRoot, copilotRoot });
     }
     return;
   }
