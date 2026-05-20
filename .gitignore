@@ -1,5 +1,4 @@
 node_modules/
-default-board/
 **/.demo-setup/
 logs/
 .tmp/

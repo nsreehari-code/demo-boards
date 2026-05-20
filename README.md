@@ -30,7 +30,6 @@ npm start
 | Script | What it does |
 |---|---|
 | `npm start` | Start backend (port 7799) + frontend (port 8000) together |
-| `npm run backend` | Start backend API server only at `http://127.0.0.1:7799` |
 | `npm run frontend` | Serve `demo-board/` as static files at `http://127.0.0.1:8000` |
 | `npm run mcp:install` | Install dependencies for `mcp-server/` |
 | `npm run mcp:dry-run` | Validate the WorkIQ MCP manifest without starting transport |
@@ -42,7 +41,6 @@ npm start
 
 ```
 demo-boards/
-  default-board/          <- template board (used by copy-example-board)
   demo-board/             <- active demo board
     boards/
       live/
@@ -56,12 +54,11 @@ demo-boards/
     demo-chat-handler.js
     index.html
   scripts/
-    start-server.cjs      <- starts backend/frontend with env-var wiring
-    copy-example-board.cjs <- copies default-board to create a new board
+    start-server.cjs      <- foreground runner for backend, MCP, and frontend
   mcp-server/             <- manifest-driven MCP server scaffold
 ```
 
-## Environment variables (auto-set by `npm start`)
+## Environment variables (auto-set by the start scripts)
 
 - `BOARD_LIVE_CARDS_CLI_JS` → local `yaml-flow` CLI path
 - `DEMO_STEP_MACHINE_CLI_PATH` → local `yaml-flow` step-machine CLI path

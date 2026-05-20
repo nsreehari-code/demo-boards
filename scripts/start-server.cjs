@@ -3,23 +3,28 @@
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 
 const workspaceDir = process.cwd();
 const args = process.argv.slice(2);
-const modeFlag = args.find(a => a === '--all' || a === '--backend') || '--backend';
-const boardDirArg = args.find(a => !a.startsWith('--')) || 'default-board';
+const boardDirArg = args.find(a => !a.startsWith('--')) || 'demo-board';
 const boardDir = path.resolve(workspaceDir, boardDirArg);
 const boardServerPath = path.join(boardDir, 'server', 'board-server.js');
 
 if (!fs.existsSync(boardServerPath)) {
-  console.error(`[start-server] Missing ${boardServerPath}. Run "npm run copy-example-board" first.`);
+  console.error(`[start-server] Missing ${boardServerPath}. Pass a valid board directory, for example "demo-board".`);
   process.exit(1);
 }
 
 const boardLiveCardsCliJs = path.resolve(workspaceDir, 'node_modules', 'yaml-flow', 'cli', 'node', 'board-live-cards-cli.js');
 const stepMachineCliPath = path.resolve(workspaceDir, 'node_modules', 'yaml-flow', 'cli', 'node', 'step-machine-cli.js');
 const mcpServerPath = path.resolve(workspaceDir, 'mcp-server', 'src', 'index.js');
+const frontendDir = path.join(boardDir, 'web', 'dist-vite');
+const viteDir = path.join(boardDir, 'web', 'vite');
+const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npmExecPath = typeof process.env.npm_execpath === 'string' && process.env.npm_execpath
+  ? process.env.npm_execpath
+  : '';
 
 if (!fs.existsSync(boardLiveCardsCliJs)) {
   console.error(`[start-server] Missing ${boardLiveCardsCliJs}. Run \"npm install\" first.`);
@@ -32,6 +37,36 @@ if (!fs.existsSync(stepMachineCliPath)) {
 if (!fs.existsSync(mcpServerPath)) {
   console.error(`[start-server] Missing ${mcpServerPath}. Run \"npm install\" first.`);
   process.exit(1);
+}
+if (!fs.existsSync(viteDir)) {
+  console.error(`[start-server] Missing ${viteDir}. Run \"npm install\" first.`);
+  process.exit(1);
+}
+
+function runNpmCommandSync(args, options = {}) {
+  if (npmExecPath) {
+    execFileSync(process.execPath, [npmExecPath, ...args], options);
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    execFileSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/c', npmCmd, ...args], options);
+    return;
+  }
+
+  execFileSync(npmCmd, args, options);
+}
+
+if (!fs.existsSync(frontendDir)) {
+  console.log(`[start-server] Missing ${frontendDir}. Building frontend...`);
+  runNpmCommandSync(['--prefix', viteDir, 'run', 'build'], {
+    cwd: workspaceDir,
+    stdio: 'inherit',
+  });
+  if (!fs.existsSync(frontendDir)) {
+    console.error(`[start-server] Frontend build did not produce ${frontendDir}.`);
+    process.exit(1);
+  }
 }
 
 const sharedEnv = {
@@ -73,9 +108,7 @@ async function handleMcpExit(code) {
 console.log(`[start-server] board dir: ${boardDir}`);
 console.log('[start-server] backend:  http://127.0.0.1:7799');
 console.log('[start-server] mcp:      http://127.0.0.1:7801/mcp');
-if (modeFlag === '--all') {
-  console.log('[start-server] frontend: http://127.0.0.1:8000');
-}
+console.log('[start-server] frontend: http://127.0.0.1:8000');
 
 const mcp = spawn(process.execPath, [mcpServerPath, '--transport', 'streamable-http'], {
   cwd: path.resolve(workspaceDir, 'mcp-server'),
@@ -90,13 +123,11 @@ const backend = spawn(process.execPath, [boardServerPath], {
 });
 
 let frontend = null;
-if (modeFlag === '--all') {
-  const httpServerEntry = require.resolve('http-server/bin/http-server');
-  frontend = spawn(process.execPath, [httpServerEntry, boardDir, '-p', '8000', '-c-1'], {
-    cwd: workspaceDir,
-    stdio: 'inherit',
-  });
-}
+const httpServerEntry = require.resolve('http-server/bin/http-server');
+frontend = spawn(process.execPath, [httpServerEntry, frontendDir, '-p', '8000', '-c-1'], {
+  cwd: workspaceDir,
+  stdio: 'inherit',
+});
 
 let shuttingDown = false;
 
@@ -131,14 +162,12 @@ backend.on('exit', (code) => {
   }
 });
 
-if (frontend) {
-  frontend.on('exit', (code) => {
-    if (!shuttingDown) {
-      console.error(`[start-server] frontend exited with code ${code ?? 0}`);
-      shutdown();
-    }
-  });
-}
+frontend.on('exit', (code) => {
+  if (!shuttingDown) {
+    console.error(`[start-server] frontend exited with code ${code ?? 0}`);
+    shutdown();
+  }
+});
 
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
