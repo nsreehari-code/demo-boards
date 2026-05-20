@@ -3,7 +3,6 @@ default-board/
 **/.demo-setup/
 logs/
 .tmp/
-dist-vite/
 data-repos-VX/
 **/.board-ws
 **/.board-ws/
