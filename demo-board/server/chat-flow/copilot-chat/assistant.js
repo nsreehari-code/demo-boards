@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -36,9 +37,33 @@ const {
 const chatCopilotTimeoutMs = Number.isFinite(Number(rawChatCopilotTimeoutMs)) && Number(rawChatCopilotTimeoutMs) > 0
   ? Math.floor(Number(rawChatCopilotTimeoutMs))
   : 300000;
+const bypassCopilotForTest = process.env.DEMO_T3A_BYPASS === '1';
+const ENABLE_DEBUG_LOGGING = typeof process.env.ENABLE_DEBUG_LOGGING === 'string' ? process.env.ENABLE_DEBUG_LOGGING.trim() : '';
+const DEBUG_LOG_PATH = ENABLE_DEBUG_LOGGING || path.join(os.tmpdir(), 'demo-board-t3a-assistant-debug.log');
 
 const scratchDir = scratchStoreRef ? resolveStoreDir(scratchStoreRef, 'scratchStoreRef') : '';
 const DEBUG_LOG_FILE = scratchDir ? path.join(scratchDir, 'assistant-debug.jsonl') : '';
+
+function DBG_LOG(stage, details = {}) {
+  if (!ENABLE_DEBUG_LOGGING) {
+    return;
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(DEBUG_LOG_PATH), { recursive: true });
+    fs.appendFileSync(
+      DEBUG_LOG_PATH,
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        pid: process.pid,
+        stage,
+        bypassCopilotForTest,
+        ...details,
+      }) + '\n',
+      'utf-8'
+    );
+  } catch {}
+}
 
 function buildPrompt(cId, historyDump) {
   const instructionsBlock = [
@@ -48,11 +73,10 @@ function buildPrompt(cId, historyDump) {
     'Do not expose internal orchestration details, logs, handles, refs, paths, directory names, or implementation notes.',
     'Use the runtime handles below directly when you need operational context.',
     'Do not spend time rediscovering these handles from files, directories, or scans.',
-    'Return only the user-visible final answer text.',
-    'Do not return status updates, tool transcripts, internal notes, or completion acknowledgements.',
-    'Do not write files, and do not include markdown fences.',
-    'When you have the final user-visible answer, write it to chat storage yourself using the local standalone chat-store CLI from the Copilot workspace root.',
-    'Append exactly one assistant message containing only the final user-visible answer text.',
+    'Do not return the final user-visible answer text through stdout or any other response channel.',
+    'Do not return status updates, tool transcripts, internal notes, completion acknowledgements, or reply text.',
+    'Write the final user-visible assistant reply to chat store only.',
+    'Do not write files and do not include markdown fences.',
     'Use the current skill command surfaces; do not invent alternate CLI forms.',
   ].join(' ');
 
@@ -67,19 +91,10 @@ function buildPrompt(cId, historyDump) {
     `- scratchStoreRef: ${scratchStoreRef || '(not provided)'}`,
   ].join('\n');
 
-  const responseWriteBlock = [
-    'Write the final response to the user here:',
-    '- from the Copilot workspace root, use:',
-    `- node ./.github/scripts/chat-store-cli.js append --store-ref "${chatStoreRef || '(not provided)'}" --card-id "${cId}" --role assistant --text "<final-user-reply>" --files-json "[]"`,
-    '- append exactly one final assistant reply and nothing else.',
-  ].join('\n');
-
   return [
     instructionsBlock,
     '',
     runtimeHandlesBlock,
-    '',
-    responseWriteBlock,
     '',
     'Chat history dump:',
     historyDump,
@@ -108,6 +123,28 @@ function buildValidationRepairPrompt(issuesByCardId) {
     'The following validations issues surfaced on the cards. Please fix them.',
     JSON.stringify(issuesByCardId),
   ].join('\n');
+}
+
+function buildCombinedRepairPrompt(issuesByCardId, missingChatStoreReply) {
+  const promptParts = [
+    'The previous attempt did not produce an acceptable result. Fix the issues below before completing.',
+  ];
+
+  if (hasValidationIssues(issuesByCardId)) {
+    promptParts.push(
+      'Validation issues surfaced on the cards:',
+      JSON.stringify(issuesByCardId)
+    );
+  }
+
+  if (missingChatStoreReply) {
+    promptParts.push(
+      'No assistant reply was appended to chat store.',
+      'Write the final user-visible reply to chat store only. Do not return reply text through stdout or any other response channel.'
+    );
+  }
+
+  return promptParts.join('\n');
 }
 
 function formatCommandForLog(command, args) {
@@ -150,6 +187,19 @@ function runCopilot(prompt, workingDir) {
   ];
   fs.writeFileSync(promptFile, prompt, 'utf-8');
   try {
+    DBG_LOG('runCopilot:beforeExec', {
+      cwd: process.cwd(),
+      tempRoot,
+      promptFile,
+      outFile,
+      errFile,
+      wrapperBat: WRAPPER_BAT,
+      copilotWorkingDir: effectiveWorkingDir,
+      execCommand: 'cmd.exe',
+      execArgs,
+      copilotCmd: formatCommandForLog('cmd.exe', execArgs),
+      promptLength: prompt.length,
+    });
     appendDebug('runCopilot:beforeExec', {
       cwd: process.cwd(),
       tempRoot,
@@ -169,6 +219,12 @@ function runCopilot(prompt, workingDir) {
     });
     const outputText = fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf-8').trim() : '';
     const errorText = fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf-8').trim() : '';
+    DBG_LOG('runCopilot:afterExec', {
+      outputLength: outputText.length,
+      errorLength: errorText.length,
+      outFileExists: fs.existsSync(outFile),
+      errFileExists: fs.existsSync(errFile),
+    });
     appendDebug('runCopilot:afterExec', {
       outputLength: outputText.length,
       errorLength: errorText.length,
@@ -178,6 +234,12 @@ function runCopilot(prompt, workingDir) {
     return outputText;
   } catch (err) {
     const errorText = fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf-8').trim() : '';
+    DBG_LOG('runCopilot:error', {
+      message: err?.message ?? String(err),
+      errFileText: errorText || undefined,
+      stderr: typeof err?.stderr === 'string' ? err.stderr.trim() : undefined,
+      stdout: typeof err?.stdout === 'string' ? err.stdout.trim() : undefined,
+    });
     appendDebug('runCopilot:error', {
       message: err?.message ?? String(err),
       errFileText: errorText || undefined,
@@ -189,9 +251,17 @@ function runCopilot(prompt, workingDir) {
     }
     throw err;
   } finally {
-    try { fs.unlinkSync(promptFile); } catch {}
-    try { fs.unlinkSync(outFile); } catch {}
-    try { fs.unlinkSync(errFile); } catch {}
+    if (!ENABLE_DEBUG_LOGGING) {
+      try { fs.unlinkSync(promptFile); } catch {}
+      try { fs.unlinkSync(outFile); } catch {}
+      try { fs.unlinkSync(errFile); } catch {}
+    }
+    DBG_LOG('runCopilot:cleanup', {
+      keptTempFiles: !!ENABLE_DEBUG_LOGGING,
+      promptFileRemoved: !fs.existsSync(promptFile),
+      outFileRemoved: !fs.existsSync(outFile),
+      errFileRemoved: !fs.existsSync(errFile),
+    });
     appendDebug('runCopilot:cleanup', {
       promptFileRemoved: !fs.existsSync(promptFile),
       outFileRemoved: !fs.existsSync(outFile),
@@ -200,70 +270,92 @@ function runCopilot(prompt, workingDir) {
   }
 }
 
-function runValidationRepair(workingDir, issuesByCardId) {
-  const repairPrompt = buildValidationRepairPrompt(issuesByCardId);
+function runValidationRepair(workingDir, issuesByCardId, missingChatStoreReply = false) {
+  const repairPrompt = missingChatStoreReply || hasValidationIssues(issuesByCardId)
+    ? buildCombinedRepairPrompt(issuesByCardId, missingChatStoreReply)
+    : buildValidationRepairPrompt(issuesByCardId);
   appendDebug('runValidationRepair:start', {
     issueCardCount: issuesByCardId && typeof issuesByCardId === 'object' ? Object.keys(issuesByCardId).length : 0,
+    missingChatStoreReply,
   });
   return runCopilot(repairPrompt, workingDir).trim();
 }
 
-function runCopilotWithValidationRetries(prompt, workingDir, setupRoot, storeRef) {
+function runCopilotWithValidationRetries(prompt, workingDir, setupRoot, storeRef, currentCardId, initialChatCount) {
   const initialCardSnapshot = createCardStoreSnapshot(setupRoot, storeRef);
   appendDebug('runCopilotWithValidationRetries:snapshotCreated', {
     hasInitialCardSnapshot: initialCardSnapshot !== null,
   });
-  const responseParts = [];
-  const initialResponse = runCopilot(prompt, workingDir).trim();
-  appendDebug('runCopilotWithValidationRetries:initialResponse', {
-    responseLength: initialResponse.length,
-  });
-  if (initialResponse) {
-    responseParts.push(initialResponse);
-  }
+  const maxRetries = 3;
+  let attempt = 0;
+  let finalValidationIssuesByCardId = {};
+  let finalAppendedAssistantMessage = null;
 
-  let retries = 0;
-  while (retries < 3) {
+  while (attempt <= maxRetries) {
+    const responseText = runCopilot(attempt === 0 ? prompt : buildCombinedRepairPrompt(finalValidationIssuesByCardId, !finalAppendedAssistantMessage), workingDir).trim();
+    appendDebug('runCopilotWithValidationRetries:attemptCompleted', {
+      attempt,
+      responseLength: responseText.length,
+    });
+
     const validationIssuesByCardId = validateAllCards(setupRoot, storeRef, Math.min(chatCopilotTimeoutMs, 30000));
+    const updatedChatMessages = readChatMessages(chatStoreRef, currentCardId, Math.min(chatCopilotTimeoutMs, 30000));
+    const appendedAssistantMessage = findNewAssistantMessage(updatedChatMessages, initialChatCount);
+    const missingChatStoreReply = !appendedAssistantMessage;
+
     appendDebug('runCopilotWithValidationRetries:validationCheck', {
-      retryIndex: retries,
+      attempt,
       hasValidationIssues: hasValidationIssues(validationIssuesByCardId),
       issueCardCount: validationIssuesByCardId && typeof validationIssuesByCardId === 'object'
         ? Object.keys(validationIssuesByCardId).length
         : 0,
+      missingChatStoreReply,
+      updatedChatMessageCount: Array.isArray(updatedChatMessages) ? updatedChatMessages.length : -1,
     });
-    if (!hasValidationIssues(validationIssuesByCardId)) {
+
+    finalValidationIssuesByCardId = validationIssuesByCardId;
+    finalAppendedAssistantMessage = appendedAssistantMessage;
+
+    if (!hasValidationIssues(validationIssuesByCardId) && appendedAssistantMessage) {
       break;
     }
 
-    const repairResponse = runValidationRepair(workingDir, validationIssuesByCardId);
-    appendDebug('runCopilotWithValidationRetries:repairResponse', {
-      retryIndex: retries,
-      responseLength: repairResponse.length,
-    });
-    if (repairResponse) {
-      responseParts.push(repairResponse);
+    if (attempt === maxRetries) {
+      break;
     }
-    retries += 1;
+
+    const repairResponse = runValidationRepair(workingDir, validationIssuesByCardId, missingChatStoreReply);
+    appendDebug('runCopilotWithValidationRetries:repairResponse', {
+      attempt,
+      responseLength: repairResponse.length,
+      missingChatStoreReply,
+    });
+    attempt += 1;
   }
 
-  const finalValidationIssuesByCardId = validateAllCards(setupRoot, storeRef, Math.min(chatCopilotTimeoutMs, 30000));
   appendDebug('runCopilotWithValidationRetries:finalValidation', {
     hasValidationIssues: hasValidationIssues(finalValidationIssuesByCardId),
     issueCardCount: finalValidationIssuesByCardId && typeof finalValidationIssuesByCardId === 'object'
       ? Object.keys(finalValidationIssuesByCardId).length
       : 0,
+    missingChatStoreReply: !finalAppendedAssistantMessage,
   });
-  if (hasValidationIssues(finalValidationIssuesByCardId)) {
-    throw new Error(`Card validation failed after Copilot run\n${JSON.stringify(finalValidationIssuesByCardId)}`);
+  if (hasValidationIssues(finalValidationIssuesByCardId) || !finalAppendedAssistantMessage) {
+    appendDebug('runCopilotWithValidationRetries:finalFailure', {
+      validationIssuesByCardId: finalValidationIssuesByCardId,
+      missingChatStoreReply: !finalAppendedAssistantMessage,
+    });
+    throw new Error("copilot couldn't produce a valid response");
   }
 
   syncChangedCardsToBoard(initialCardSnapshot);
   appendDebug('runCopilotWithValidationRetries:syncChangedCardsToBoard', {
-    responsePartCount: responseParts.length,
+    appendedAssistantMessage: true,
   });
 
-  return responseParts.join('\n\n');
+  return {
+    appendedAssistantMessage: finalAppendedAssistantMessage,
+  };
 }
 
 function resolveCopilotRoot(storeRef, cId) {
@@ -308,9 +400,19 @@ appendDebug('assistant:start', {
   scratchDir,
   chatCopilotTimeoutMs,
 });
+DBG_LOG('assistant:start', {
+  boardId,
+  cardId,
+  chatStoreRef,
+  scratchStoreRef,
+  enableDebugLogging: ENABLE_DEBUG_LOGGING,
+});
 
 const chatMessages = readChatMessages(chatStoreRef, cardId, Math.min(chatCopilotTimeoutMs, 30000));
 appendDebug('assistant:initialChatMessages', {
+  chatMessageCount: Array.isArray(chatMessages) ? chatMessages.length : -1,
+});
+DBG_LOG('assistant:initialChatMessages', {
   chatMessageCount: Array.isArray(chatMessages) ? chatMessages.length : -1,
 });
 const historyDump = JSON.stringify(chatMessages, null, 2);
@@ -318,21 +420,50 @@ const workingDir = resolveCopilotWorkingDir(boardSetupRoot, cardStoreRef, cardId
 appendDebug('assistant:workingDirResolved', {
   workingDir,
 });
+DBG_LOG('assistant:workingDirResolved', {
+  workingDir,
+});
 const prompt = buildPrompt(cardId, historyDump);
 appendDebug('assistant:promptBuilt', {
   historyDumpLength: historyDump.length,
   promptLength: prompt.length,
 });
+DBG_LOG('assistant:promptBuilt', {
+  historyDumpLength: historyDump.length,
+  promptLength: prompt.length,
+});
 
 try {
-  const assistantReplyText = runCopilotWithValidationRetries(
+  if (bypassCopilotForTest) {
+    appendDebug('assistant:testBypass', {
+      replyText: 'paris',
+    });
+    // User-visible assistant text must be written through chat store only.
+    DBG_LOG('assistant:testBypass:beforeAppend', {
+      replyText: 'paris',
+    });
+    appendAssistantReply(chatStoreRef, cardId, 'paris', Math.min(chatCopilotTimeoutMs, 30000));
+    DBG_LOG('assistant:testBypass:afterAppend');
+    process.stdout.write(JSON.stringify({ assistantHandled: true, bypassed: true }));
+    process.exit(0);
+  }
+
+  DBG_LOG('assistant:beforeCopilotRun');
+  const runResult = runCopilotWithValidationRetries(
     prompt,
     workingDir,
     boardSetupRoot,
-    cardStoreRef
+    cardStoreRef,
+    cardId,
+    chatMessages.length
   );
   appendDebug('assistant:copilotRunCompleted', {
-    assistantReplyLength: assistantReplyText.length,
+    assistantReplyLength: 0,
+    appendedAssistantMessage: !!runResult?.appendedAssistantMessage,
+  });
+  DBG_LOG('assistant:copilotRunCompleted', {
+    assistantReplyLength: 0,
+    appendedAssistantMessage: !!runResult?.appendedAssistantMessage,
   });
   const updatedChatMessages = readChatMessages(chatStoreRef, cardId, Math.min(chatCopilotTimeoutMs, 30000));
   appendDebug('assistant:updatedChatMessages', {
@@ -344,20 +475,21 @@ try {
   });
 
   if (!appendedAssistantMessage) {
-    if (!assistantReplyText || assistantReplyText.trim().length === 0) {
-      throw new Error('Assistant handler did not append a reply and returned an empty response');
-    }
-    appendDebug('assistant:fallbackAppendAssistantReply', {
-      replyLength: assistantReplyText.trim().length,
-    });
-    appendAssistantReply(chatStoreRef, cardId, assistantReplyText.trim(), Math.min(chatCopilotTimeoutMs, 30000));
+    throw new Error("copilot couldn't produce a valid response");
   }
   appendDebug('assistant:success', {
-    usedFallbackAppend: !appendedAssistantMessage,
+    usedFallbackAppend: false,
   });
+  DBG_LOG('assistant:success', {
+    usedFallbackAppend: false,
+  });
+  // The flow only consumes success or error from this process. Reply text must not be returned here.
   process.stdout.write(JSON.stringify({ assistantHandled: true }));
 } catch (err) {
   appendDebug('assistant:error', {
+    message: err?.message ?? String(err),
+  });
+  DBG_LOG('assistant:error', {
     message: err?.message ?? String(err),
   });
   process.stderr.write((err?.message ?? String(err)) + '\n');

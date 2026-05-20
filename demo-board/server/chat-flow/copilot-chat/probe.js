@@ -35,7 +35,9 @@ try {
   }
   appendSystemMessage(chatStoreRef, cardId, 'in-progress');
   const replyText = `Echo: ${normalizeProbeMessageText(lastMessage.text)}`;
+  // User-visible probe text must be written through chat store only.
   appendAssistantReply(chatStoreRef, cardId, replyText);
+  // The flow only consumes success or error from this process. Reply text must not be returned here.
   process.stdout.write(JSON.stringify({ assistantHandled: true }));
 } catch (err) {
   process.stderr.write((err?.message ?? String(err)) + '\n');

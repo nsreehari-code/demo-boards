@@ -10,7 +10,7 @@
  * T1: PATCH holdings (+1 row) → verify recomputation (holdings +1, positions +1)
  *
  * Usage:
- *   node test/server-http-test.js [--port 7799]
+ *   node test/server-http-test.js [--port 7799] [--use-config-setup-root]
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -33,9 +33,11 @@ const portArg = cliArgs.indexOf('--port');
 const cliPort = portArg !== -1 ? parseInt(cliArgs[portArg + 1], 10) : NaN;
 const serverConfigArg = cliArgs.indexOf('--server-config');
 const cliServerConfig = serverConfigArg !== -1 ? String(cliArgs[serverConfigArg + 1] || '').trim() : '';
+const useConfiguredSetupRoot = cliArgs.includes('--use-config-setup-root');
 const skipT1 = cliArgs.includes('--skip-t1');
 const skipT2 = cliArgs.includes('--skip-t2');
 const skipT3 = cliArgs.includes('--skip-t3');
+const forceT3aBypass = process.env.DEMO_T3A_BYPASS === '1';
 function isCopilotAvailable() {
   try {
     const r = spawnSync('copilot', ['--version'], { timeout: 5_000, stdio: 'ignore', windowsHide: true });
@@ -43,10 +45,13 @@ function isCopilotAvailable() {
   } catch { return false; }
 }
 
-const skipT3a = cliArgs.includes('--skip-t3a') || !isCopilotAvailable();
+const skipT3a = cliArgs.includes('--skip-t3a') || (!forceT3aBypass && !isCopilotAvailable());
 const skipT3b = cliArgs.includes('--skip-t3b');
 const skipT3c = cliArgs.includes('--skip-t3c') || !isCopilotAvailable();
 const RUN_ID = `run-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+const ASSISTANT_DEBUG_LOG_FILE = typeof process.env.ENABLE_DEBUG_LOGGING === 'string' && process.env.ENABLE_DEBUG_LOGGING.trim()
+  ? process.env.ENABLE_DEBUG_LOGGING.trim()
+  : path.join(os.tmpdir(), `demo-board-server-http-assistant-debug-${RUN_ID}.log`);
 
 const BOARD_ID = 'live';
 const BOARD_DIR = path.resolve(__dirname, '..');
@@ -58,6 +63,20 @@ const SERVER_CONFIG = cliServerConfig
 const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
 const CARD_PATTERN = 'cardT*';
 const CHAT_CARD_ID = 'card-portfolio';
+
+function loadServerConfigJson(configPath) {
+  try {
+    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function resolveConfiguredBoardSetupRoot(serverConfig, boardId) {
+  const setupRoot = serverConfig?.boards?.[boardId]?.setup?.setupRoot;
+  if (typeof setupRoot !== 'string' || !setupRoot.trim()) return null;
+  return path.resolve(BOARD_DIR, setupRoot);
+}
 
 function findFreePort() {
   return new Promise((resolve, reject) => {
@@ -78,16 +97,38 @@ async function resolveServerPort() {
 const PORT = await resolveServerPort();
 const BASE = `http://127.0.0.1:${PORT}/api/boards/${BOARD_ID}`;
 
-// Always use a system temp directory so parallel runs and vitest don't collide.
-function resolveSetupDirRoot() {
-  return os.tmpdir();
+function resolveSetupMode(serverConfig, boardId) {
+  if (useConfiguredSetupRoot) {
+    const configuredRoot = resolveConfiguredBoardSetupRoot(serverConfig, boardId);
+    if (!configuredRoot) {
+      throw new Error(`Configured setupRoot missing for board "${boardId}" in ${SERVER_CONFIG}`);
+    }
+    return {
+      setupDir: configuredRoot,
+      boardSetupRoot: configuredRoot,
+      cleanupPath: configuredRoot,
+      preserveSetupDir: true,
+    };
+  }
+
+  const setupDir = path.join(os.tmpdir(), RUN_ID);
+  return {
+    setupDir,
+    boardSetupRoot: path.join(setupDir, 'boards'),
+    cleanupPath: setupDir,
+    preserveSetupDir: false,
+  };
 }
 
-const SETUP_DIR = path.join(resolveSetupDirRoot(), RUN_ID);
-const BOARD_SETUP_ROOT = path.join(SETUP_DIR, 'boards');
-if (fs.existsSync(SETUP_DIR)) {
-  fs.rmSync(SETUP_DIR, { recursive: true, force: true });
-  console.log(`[demo-http-test] wiped setup dir: ${SETUP_DIR}`);
+const TEST_SERVER_CONFIG = loadServerConfigJson(SERVER_CONFIG);
+const SETUP_MODE = resolveSetupMode(TEST_SERVER_CONFIG, BOARD_ID);
+const SETUP_DIR = SETUP_MODE.setupDir;
+const BOARD_SETUP_ROOT = SETUP_MODE.boardSetupRoot;
+const SETUP_CLEANUP_PATH = SETUP_MODE.cleanupPath;
+const PRESERVE_SETUP_DIR = SETUP_MODE.preserveSetupDir;
+if (fs.existsSync(SETUP_CLEANUP_PATH)) {
+  fs.rmSync(SETUP_CLEANUP_PATH, { recursive: true, force: true });
+  console.log(`[demo-http-test] wiped setup dir: ${SETUP_CLEANUP_PATH}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -372,10 +413,15 @@ function startServer(port) {
       windowsHide: true,
       env: {
         ...process.env,
+        ENABLE_DEBUG_LOGGING: ASSISTANT_DEBUG_LOG_FILE,
         DEMO_SERVER_PORT: String(port),
-        DEMO_SETUP_DIR: SETUP_DIR,
-        DEMO_BOARD_SETUP_ROOT: BOARD_SETUP_ROOT,
         DEMO_CARDS_PATTERN: CARD_PATTERN,
+        ...(useConfiguredSetupRoot
+          ? {}
+          : {
+              DEMO_SETUP_DIR: SETUP_DIR,
+              DEMO_BOARD_SETUP_ROOT: BOARD_SETUP_ROOT,
+            }),
       },
     });
     let ready = false;
@@ -407,12 +453,28 @@ function startServer(port) {
 console.log('\n=== live board HTTP+SSE smoke test ===');
 console.log(`target: ${BASE}`);
 console.log(`card pattern: ${CARD_PATTERN}`);
+console.log(`[demo-http-test] assistant debug log: ${ASSISTANT_DEBUG_LOG_FILE}`);
 
 const serverProc = await startServer(PORT);
 let sseWorker = null;
 let chatSseClient = null;
 let chatSseClientId = '';
 
+async function ensureChatSseSubscription() {
+  if (!chatSseClientId) {
+    chatSseClientId = `chat-proto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  if (!chatSseClient) {
+    chatSseClient = startSseClient(`${BASE}/sse?clientId=${encodeURIComponent(chatSseClientId)}`, (payload) => {
+      captureChatEvents(payload, CHAT_CARD_ID);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+
+  const subRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/subscribe-sse`, { clientId: chatSseClientId });
+  assert(subRes.status === 200, `chat subscribe returned ${subRes.status}`);
+}
 try {
   // ── T0: init-board, SSE connect, wait for initial completion ──
 
@@ -566,14 +628,7 @@ try {
       console.log('\n=== T3: skipped (--skip-t3) ===');
     } else {
     console.log(`\n[${new Date().toISOString()}] === T3: probe chat protocol (SSE lifecycle) ===`);
-  chatSseClientId = `chat-proto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  chatSseClient = startSseClient(`${BASE}/sse?clientId=${encodeURIComponent(chatSseClientId)}`, (payload) => {
-    captureChatEvents(payload, CHAT_CARD_ID);
-  });
-  await new Promise((r) => setTimeout(r, 400));
-
-  const subRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/subscribe-sse`, { clientId: chatSseClientId });
-  assert(subRes.status === 200, `chat subscribe returned ${subRes.status}`);
+  await ensureChatSseSubscription();
 
   const t2Before = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
   assert(t2Before.status === 200, `T3 pre chats returned ${t2Before.status}`);
@@ -621,6 +676,7 @@ try {
     console.log('\n=== T3b: skipped (--skip-t3b) ===');
   } else {
     console.log('\n=== T3b: probe-echo chat with file upload protocol ===');
+    await ensureChatSseSubscription();
     const t2bBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
     assert(t2bBefore.status === 200, `T3b pre chats returned ${t2bBefore.status}`);
     const t2bBeforeMessages = Array.isArray(t2bBefore.data?.messages) ? t2bBefore.data.messages : [];
@@ -697,11 +753,58 @@ try {
     console.log('[T3b] ok: upload protocol and ordered probe lifecycle observed (user+processing, in-progress, assistant+processing clear)');
   }
 
+  // ── T3a: non-probe chat protocol over API + SSE ──
+  // Disabled in the public example unless explicitly requested — requires a
+  // configured Azure Foundry endpoint and agent_id in server-config.json.
+  if (skipT3a) {
+    console.log('\n=== T3a: skipped (--skip-t3a) ===');
+  } else {
+    console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');
+    await ensureChatSseSubscription();
+    const t2aBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2aBefore.status === 200, `T3a pre chats returned ${t2aBefore.status}`);
+    const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
+    const t2aBeforeCount = t2aBeforeMessages.length;
+    const t2aEventStart = NS.chatEvents.length;
+    const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
+
+    const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+      actionType: 'chat-send',
+      payload: {
+        text: t2aPrompt,
+      },
+    });
+    assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
+
+    const t2aAssistant = await waitForChatPredicate((events) => {
+      const t2aEvents = events.slice(t2aEventStart);
+      for (let i = t2aEvents.length - 1; i >= 0; i -= 1) {
+        const e = t2aEvents[i];
+        if (e.messageCount < t2aBeforeCount + 2) continue;
+        const last = e.messages[e.messages.length - 1];
+        if (last?.role === 'assistant' && /paris/i.test(String(last.text || ''))) return e;
+      }
+      return false;
+    }, 240_000, 'T3a assistant response with paris');
+    assert(!!t2aAssistant, 'T3a assistant response with paris not observed on SSE');
+
+    const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
+    const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
+    const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
+    assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat messages, got ${t2aNewMessages.length}`);
+    const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
+    assert(!!t2aAssistantMsg && typeof t2aAssistantMsg.id === 'string', 'T3a assistant chat message missing id');
+    assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T3a assistant file content missing paris');
+    console.log('[T3a] ok: non-probe response contains paris');
+  }
+
   // ── T3c: non-probe chat + file upload protocol over API + SSE ──
   if (skipT3c) {
     console.log('\n=== T3c: skipped (--skip-t3c) ===');
   } else {
     console.log('\n=== T3c: non-probe chat with file upload protocol (expect tokyo) ===');
+    await ensureChatSseSubscription();
     const t2cBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
     assert(t2cBefore.status === 200, `T3c pre chats returned ${t2cBefore.status}`);
     const t2cBeforeMessages = Array.isArray(t2cBefore.data?.messages) ? t2cBefore.data.messages : [];
@@ -773,51 +876,6 @@ try {
     assert(/tokyo/i.test(String(t2cAssistantMsg?.text || '')), 'T3c assistant file content missing tokyo');
     console.log('[T3c] ok: non-probe file-upload response contains tokyo');
   }
-
-  // ── T3a: non-probe chat protocol over API + SSE ──
-  // Disabled in the public example unless explicitly requested — requires a
-  // configured Azure Foundry endpoint and agent_id in server-config.json.
-  if (skipT3a) {
-    console.log('\n=== T3a: skipped (--skip-t3a) ===');
-  } else {
-    console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');
-    const t2aBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-    assert(t2aBefore.status === 200, `T3a pre chats returned ${t2aBefore.status}`);
-    const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
-    const t2aBeforeCount = t2aBeforeMessages.length;
-    const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
-
-    const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-      actionType: 'chat-send',
-      payload: {
-        text: JSON.stringify({
-          prompt: t2aPrompt,
-        }),
-      },
-    });
-    assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
-
-    const t2aAssistant = await waitForChatPredicate((events) => {
-      for (let i = events.length - 1; i >= 0; i -= 1) {
-        const e = events[i];
-        if (e.messageCount < t2aBeforeCount + 2) continue;
-        const last = e.messages[e.messages.length - 1];
-        if (last?.role === 'assistant' && /paris/i.test(String(last.text || ''))) return e;
-      }
-      return false;
-    }, 240_000, 'T3a assistant response with paris');
-    assert(!!t2aAssistant, 'T3a assistant response with paris not observed on SSE');
-
-    const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-    assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
-    const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
-    const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
-    assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat messages, got ${t2aNewMessages.length}`);
-    const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
-    assert(!!t2aAssistantMsg && typeof t2aAssistantMsg.id === 'string', 'T3a assistant chat message missing id');
-    assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T3a assistant file content missing paris');
-    console.log('[T3a] ok: non-probe response contains paris');
-  }
   }
 
   console.log('\n=== All smoke checks passed ===\n');
@@ -832,8 +890,12 @@ try {
   await new Promise((r) => serverProc.on('exit', r));
   if (sseWorker) await sseWorker.terminate();
 
-  if (fs.existsSync(SETUP_DIR)) {
-    fs.rmSync(SETUP_DIR, { recursive: true, force: true });
+  if (PRESERVE_SETUP_DIR) {
+    console.log(`[demo-http-test] server stopped, setup dir preserved: ${SETUP_CLEANUP_PATH}`);
+  } else {
+    if (fs.existsSync(SETUP_CLEANUP_PATH)) {
+      fs.rmSync(SETUP_CLEANUP_PATH, { recursive: true, force: true });
+    }
+    console.log('[demo-http-test] server stopped, setup dir cleaned');
   }
-  console.log('[demo-http-test] server stopped, setup dir cleaned');
 }

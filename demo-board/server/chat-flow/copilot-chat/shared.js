@@ -3,13 +3,12 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { parseRef } from 'yaml-flow/board-worker-adapter';
-import { createBoardLiveCardsNonCorePublic } from 'yaml-flow/board-live-cards-public';
-import { createCardStore, createCardStorePublic, createFsBoardNonCorePlatformAdapter } from 'yaml-flow/board-live-cards-node';
 
 const require = createRequire(import.meta.url);
 const YAML_FLOW_PACKAGE_JSON = require.resolve('yaml-flow/package.json');
 const CHAT_STORE_CLI = path.join(path.dirname(YAML_FLOW_PACKAGE_JSON), 'cli', 'node', 'chat-store-cli.js');
 const CARD_STORE_CLI = path.join(path.dirname(YAML_FLOW_PACKAGE_JSON), 'cli', 'node', 'card-store-cli.js');
+const BOARD_LIVE_CARDS_CLI = path.join(path.dirname(YAML_FLOW_PACKAGE_JSON), 'cli', 'node', 'board-live-cards-cli.js');
 
 function resolveFsPathRef(ref, fieldName) {
   requireNonEmptyString(ref, fieldName);
@@ -63,6 +62,98 @@ function runChatStoreCommands(chatStoreRef, cardId, commands, timeoutMs = 30000)
   }
 
   return JSON.parse(raw);
+}
+
+function encodeRef(refObject) {
+  return `b64:${Buffer.from(JSON.stringify(refObject), 'utf-8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')}`;
+}
+
+function buildFsPathRef(pathValue) {
+  requireNonEmptyString(pathValue, 'pathValue');
+  return encodeRef({ kind: 'fs-path', value: pathValue });
+}
+
+function runBoardLiveCardsCommand(baseRef, command, extraArgs = [], options = {}) {
+  const raw = execFileSync(process.execPath, [
+    BOARD_LIVE_CARDS_CLI,
+    command,
+    '--base-ref',
+    baseRef,
+    ...extraArgs,
+  ], {
+    input: options.input,
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: options.timeoutMs ?? 30000,
+    windowsHide: true,
+  }).trim();
+
+  return raw ? JSON.parse(raw) : null;
+}
+
+function writeStoredCards(storeRef, cards, timeoutMs = 30000) {
+  const payload = Array.isArray(cards) ? cards : [cards];
+  execFileSync(process.execPath, [
+    CARD_STORE_CLI,
+    'set',
+    '--store-ref',
+    storeRef,
+  ], {
+    input: JSON.stringify(payload),
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: timeoutMs,
+    windowsHide: true,
+  });
+}
+
+function checksumCard(card) {
+  return JSON.stringify(card);
+}
+
+function normalizeCardFileEntry(cardId, fileEntry) {
+  if (!fileEntry || typeof fileEntry !== 'object' || Array.isArray(fileEntry)) {
+    return fileEntry;
+  }
+
+  const normalized = {};
+  if (typeof fileEntry.name === 'string' && fileEntry.name.length > 0) {
+    normalized.name = fileEntry.name;
+  }
+  if (typeof fileEntry.stored_name === 'string' && fileEntry.stored_name.length > 0) {
+    normalized.stored_name = fileEntry.stored_name;
+  }
+
+  const normalizedPath = typeof fileEntry.path === 'string' && fileEntry.path.length > 0
+    ? fileEntry.path
+    : (typeof fileEntry.stored_name === 'string' && fileEntry.stored_name.length > 0 && typeof cardId === 'string' && cardId.length > 0
+      ? `${cardId}/files/${fileEntry.stored_name}`
+      : '');
+  if (normalizedPath) {
+    normalized.path = normalizedPath;
+  }
+
+  return normalized;
+}
+
+function normalizeStoredCard(card) {
+  if (!card || typeof card !== 'object' || Array.isArray(card)) {
+    return card;
+  }
+
+  if (!Array.isArray(card.card_data?.files)) {
+    return card;
+  }
+
+  return {
+    ...card,
+    card_data: {
+      ...(card.card_data && typeof card.card_data === 'object' && !Array.isArray(card.card_data) ? card.card_data : {}),
+      files: card.card_data.files.map((fileEntry) => normalizeCardFileEntry(card.id, fileEntry)),
+    },
+  };
 }
 
 function getBatchCommandData(parsed, index = 0) {
@@ -227,47 +318,20 @@ export function createCardStoreSnapshot(setupRoot, storeRef) {
     return null;
   }
 
-  const boardRef = { kind: 'fs-path', value: setupRoot };
-  const boardAdapter = createFsBoardNonCorePlatformAdapter(boardRef);
-  const kvStorage = boardAdapter.kvStorageForRef(storeRef);
-  const cardAdminStore = createCardStore({
-    readIndex() {
-      const value = kvStorage.read('_index');
-      return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
-    },
-    writeIndex(index) {
-      kvStorage.write('_index', index);
-    },
-    readCard(key) {
-      const value = kvStorage.read(key);
-      return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
-    },
-    writeCard(key, card) {
-      kvStorage.write(key, card);
-      return JSON.stringify(card);
-    },
-    cardExists(key) {
-      return kvStorage.read(key) !== null;
-    },
-    defaultCardKey(currentCardId) {
-      return currentCardId;
-    },
-  });
-  const cardStorePublic = createCardStorePublic(cardAdminStore);
-  const cardsResult = cardStorePublic.get({});
-  const cards = cardsResult.status === 'success' && Array.isArray(cardsResult.data?.cards)
-    ? cardsResult.data.cards.filter((card) => card && typeof card === 'object')
-    : [];
-
+  const cards = readAllStoredCards(storeRef).map((card) => normalizeStoredCard(card));
   return {
-    boardApi: createBoardLiveCardsNonCorePublic(boardRef, boardAdapter),
-    cardAdminStore,
+    storeRef,
+    baseRef: buildFsPathRef(setupRoot),
     cardsById: new Map(
       cards
         .filter((card) => typeof card.id === 'string' && card.id.length > 0)
         .map((card) => [card.id, card])
     ),
-    checksumIndex: cardAdminStore.readChecksumIndex(),
+    checksumIndex: new Map(
+      cards
+        .filter((card) => typeof card.id === 'string' && card.id.length > 0)
+        .map((card) => [card.id, checksumCard(card)])
+    ),
   };
 }
 
@@ -276,19 +340,39 @@ export function syncChangedCardsToBoard(snapshot) {
     return;
   }
 
-  const changedCardIds = snapshot.cardAdminStore.changedSince(snapshot.checksumIndex);
+  const currentCardsById = new Map(
+    readAllStoredCards(snapshot.storeRef)
+      .map((card) => normalizeStoredCard(card))
+      .filter((card) => typeof card?.id === 'string' && card.id.length > 0)
+      .map((card) => [card.id, card])
+  );
+  const changedCardIds = new Set();
+  for (const [cardId, currentCard] of currentCardsById.entries()) {
+    if (snapshot.checksumIndex.get(cardId) !== checksumCard(currentCard)) {
+      changedCardIds.add(cardId);
+    }
+  }
+  for (const cardId of snapshot.checksumIndex.keys()) {
+    if (!currentCardsById.has(cardId)) {
+      changedCardIds.add(cardId);
+    }
+  }
+
   for (const changedCardId of changedCardIds) {
     if (!changedCardId) {
       continue;
     }
 
-    const currentCard = snapshot.cardAdminStore.readCard(changedCardId);
+    const currentCard = currentCardsById.get(changedCardId) ?? null;
     if (currentCard) {
-      const upsertResult = snapshot.boardApi.upsertCard({
-        params: { cardId: changedCardId, restart: true },
-      });
-      if (upsertResult.status !== 'success') {
-        throw new Error(upsertResult.error ?? `Failed to refresh changed card "${changedCardId}"`);
+      const refreshResult = runBoardLiveCardsCommand(
+        snapshot.baseRef,
+        'upsert-card',
+        ['--card-id', changedCardId, '--restart'],
+      );
+
+      if (refreshResult?.status !== 'success') {
+        throw new Error(refreshResult?.error ?? `Failed to refresh changed card "${changedCardId}"`);
       }
       continue;
     }
@@ -297,11 +381,13 @@ export function syncChangedCardsToBoard(snapshot) {
       continue;
     }
 
-    const removeResult = snapshot.boardApi.removeCard({
-      params: { id: changedCardId },
-    });
-    if (removeResult.status !== 'success') {
-      throw new Error(removeResult.error ?? `Failed to remove deleted card "${changedCardId}" from board runtime`);
+    const removeResult = runBoardLiveCardsCommand(
+      snapshot.baseRef,
+      'remove-card',
+      ['--id', changedCardId],
+    );
+    if (removeResult?.status !== 'success') {
+      throw new Error(removeResult?.error ?? `Failed to remove deleted card "${changedCardId}" from board runtime`);
     }
   }
 }
@@ -316,11 +402,7 @@ export function validateAllCards(setupRoot, storeRef, timeoutMs = 30000) {
     return {};
   }
 
-  const boardRef = { kind: 'fs-path', value: setupRoot };
-  const boardApi = createBoardLiveCardsNonCorePublic(
-    boardRef,
-    createFsBoardNonCorePlatformAdapter(boardRef)
-  );
+  const baseRef = buildFsPathRef(setupRoot);
 
   const issuesByCardId = {};
   for (const card of cards) {
@@ -330,12 +412,23 @@ export function validateAllCards(setupRoot, storeRef, timeoutMs = 30000) {
       continue;
     }
 
-    const validation = boardApi.validateCardPreflight({
-      body: card,
-    });
+    const normalizedCard = normalizeStoredCard(card);
+    if (checksumCard(normalizedCard) !== checksumCard(card)) {
+      writeStoredCards(storeRef, normalizedCard, timeoutMs);
+    }
 
-    if (validation.status !== 'success') {
-      issuesByCardId[currentCardId] = [validation.error ?? 'validateCardPreflight failed'];
+    const validation = runBoardLiveCardsCommand(
+      baseRef,
+      'validate-card-preflight',
+      [],
+      {
+        input: JSON.stringify(normalizedCard),
+        timeoutMs,
+      },
+    );
+
+    if (validation?.status !== 'success') {
+      issuesByCardId[currentCardId] = [validation?.error ?? 'validate-card-preflight failed'];
       continue;
     }
 
