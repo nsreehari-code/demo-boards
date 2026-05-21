@@ -14,6 +14,11 @@ function resolveDefaultBoard(config) {
 }
 
 function resolveServerOrigin(config) {
+  const override = import.meta.env?.VITE_SERVER_ORIGIN;
+  if (typeof override === 'string' && override.trim()) {
+    return override.trim().replace(/\/+$/, '');
+  }
+
   const port = Number(config?.port);
   const resolvedPort = Number.isFinite(port) && port > 0 ? port : 7799;
   const protocol = typeof window !== 'undefined' && window.location?.protocol
