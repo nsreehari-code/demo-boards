@@ -11,7 +11,7 @@
     "postinstall": "npm run install:foundry && npm run install:vite",
     "start": "node scripts/start-server.cjs demo-board --all",
     "dev": "npm run vite",
-    "frontend": "node ./node_modules/http-server/bin/http-server demo-board/web/dist-vite -p 8000 -c-1",
+    "frontend": "node ./node_modules/http-server/bin/http-server docs -p 8000 -c-1",
     "vite": "npm --prefix demo-board/web/vite run dev",
     "mcp:install": "npm --prefix mcp-server install",
     "mcp:test": "npm --prefix mcp-server run test:smoke",

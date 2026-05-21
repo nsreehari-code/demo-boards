@@ -19,7 +19,7 @@ if (!fs.existsSync(boardServerPath)) {
 const boardLiveCardsCliJs = path.resolve(workspaceDir, 'node_modules', 'yaml-flow', 'cli', 'node', 'board-live-cards-cli.js');
 const stepMachineCliPath = path.resolve(workspaceDir, 'node_modules', 'yaml-flow', 'cli', 'node', 'step-machine-cli.js');
 const mcpServerPath = path.resolve(workspaceDir, 'mcp-server', 'src', 'index.js');
-const frontendDir = path.join(boardDir, 'web', 'dist-vite');
+const frontendDir = path.resolve(workspaceDir, 'docs');
 const viteDir = path.join(boardDir, 'web', 'vite');
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npmExecPath = typeof process.env.npm_execpath === 'string' && process.env.npm_execpath

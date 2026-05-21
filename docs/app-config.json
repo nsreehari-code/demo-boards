@@ -1,0 +1,12 @@
+{
+  "defaultBoardId": "live",
+  "defaultBoard": {
+    "id": "live",
+    "label": "Live",
+    "subtitle": "Live operational intelligence for agent workflows"
+  },
+  "pageTitle": "Live",
+  "pageSubtitle": "Live operational intelligence for agent workflows",
+  "refreshAllIntervalMs": 300000,
+  "serverOrigin": "http://localhost:7799"
+}
