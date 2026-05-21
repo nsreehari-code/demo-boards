@@ -48,9 +48,7 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: ${{ github.workspace }}/demo-board/dist-vite
-          name: github-pages
-
+          path: demo-board/dist-vite
 
   deploy:
     needs: build
