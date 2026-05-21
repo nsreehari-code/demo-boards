@@ -1,6 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {
+  ResponsiveContainer,
+  PieChart, Pie, Cell,
+  BarChart, Bar,
+  LineChart, Line,
+  AreaChart, Area,
+  ScatterChart, Scatter,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+} from 'recharts';
+
+const CHART_PALETTE = [
+  '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
+  '#edc948', '#b07aa1', '#ff9da7', '#9c755f', '#bab0ac',
+];
 
 export const CARD_CORE_VIEW_KINDS = {
   table: { Component: TableView, isEditable: false },
@@ -18,7 +32,6 @@ export const CARD_CORE_VIEW_KINDS = {
   text: { Component: TextView, isEditable: false },
   markdown: { Component: MarkdownView, isEditable: false },
   actions: { Component: ActionsView, isEditable: false },
-  custom: { Component: CustomView, isEditable: false },
 };
 
 function deepEqual(left, right) {
@@ -61,7 +74,6 @@ function detectChartType(data) {
   if (sample?.x !== undefined || sample?.date !== undefined) return 'line';
   return 'bar';
 }
-
 function getObjectColumns(rows, configuredColumns) {
   if (Array.isArray(configuredColumns) && configuredColumns.length) return configuredColumns;
   const keys = new Set();
@@ -272,16 +284,145 @@ function ListView({ data, renderDef }) {
   return <div className="small">{String(data)}</div>;
 }
 
+function normalizeChartData({ data, viewData }) {
+  // Chart.js-style pre-shaped input: { labels: [...], datasets: [{ label, data }, ...] }
+  if (data && !Array.isArray(data) && typeof data === 'object'
+      && Array.isArray(data.labels) && Array.isArray(data.datasets)) {
+    const labels = data.labels;
+    const datasets = data.datasets;
+    const seriesNames = datasets.map((d, i) => d?.label ?? `series${i + 1}`);
+    const rows = labels.map((label, i) => {
+      const row = { __label: label };
+      datasets.forEach((d, j) => {
+        const val = Array.isArray(d?.data) ? d.data[i] : undefined;
+        row[seriesNames[j]] = val;
+      });
+      return row;
+    });
+    return { rows, labelKey: '__label', seriesKeys: seriesNames };
+  }
+
+  if (!Array.isArray(data) || !data.length) return null;
+
+  // Array of primitives → one series, index-based labels
+  if (typeof data[0] !== 'object' || data[0] === null) {
+    const rows = data.map((v, i) => ({ __label: String(i + 1), value: v }));
+    return { rows, labelKey: '__label', seriesKeys: ['value'] };
+  }
+
+  const columns = Array.isArray(viewData.columns) ? viewData.columns : null;
+  const allKeys = Object.keys(data[0] ?? {});
+  const labelKey = columns?.[0] ?? viewData.labelKey ?? viewData.xKey ?? allKeys[0];
+  let seriesKeys;
+  if (Array.isArray(viewData.series) && viewData.series.length) {
+    seriesKeys = viewData.series;
+  } else if (columns && columns.length > 1) {
+    seriesKeys = columns.slice(1);
+  } else {
+    seriesKeys = allKeys.filter((k) => k !== labelKey && typeof data[0][k] === 'number');
+    if (!seriesKeys.length) seriesKeys = allKeys.filter((k) => k !== labelKey).slice(0, 1);
+  }
+  return { rows: data, labelKey, seriesKeys };
+}
+
 function ChartView({ data, renderDef }) {
-  if (!Array.isArray(data) || !data.length) {
+  const viewData = renderDef?.data ?? {};
+  const normalized = useMemo(() => normalizeChartData({ data, viewData }), [data, viewData]);
+
+  if (!normalized || !normalized.rows.length || !normalized.seriesKeys.length) {
     return <p className="board-text-muted small mb-0">No chart data</p>;
   }
 
-  const chartType = renderDef?.data?.chartType ?? detectChartType(data);
+  const { rows, labelKey, seriesKeys } = normalized;
+  const chartType = viewData.chartType ?? detectChartType(rows);
+  const stacked = viewData.stacked === true;
+  const showLegend = viewData.legend !== false && (seriesKeys.length > 1 || chartType === 'pie' || chartType === 'doughnut');
+  const showGrid = viewData.grid !== false;
+
+  let chart;
+  if (chartType === 'pie' || chartType === 'doughnut') {
+    const valueKey = seriesKeys[0];
+    const inner = chartType === 'doughnut' ? '55%' : 0;
+    chart = (
+      <PieChart>
+        <Pie
+          data={rows}
+          dataKey={valueKey}
+          nameKey={labelKey}
+          innerRadius={inner}
+          outerRadius="80%"
+          paddingAngle={1}
+        >
+          {rows.map((_, i) => (
+            <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
+          ))}
+        </Pie>
+        <Tooltip />
+        {showLegend ? <Legend wrapperStyle={{ fontSize: 11 }} /> : null}
+      </PieChart>
+    );
+  } else if (chartType === 'line' || chartType === 'area') {
+    const ChartC = chartType === 'area' ? AreaChart : LineChart;
+    const SeriesC = chartType === 'area' ? Area : Line;
+    chart = (
+      <ChartC data={rows} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+        {showGrid ? <CartesianGrid strokeDasharray="3 3" /> : null}
+        <XAxis dataKey={labelKey} tick={{ fontSize: 10 }} />
+        <YAxis tick={{ fontSize: 10 }} />
+        <Tooltip />
+        {showLegend ? <Legend wrapperStyle={{ fontSize: 11 }} /> : null}
+        {seriesKeys.map((key, i) => (
+          <SeriesC
+            key={key}
+            type="monotone"
+            dataKey={key}
+            stroke={CHART_PALETTE[i % CHART_PALETTE.length]}
+            fill={CHART_PALETTE[i % CHART_PALETTE.length]}
+            fillOpacity={chartType === 'area' ? 0.3 : 1}
+            stackId={stacked ? 'stack' : undefined}
+            dot={false}
+          />
+        ))}
+      </ChartC>
+    );
+  } else if (chartType === 'scatter') {
+    const xKey = labelKey;
+    const yKey = seriesKeys[0];
+    chart = (
+      <ScatterChart margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+        {showGrid ? <CartesianGrid strokeDasharray="3 3" /> : null}
+        <XAxis dataKey={xKey} tick={{ fontSize: 10 }} />
+        <YAxis dataKey={yKey} tick={{ fontSize: 10 }} />
+        <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+        <Scatter data={rows} fill={CHART_PALETTE[0]} />
+      </ScatterChart>
+    );
+  } else {
+    chart = (
+      <BarChart data={rows} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+        {showGrid ? <CartesianGrid strokeDasharray="3 3" /> : null}
+        <XAxis dataKey={labelKey} tick={{ fontSize: 10 }} />
+        <YAxis tick={{ fontSize: 10 }} />
+        <Tooltip />
+        {showLegend ? <Legend wrapperStyle={{ fontSize: 11 }} /> : null}
+        {seriesKeys.map((key, i) => (
+          <Bar
+            key={key}
+            dataKey={key}
+            fill={CHART_PALETTE[i % CHART_PALETTE.length]}
+            stackId={stacked ? 'stack' : undefined}
+          />
+        ))}
+      </BarChart>
+    );
+  }
+
+  const height = viewData.height ?? 220;
   return (
-    <div className="h-100 d-flex flex-column min-h-0">
-      <div className="small board-text-muted mb-2">Chart preview ({chartType})</div>
-      <TableView data={data} renderDef={renderDef} />
+    <div style={{ width: '100%', height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        {chart}
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -804,11 +945,6 @@ function MarkdownView({ data }) {
       </ReactMarkdown>
     </div>
   );
-}
-
-function CustomView({ data }) {
-  if (data == null) return null;
-  return <pre className="small mb-0" style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(data, null, 2)}</pre>;
 }
 
 function ActionsView({ data, renderDef, onSave }) {
