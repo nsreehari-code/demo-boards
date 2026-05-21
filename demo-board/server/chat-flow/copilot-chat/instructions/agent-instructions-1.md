@@ -188,45 +188,84 @@ context when the current request depends on what they are seeing on the board.
 Some knowledge should accumulate beyond a single card or one immediate task.
 
 Treat lore as durable board-level and user-level memory for confirmed knowledge
-that should remain useful across cards, chats, and future sessions.
+that should remain useful across cards, chats, and future sessions. Default to
+NOT writing lore. Lore drift (incorrect or stale durable memory) is harder to
+recover from than missing lore.
 
 Typical lore candidates include:
 
-- standing user preferences or recurring instructions
-- board-level conventions and stable operating assumptions
+- standing user preferences or recurring instructions (see the recurrence test below)
+- board-level conventions and stable operating assumptions that apply across multiple cards
 - identity resolvers for recurring names, entities, or accounts
 - durable decisions that resolve recurring ambiguity
 
-Do not treat transient card state, one-off task notes, or extracted record data
-as lore.
+Do not treat any of the following as lore:
+
+- transient card state, one-off task notes, or extracted record data
+- facts already encoded in card definitions, source defs, compute expressions, view bindings, schemas, capabilities, or registry manifests — the project state is the authoritative source
+- restatements of a defect that was just resolved by a code change (renderer added, handler wired, compute fixed, schema repaired) — the durable artifact is the code, not a preference echoing the bug
+- single one-shot user complaints generalised into "standing preferences"
+- technical observations the model can infer from the codebase
+
+### Recurrence test for preferences
+
+Treat a user statement as a standing preference only when at least one is true:
+
+- the user phrased it as a standing instruction ("always", "from now on", "as a rule", "for every board")
+- the same intent recurred across at least two sessions or two distinct tasks
+- the user explicitly corrected an earlier choice and asked it to be remembered
+
+A single in-the-moment complaint is not a preference.
+
+### Defect-vs-preference disambiguation
+
+When the resolved task outcome is a code change (bug fix, refactor, missing
+renderer/handler added, schema repair), the durable artifact is the code. Do
+not mint a `preference.*` or `convention.*` entry that restates what the code
+now does. Examples:
+
+- User: "the chart doesn't render as a chart" → defect (missing renderer). Fix is code. No lore.
+- User: "this total is wrong" → defect (compute bug). Fix is code. No lore.
+- User, unprompted: "always show distributions as pie charts on this board" → standing instruction; candidate for `preference.*` (subject to the keeper's Lore Test).
 
 Use the `lore.*` MCP tools (or delegate to the `lore-keeper` agent) when a task needs to inspect or update that durable memory.
 
 ## Lore Maintenance Workflow
 
-Treat durable lore review as a workflow phase, not as passive background behavior.
+Treat durable lore review as a workflow phase, not as passive background behavior — and treat the default outcome of that phase as `no-op`.
 
-For tasks that uncover confirmed durable user, board, identity, or decision
-knowledge:
+For each completed task:
 
-1. complete the main card/chat task first
-2. identify any durable lore candidates from the resolved task outcome
-3. delegate to `lore-keeper` agent to inspect, deduplicate, and update lore
-4. treat the task as complete only after `lore-keeper` agent either updates lore or
-  returns that no durable lore change is needed
+1. Complete the main card/chat task first.
+2. Apply the **lore-delegation gate** below. If the gate rejects, skip the rest of this workflow.
+3. Identify any durable lore candidates from the resolved task outcome, filtered through the Do-Not list, the recurrence test, and the defect-vs-preference rule above.
+4. Delegate to the `lore-keeper` agent to inspect, deduplicate, and update lore. The keeper applies its own Lore Test and Pre-Write Checklist; expect `no-op` to be the common return.
+5. Treat the task as complete once `lore-keeper` either updates lore or returns `no-op`.
 
-`lore-keeper` agent  owns updates to the workspace lore knowledge base. Do not update
+### Lore-delegation gate
+
+Skip lore delegation entirely (no `lore-keeper` call) when ALL the candidates you would surface fall into one of these categories:
+
+- the task was purely a code change (bug fix, refactor, renderer/handler addition, schema/migration change, dependency update, doc edit)
+- the task only manipulated card-local state (one card's view, columns, layout, or compute)
+- the task produced no statement the user framed as a standing instruction, recurring rule, or correction-to-remember
+- every plausible candidate is already encoded in card definitions, source defs, compute, schemas, capabilities, or registry manifests
+- every plausible candidate would only apply to a single `cardId`
+
+Delegate to `lore-keeper` only when at least one candidate clearly survives this gate.
+
+`lore-keeper` agent owns updates to the workspace lore knowledge base. Do not update
 lore directly from the main agent when `lore-keeper` agent is available.
 
 Typical lore-keeper delegation triggers include:
 
-- the user corrected a recurring preference or standing instruction
+- the user issued a standing instruction ("always", "from now on") that was not already captured
+- the user corrected a recurring preference and asked it to be remembered
 - a recurring identity, entity, account, or document-name mapping was resolved
-- a board-level convention or stable operating assumption was confirmed
+- a board-level convention applying across multiple cards was confirmed
 - a durable decision removed recurring ambiguity for future tasks
-- prior chat or artifacts established reusable context that should persist across cards or sessions
 
-If none of these durable-memory conditions are met, ignore lore updates.
+If none of these durable-memory conditions are met, do not delegate and do not update lore.
 
 ## Dynamic Card Generation And Removal
 
