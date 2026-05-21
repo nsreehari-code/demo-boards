@@ -1,0 +1,111 @@
+{
+  "server": {
+    "name": "demo-boards-mcp",
+    "version": "0.1.0",
+    "description": "Centralized lore knowledge-base tools"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+    "urlDefault": "http://127.0.0.1:7801/mcp"
+  },
+  "tools": [
+    {
+      "name": "lore.get",
+      "title": "Lore Get",
+      "description": "Fetch one lore entry by key within a scope. Returns the entry or null.",
+      "handler": "lore",
+      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', or 'user/<id>'." },
+          "key": { "type": "string", "description": "Lore entry key (dotted, e.g. board.fy-convention)." }
+        },
+        "required": ["scope", "key"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "lore.get_all",
+      "title": "Lore Get All",
+      "description": "List lore entries in a scope, optionally filtered by key prefix and including deprecated entries.",
+      "handler": "lore",
+      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', or 'user/<id>'." },
+          "keyPrefix": { "type": "string", "description": "Optional key prefix filter (e.g. 'identity.')." },
+          "includeDeprecated": { "type": "boolean", "description": "When true, include deprecated entries. Default false." }
+        },
+        "required": ["scope"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "lore.list_scopes",
+      "title": "Lore List Scopes",
+      "description": "Discover scopes that have any stored lore. Optionally filter by prefix (e.g. 'board/').",
+      "handler": "lore",
+      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prefix": { "type": "string", "description": "Optional scope prefix filter such as 'board/' or 'user/'." }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "lore.set",
+      "title": "Lore Set",
+      "description": "Create or replace one lore entry within a scope. Clears any prior deprecation.",
+      "handler": "lore",
+      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', or 'user/<id>'." },
+          "key": { "type": "string", "description": "Lore entry key." },
+          "value": { "description": "Entry value. Strings, objects, or arrays are all supported." }
+        },
+        "required": ["scope", "key", "value"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "lore.append",
+      "title": "Lore Append",
+      "description": "Append to an existing lore entry, creating it if missing. Strings concatenate with newline; arrays merge; otherwise the value becomes an array.",
+      "handler": "lore",
+      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', or 'user/<id>'." },
+          "key": { "type": "string", "description": "Lore entry key." },
+          "value": { "description": "Value to append." }
+        },
+        "required": ["scope", "key", "value"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "lore.deprecate",
+      "title": "Lore Deprecate",
+      "description": "Mark one lore entry as deprecated. Default reads hide it; get_all with includeDeprecated=true still returns it.",
+      "handler": "lore",
+      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', or 'user/<id>'." },
+          "key": { "type": "string", "description": "Lore entry key." }
+        },
+        "required": ["scope", "key"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

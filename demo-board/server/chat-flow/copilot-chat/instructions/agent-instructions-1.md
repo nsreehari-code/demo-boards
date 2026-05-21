@@ -29,7 +29,8 @@ shared reference:
 - `card-store-commands` for stored card CRUD
 - `artifacts-store-commands` for uploaded or attached files
 - `chat-store-commands` for card chat history
-- `lore-commands` for durable board-level and user-level lore
+
+For durable board-level and cross-board lore, call the `lore.*` MCP tools directly (`lore.get`, `lore.get_all`, `lore.list_scopes`, `lore.set`, `lore.append`, `lore.deprecate`) instead of any local CLI. Use scope `board/<boardId>` for board lore and `global` for cross-board user lore.
 
 Treat the `*-commands` skills as the authoritative command surfaces for their
 respective stores and runtime operations.
@@ -199,7 +200,7 @@ Typical lore candidates include:
 Do not treat transient card state, one-off task notes, or extracted record data
 as lore.
 
-Use `lore-commands` when a task needs lore commands to inspect or update that durable memory.
+Use the `lore.*` MCP tools (or delegate to the `lore-keeper` agent) when a task needs to inspect or update that durable memory.
 
 ## Lore Maintenance Workflow
 

@@ -24,6 +24,7 @@ import os from 'node:os';
 
 const ECHO_PROBE_MARKER = '__probe__echo__probe__';
 const PROBE_IN_PROGRESS_TEXT = 'in-progress';
+const NON_PROBE_RESPONSE_TIMEOUT_MS = 40_000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -278,6 +279,133 @@ const waitForAllCompleted = (ms = 60_000, label = 'all completed') =>
 
 const waitForChatPredicate = (predicate, ms, label) =>
   waitUntil(() => predicate(NS.chatEvents) || false, ms, label);
+
+function findAssistantOutcomeInMessages(messages, beforeCount, successPattern) {
+  const newMessages = Array.isArray(messages) ? messages.slice(beforeCount) : [];
+  const assistantMessage = [...newMessages].reverse().find((message) => message?.role === 'assistant');
+
+  if (assistantMessage) {
+    const text = String(assistantMessage.text || '');
+    if (successPattern && successPattern.test(text)) {
+      return { ok: true, assistantMessage };
+    }
+    return {
+      ok: false,
+      reason: `assistant reply did not match expected content: ${text.slice(0, 120) || '(empty)'}`,
+      assistantMessage,
+    };
+  }
+
+  const failureMessage = [...newMessages].reverse().find((message) => {
+    if (!message || (message.role !== 'system' && message.role !== 'assistant')) return false;
+    return /(failed|error|unable to complete|couldn't produce a valid response|intent: failure)/i.test(String(message.text || ''));
+  });
+  if (failureMessage) {
+    return {
+      ok: false,
+      reason: `chat failure message observed: ${String(failureMessage.text || '').slice(0, 160)}`,
+    };
+  }
+
+  return null;
+}
+
+function readAssistantDebugEntries() {
+  if (!ASSISTANT_DEBUG_LOG_FILE || !fs.existsSync(ASSISTANT_DEBUG_LOG_FILE)) {
+    return [];
+  }
+
+  try {
+    return fs.readFileSync(ASSISTANT_DEBUG_LOG_FILE, 'utf-8')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function findAssistantOutcome(events, options) {
+  const successPattern = options?.successPattern instanceof RegExp ? options.successPattern : null;
+  const beforeCount = Number.isInteger(options?.beforeCount) && options.beforeCount >= 0 ? options.beforeCount : 0;
+  const debugEntryStart = Number.isInteger(options?.debugEntryStart) && options.debugEntryStart >= 0
+    ? options.debugEntryStart
+    : 0;
+  let sawProcessingTrue = false;
+
+  for (const event of events) {
+    if (!event || !Array.isArray(event.messages)) continue;
+
+    if (event.processing) {
+      sawProcessingTrue = true;
+    }
+
+    const messageOutcome = findAssistantOutcomeInMessages(event.messages, beforeCount, successPattern);
+    if (messageOutcome) {
+      return { ...messageOutcome, event, source: 'sse' };
+    }
+
+    if (sawProcessingTrue && !event.processing && event.messageCount >= beforeCount + 1) {
+      return {
+        ok: false,
+        reason: 'chat processing cleared before a matching assistant reply was appended',
+        event,
+      };
+    }
+  }
+
+  const debugEntries = readAssistantDebugEntries().slice(debugEntryStart);
+  const assistantError = [...debugEntries].reverse().find((entry) => (
+    entry
+    && typeof entry.stage === 'string'
+    && (entry.stage === 'assistant:error' || entry.stage === 'runCopilot:error')
+  ));
+  if (assistantError) {
+    return {
+      ok: false,
+      reason: assistantError.message || assistantError.errFileText || 'assistant error logged',
+      debugEntry: assistantError,
+    };
+  }
+
+  return false;
+}
+
+async function waitForAssistantOutcome({ cardId, eventStart, beforeCount, debugEntryStart, successPattern, timeoutMs, label }) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    const eventOutcome = findAssistantOutcome(NS.chatEvents.slice(eventStart), {
+      beforeCount,
+      debugEntryStart,
+      successPattern,
+    });
+    if (eventOutcome) {
+      return eventOutcome;
+    }
+
+    const chatsRes = await httpGet(`${BASE}/cards/${cardId}/chats`);
+    if (chatsRes.status === 200) {
+      const messages = Array.isArray(chatsRes.data?.messages) ? chatsRes.data.messages : [];
+      const messageOutcome = findAssistantOutcomeInMessages(messages, beforeCount, successPattern);
+      if (messageOutcome) {
+        return { ...messageOutcome, source: 'http' };
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(`Timeout (${timeoutMs}ms) waiting for: ${label}`);
+}
 
 function deriveProbeLifecycleMilestones(events, opts) {
   const milestones = [];
@@ -766,6 +894,7 @@ try {
     const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
     const t2aBeforeCount = t2aBeforeMessages.length;
     const t2aEventStart = NS.chatEvents.length;
+    const t2aDebugStart = readAssistantDebugEntries().length;
     const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
 
     const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
@@ -776,17 +905,16 @@ try {
     });
     assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
 
-    const t2aAssistant = await waitForChatPredicate((events) => {
-      const t2aEvents = events.slice(t2aEventStart);
-      for (let i = t2aEvents.length - 1; i >= 0; i -= 1) {
-        const e = t2aEvents[i];
-        if (e.messageCount < t2aBeforeCount + 2) continue;
-        const last = e.messages[e.messages.length - 1];
-        if (last?.role === 'assistant' && /paris/i.test(String(last.text || ''))) return e;
-      }
-      return false;
-    }, 240_000, 'T3a assistant response with paris');
-    assert(!!t2aAssistant, 'T3a assistant response with paris not observed on SSE');
+    const t2aOutcome = await waitForAssistantOutcome({
+      cardId: CHAT_CARD_ID,
+      eventStart: t2aEventStart,
+      beforeCount: t2aBeforeCount,
+      debugEntryStart: t2aDebugStart,
+      successPattern: /paris/i,
+      timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
+      label: 'T3a assistant response with paris',
+    });
+    assert(t2aOutcome.ok, `T3a failed before assistant response: ${t2aOutcome.reason || 'unknown reason'}`);
 
     const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
     assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
@@ -840,6 +968,8 @@ try {
     assert(/#\d+\s*$/.test(String(t2cUploadSystem?.text || '')), 'T3c upload system message should include merged file index');
 
     const t2cSendBaseline = t2cUploadMessages.length;
+    const t2cEventStart = NS.chatEvents.length;
+    const t2cDebugStart = readAssistantDebugEntries().length;
     const t2cPrompt = 'Answer the question in the attached file in one word';
 
     const t2cSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
@@ -851,16 +981,16 @@ try {
     });
     assert(t2cSendRes.status === 200, `T3c chat-send returned ${t2cSendRes.status}`);
 
-    const t2cAssistant = await waitForChatPredicate((events) => {
-      for (let i = events.length - 1; i >= 0; i -= 1) {
-        const e = events[i];
-        if (e.messageCount < t2cSendBaseline + 2) continue;
-        const last = e.messages[e.messages.length - 1];
-        if (last?.role === 'assistant' && /tokyo/i.test(String(last.text || ''))) return e;
-      }
-      return false;
-    }, 240_000, 'T3c assistant response with tokyo');
-    assert(!!t2cAssistant, 'T3c assistant response with tokyo not observed on SSE');
+    const t2cOutcome = await waitForAssistantOutcome({
+      cardId: CHAT_CARD_ID,
+      eventStart: t2cEventStart,
+      beforeCount: t2cSendBaseline,
+      debugEntryStart: t2cDebugStart,
+      successPattern: /tokyo/i,
+      timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
+      label: 'T3c assistant response with tokyo',
+    });
+    assert(t2cOutcome.ok, `T3c failed before assistant response: ${t2cOutcome.reason || 'unknown reason'}`);
 
     const t2cAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
     assert(t2cAfter.status === 200, `T3c post chats returned ${t2cAfter.status}`);

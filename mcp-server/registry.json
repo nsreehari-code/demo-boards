@@ -32,6 +32,9 @@
     },
     "graph": {
       "manifest": "demo-boards.graph.json"
+    },
+    "lore": {
+      "manifest": "lore.local.json"
     }
   }
 }

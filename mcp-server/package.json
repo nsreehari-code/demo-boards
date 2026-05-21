@@ -9,6 +9,7 @@
     "start:http": "node src/index.js --transport streamable-http",
     "start:stdio": "node src/index.js --transport stdio",
     "dry-run": "node src/index.js --dry-run --transport streamable-http",
+    "test:smoke": "node scripts/smoke-registered-services.js",
     "probe:finbook-workflows": "node scripts/probe-finbook-workflow-tools.js"
   },
   "dependencies": {

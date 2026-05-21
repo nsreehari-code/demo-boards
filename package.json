@@ -5,7 +5,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node demo-board/test/server-http-test.js && npm run mcp:test",
     "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt",
     "install:vite": "npm --prefix demo-board/web/vite install",
     "postinstall": "npm run install:foundry && npm run install:vite",
@@ -14,6 +14,7 @@
     "frontend": "node ./node_modules/http-server/bin/http-server demo-board/web/dist-vite -p 8000 -c-1",
     "vite": "npm --prefix demo-board/web/vite run dev",
     "mcp:install": "npm --prefix mcp-server install",
+    "mcp:test": "npm --prefix mcp-server run test:smoke",
     "mcp:dry-run": "npm --prefix mcp-server run dry-run -- --manifest manifests/demo-boards.workiq.json --manifest manifests/demo-boards.graph.json --manifest ../../fintech/data-repos/finbook-data/managed-truthsets/mcp-executable-manifest.json --transport streamable-http",
     "mcp:start": "npm --prefix mcp-server run start:http",
     "seed-cpm": "node demo-board/scripts/sqlite/seed-cpm.cjs",

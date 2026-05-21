@@ -20,6 +20,7 @@ import {
 
 const HANDLER_DIR = path.dirname(fileURLToPath(import.meta.url));
 const WRAPPER_BAT = path.join(HANDLER_DIR, 'copilot_wrapper.bat');
+const COPILOT_MODEL = 'gpt-5.4';
 
 const extra = readJsonStdin();
 const {
@@ -185,6 +186,7 @@ function runCopilot(prompt, workingDir) {
     promptFile,
     outFile,
     errFile,
+    COPILOT_MODEL,
   ];
   fs.writeFileSync(promptFile, prompt, 'utf-8');
   try {
@@ -195,6 +197,7 @@ function runCopilot(prompt, workingDir) {
       outFile,
       errFile,
       wrapperBat: WRAPPER_BAT,
+      model: COPILOT_MODEL,
       copilotWorkingDir: effectiveWorkingDir,
       execCommand: 'cmd.exe',
       execArgs,
@@ -207,6 +210,7 @@ function runCopilot(prompt, workingDir) {
       promptFile,
       outFile,
       errFile,
+      model: COPILOT_MODEL,
       copilotWorkingDir: effectiveWorkingDir,
       copilotCmd: formatCommandForLog('cmd.exe', execArgs),
       promptLength: prompt.length,

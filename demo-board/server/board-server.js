@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import os from 'node:os';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -668,43 +668,6 @@ const runtime = createMultiBoardServerRuntime({
 function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
   fs.mkdirSync(boardSetupRoot, { recursive: true });
 
-  const seedWorkspaceLore = ({ workspaceRoot, copilotRoot }) => {
-    const loreCliPath = path.join(workspaceRoot, '.github', 'scripts', 'lore-cli.js');
-    if (!fs.existsSync(loreCliPath)) return;
-
-    const boardLore = {
-      boardId,
-      label: typeof cfg?.label === 'string' ? cfg.label : boardId,
-      description: typeof cfg?.subtitle === 'string' && cfg.subtitle.trim()
-        ? cfg.subtitle.trim()
-        : `Board workspace for ${typeof cfg?.label === 'string' && cfg.label.trim() ? cfg.label.trim() : boardId}`,
-    };
-
-    const result = spawnSync(
-      process.execPath,
-      [
-        loreCliPath,
-        'set',
-        '--key',
-        'board.bootstrap.profile',
-        '--value-json',
-        JSON.stringify(boardLore),
-      ],
-      {
-        cwd: workspaceRoot,
-        encoding: 'utf-8',
-        windowsHide: true,
-      },
-    );
-
-    if (result.status !== 0) {
-      const details = String(result.stderr || result.stdout || '').trim();
-      console.warn(
-        `[board-server] copilot workspace "${copilotRoot}" lore bootstrap failed${details ? `: ${details}` : ''}`,
-      );
-    }
-  };
-
   const workspaceSetup = Array.isArray(cfg?.['copilot-workdirs-setup'])
     ? cfg['copilot-workdirs-setup'].filter((entry) => entry && typeof entry === 'object')
     : [];
@@ -834,8 +797,6 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
         }
         logCopiedFiles('copyScripts', scriptsDir, copiedCount);
       }
-
-      seedWorkspaceLore({ workspaceRoot, copilotRoot });
     }
     return;
   }
