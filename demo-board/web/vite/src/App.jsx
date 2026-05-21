@@ -13,9 +13,7 @@ function formatCountdown(remainingMs) {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-export default function App() {
-  const board = useBoardState(BOARD_ID);
-  const canRefreshAll = board?.hasRefreshableCards === true;
+function RefreshAllButton({ canRefreshAll, refreshAll }) {
   const [nextRefreshAt, setNextRefreshAt] = useState(() => Date.now() + REFRESH_ALL_INTERVAL_MS);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [refreshingAll, setRefreshingAll] = useState(false);
@@ -24,7 +22,7 @@ export default function App() {
 
   const remainingMs = Math.max(0, nextRefreshAt - nowMs);
 
-  refreshAllRef.current = board?.boardActions?.refreshAll ?? null;
+  refreshAllRef.current = refreshAll ?? null;
 
   const resetCountdown = () => {
     const currentTime = Date.now();
@@ -83,6 +81,29 @@ export default function App() {
   };
 
   return (
+    <button
+      type="button"
+      className="btn btn-outline-secondary btn-sm board-button d-inline-flex align-items-center gap-2"
+      onClick={handleRefreshAll}
+      disabled={!canRefreshAll || refreshingAll}
+      title="Refresh all cards"
+    >
+      {refreshingAll ? (
+        <span className="spinner-border spinner-border-sm" aria-hidden="true" />
+      ) : (
+        <i className="bi bi-arrow-clockwise" />
+      )}
+      <span>{formatCountdown(remainingMs)}</span>
+    </button>
+  );
+}
+
+export default function App() {
+  const board = useBoardState(BOARD_ID);
+  console.log('[App] useBoardState', board);
+  const canRefreshAll = board?.hasRefreshableCards === true;
+
+  return (
     <div className="board-app-shell" data-theme={DEFAULT_THEME}>
       <nav className="board-topbar px-3 px-lg-4 py-1">
         <div className="board-topbar__layout d-flex align-items-center justify-content-between gap-2 flex-nowrap">
@@ -91,20 +112,10 @@ export default function App() {
             <div className="board-topbar__subtitle text-truncate">{PAGE_SUBTITLE}</div>
           </div>
           <div className="board-topbar__actions d-flex align-items-center justify-content-end gap-2 flex-shrink-0 ms-auto">
-            <button
-              type="button"
-              className="btn btn-outline-secondary btn-sm board-button d-inline-flex align-items-center gap-2"
-              onClick={handleRefreshAll}
-              disabled={!canRefreshAll || refreshingAll}
-              title="Refresh all cards"
-            >
-              {refreshingAll ? (
-                <span className="spinner-border spinner-border-sm" aria-hidden="true" />
-              ) : (
-                <i className="bi bi-arrow-clockwise" />
-              )}
-              <span>{formatCountdown(remainingMs)}</span>
-            </button>
+            <RefreshAllButton
+              canRefreshAll={canRefreshAll}
+              refreshAll={board?.boardActions?.refreshAll ?? null}
+            />
           </div>
         </div>
       </nav>

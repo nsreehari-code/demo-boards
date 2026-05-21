@@ -121,16 +121,18 @@ function buildState(payload) {
     statusByName[entry.name] = entry;
   }
 
-  const cardsById = {};
+  const cardContentsById = Object.fromEntries(
+    (payload.cardDefinitions ?? []).map((def) => [def.id, def]),
+  );
+
+  const cardRuntimesById = {};
   for (const def of (payload.cardDefinitions ?? [])) {
-    const runtime    = payload.cardRuntimeById?.[def.id] ?? {};
+    const runtime = payload.cardRuntimeById?.[def.id] ?? {};
     const statusInfo = statusByName[def.id] ?? {};
-    cardsById[def.id] = {
-      ...def,                               // id, meta, source_defs, view, compute, requires, ...
-      card_data:       runtime.card_data ?? {},
-      computed_values: runtime.computed_values ?? {},
-      status:          statusInfo.status ?? 'fresh',
+    cardRuntimesById[def.id] = {
+      status:          statusInfo.status ?? '',
       runtime:         statusInfo.runtime ?? {},
+      computed_values: runtime.computed_values ?? {},
     };
   }
 
@@ -145,12 +147,13 @@ function buildState(payload) {
   }
 
   return {
-    boardId:       payload.boardId,
-    cardIds:       (payload.cardDefinitions ?? []).map(c => c.id),
-    cardsById,
+    boardId:          payload.boardId,
+    cardIds:          (payload.cardDefinitions ?? []).map(c => c.id),
+    cardContentsById,
+    cardRuntimesById,
     chatsById,
-    statusSummary: payload.statusSnapshot?.summary ?? null,
-    dataObjects:   payload.dataObjectsByToken ?? {},
+    statusSummary:    payload.statusSnapshot?.summary ?? null,
+    dataObjects:      payload.dataObjectsByToken ?? {},
   };
 }
 
@@ -165,28 +168,29 @@ function applyFrame(prev, payload) {
   if (payload.kind === 'notification-batch') {
     const next = {
       ...prev,
-      cardsById:   { ...prev.cardsById },
-      chatsById:   { ...prev.chatsById },
-      dataObjects: { ...prev.dataObjects },
+      cardContentsById: { ...prev.cardContentsById },
+      cardRuntimesById: { ...prev.cardRuntimesById },
+      chatsById:        { ...prev.chatsById },
+      dataObjects:      { ...prev.dataObjects },
     };
     for (const n of (payload.notifications ?? [])) {
       if (n.kind === 'status') {
         if (n.status?.summary) next.statusSummary = n.status.summary;
         for (const entry of (n.status?.cards ?? [])) {
-          if (next.cardsById[entry.name]) {
-            next.cardsById[entry.name] = {
-              ...next.cardsById[entry.name],
+          if (next.cardRuntimesById[entry.name]) {
+            next.cardRuntimesById[entry.name] = {
+              ...next.cardRuntimesById[entry.name],
               status:  entry.status,
-              runtime: entry.runtime ?? next.cardsById[entry.name].runtime,
+              runtime: entry.runtime ?? next.cardRuntimesById[entry.name].runtime,
             };
           }
         }
       } else if (n.kind === 'data_object' && n.key) {
         next.dataObjects[n.key] = n.payload;
       } else if (n.kind === 'computed_values' && n.cardId) {
-        if (next.cardsById[n.cardId]) {
-          next.cardsById[n.cardId] = {
-            ...next.cardsById[n.cardId],
+        if (next.cardRuntimesById[n.cardId]) {
+          next.cardRuntimesById[n.cardId] = {
+            ...next.cardRuntimesById[n.cardId],
             computed_values: n.values ?? {},
           };
         }
@@ -197,10 +201,21 @@ function applyFrame(prev, payload) {
           receiving:  !!n.receiving,
         };
       } else if (n.kind === 'card_refreshed' && n.cardId && n.card) {
-        if (next.cardsById[n.cardId]) {
-          next.cardsById[n.cardId] = {
-            ...next.cardsById[n.cardId],
-            ...n.card,
+        const { computed_values, runtime, status, ...cardContent } = n.card;
+
+        if (next.cardContentsById[n.cardId]) {
+          next.cardContentsById[n.cardId] = {
+            ...next.cardContentsById[n.cardId],
+            ...cardContent,
+          };
+        }
+
+        if (next.cardRuntimesById[n.cardId]) {
+          next.cardRuntimesById[n.cardId] = {
+            ...next.cardRuntimesById[n.cardId],
+            ...(status !== undefined ? { status } : null),
+            ...(runtime !== undefined ? { runtime } : null),
+            ...(computed_values !== undefined ? { computed_values } : null),
           };
         }
       }
@@ -233,26 +248,8 @@ export function useBoardState(boardId) {
 
   if (!raw) return null;
 
-  // cardContents: full card object keyed by cardId
-  const cardContents = {};
-  for (const id of (raw.cardIds ?? [])) {
-    const c = raw.cardsById[id];
-    if (c) {
-      const { computed_values, runtime, status, ...cardDefinition } = c;
-      cardContents[id] = cardDefinition;
-    }
-  }
-
-  // cardRuntimes: status + runtime + computed_values keyed by cardId
-  const cardRuntimes = {};
-  for (const id of (raw.cardIds ?? [])) {
-    const c = raw.cardsById[id];
-    if (c) cardRuntimes[id] = {
-      status:          c.status,
-      runtime:         c.runtime,
-      computed_values: c.computed_values ?? {},
-    };
-  }
+  const cardContents = raw.cardContentsById ?? {};
+  const cardRuntimes = raw.cardRuntimesById ?? {};
 
   // boardStatus: summary-level status (no per-card runtimes)
   const boardStatus = raw.statusSummary ?? null;
