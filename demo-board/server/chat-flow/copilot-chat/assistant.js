@@ -122,6 +122,9 @@ function findNewAssistantMessage(messages, priorCount) {
 
 function buildValidationRepairPrompt(issuesByCardId) {
   return [
+    'This is a silent validation-repair pass.',
+    'Do not write any assistant reply, status update, or user-visible text to chat store during this pass.',
+    'Only repair the affected cards so validation succeeds.',
     'The following validations issues surfaced on the cards. Please fix them.',
     JSON.stringify(issuesByCardId),
   ].join('\n');
@@ -131,6 +134,14 @@ function buildCombinedRepairPrompt(issuesByCardId, missingChatStoreReply) {
   const promptParts = [
     'The previous attempt did not produce an acceptable result. Fix the issues below before completing.',
   ];
+
+  if (!missingChatStoreReply) {
+    promptParts.push(
+      'This is a silent validation-repair pass.',
+      'Do not write any assistant reply, status update, or user-visible text to chat store during this pass.',
+      'Only repair cards and other workspace artifacts needed to satisfy validation.'
+    );
+  }
 
   if (hasValidationIssues(issuesByCardId)) {
     promptParts.push(
@@ -286,8 +297,8 @@ function runValidationRepair(workingDir, issuesByCardId, missingChatStoreReply =
   return runCopilot(repairPrompt, workingDir).trim();
 }
 
-function runCopilotWithValidationRetries(prompt, workingDir, setupRoot, storeRef, currentCardId, initialChatCount) {
-  const initialCardSnapshot = createCardStoreSnapshot(setupRoot, storeRef);
+function runCopilotWithValidationRetries(prompt, workingDir, baseRef, storeRef, currentCardId, initialChatCount) {
+  const initialCardSnapshot = createCardStoreSnapshot(baseRef, storeRef);
   appendDebug('runCopilotWithValidationRetries:snapshotCreated', {
     hasInitialCardSnapshot: initialCardSnapshot !== null,
   });
@@ -303,7 +314,7 @@ function runCopilotWithValidationRetries(prompt, workingDir, setupRoot, storeRef
       responseLength: responseText.length,
     });
 
-    const validationIssuesByCardId = validateAllCards(setupRoot, storeRef, Math.min(chatCopilotTimeoutMs, 30000));
+    const validationIssuesByCardId = validateAllCards(baseRef, storeRef, Math.min(chatCopilotTimeoutMs, 30000));
     const updatedChatMessages = readChatMessages(chatStoreRef, currentCardId, Math.min(chatCopilotTimeoutMs, 30000));
     const appendedAssistantMessage = findNewAssistantMessage(updatedChatMessages, initialChatCount);
     const missingChatStoreReply = !appendedAssistantMessage;
@@ -386,6 +397,7 @@ function resolveCopilotWorkingDir(setupRoot, storeRef, cId) {
 }
 
 requireRequiredStrings({
+  baseRef,
   cardId,
   boardSetupRoot,
   cardStoreRef,

@@ -64,15 +64,6 @@ function runChatStoreCommands(chatStoreRef, cardId, commands, timeoutMs = 30000)
   return JSON.parse(raw);
 }
 
-function encodeRef(refObject) {
-  return `b64:${Buffer.from(JSON.stringify(refObject), 'utf-8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')}`;
-}
-
-function buildFsPathRef(pathValue) {
-  requireNonEmptyString(pathValue, 'pathValue');
-  return encodeRef({ kind: 'fs-path', value: pathValue });
-}
-
 function runBoardLiveCardsCommand(baseRef, command, extraArgs = [], options = {}) {
   const raw = execFileSync(process.execPath, [
     BOARD_LIVE_CARDS_CLI,
@@ -313,15 +304,15 @@ export function readAllStoredCards(storeRef, timeoutMs = 30000) {
   }
 }
 
-export function createCardStoreSnapshot(setupRoot, storeRef) {
-  if (!setupRoot || !storeRef) {
+export function createCardStoreSnapshot(baseRef, storeRef) {
+  if (!baseRef || !storeRef) {
     return null;
   }
 
   const cards = readAllStoredCards(storeRef).map((card) => normalizeStoredCard(card));
   return {
     storeRef,
-    baseRef: buildFsPathRef(setupRoot),
+    baseRef,
     cardsById: new Map(
       cards
         .filter((card) => typeof card.id === 'string' && card.id.length > 0)
@@ -392,8 +383,8 @@ export function syncChangedCardsToBoard(snapshot) {
   }
 }
 
-export function validateAllCards(setupRoot, storeRef, timeoutMs = 30000) {
-  if (!setupRoot || !storeRef) {
+export function validateAllCards(baseRef, storeRef, timeoutMs = 30000) {
+  if (!baseRef || !storeRef) {
     return {};
   }
 
@@ -401,8 +392,6 @@ export function validateAllCards(setupRoot, storeRef, timeoutMs = 30000) {
   if (cards.length === 0) {
     return {};
   }
-
-  const baseRef = buildFsPathRef(setupRoot);
 
   const issuesByCardId = {};
   for (const card of cards) {

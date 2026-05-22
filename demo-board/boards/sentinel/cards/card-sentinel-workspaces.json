@@ -20,16 +20,6 @@
       }
     }
   ],
-  "compute": [
-    {
-      "bindTo": "status",
-      "expr": "$type(fetched_sources.workspaces) = 'string' ? '**Sentinel workspace lookup failed:** ' & fetched_sources.workspaces : ''"
-    },
-    {
-      "bindTo": "workspacesView",
-      "expr": "fetched_sources.workspaces"
-    }
-  ],
   "view": {
     "elements": [
       {
@@ -63,5 +53,15 @@
       "refresh": true
     }
   },
-  "card_data": {}
+  "card_data": {},
+  "compute": [
+    {
+      "bindTo": "status",
+      "expr": "$type(fetched_sources.workspaces) = 'string' and $substring(fetched_sources.workspaces,0,1) != '[' ? '**Sentinel workspace lookup failed:** ' & fetched_sources.workspaces : ''"
+    },
+    {
+      "bindTo": "workspacesView",
+      "expr": "$type(fetched_sources.workspaces) = 'string' and $substring(fetched_sources.workspaces,0,1) = '[' ? $eval(fetched_sources.workspaces) : fetched_sources.workspaces"
+    }
+  ]
 }
