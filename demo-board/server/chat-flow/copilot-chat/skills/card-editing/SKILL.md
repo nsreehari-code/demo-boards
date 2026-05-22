@@ -96,5 +96,5 @@ Use that skill to:
 
 - validate the edited card
 - run `run-source-preflight` for touched sources so the agent can verify the real source path still works
-- evaluate touched compute paths
+- evaluate touched compute paths by - materialize `provided_outputs` and `view_model` when the edit touches `provides[]` or `view`
 - run full simulation only if narrower checks are insufficient

@@ -40,6 +40,10 @@ Treat `ensure-card-correctness` as the authoritative correctness skill for any
 material card change. A card create/edit/repair task is not complete until the
 relevant `ensure-card-correctness` checks have passed for the changed card.
 
+When that skill uses staged helper scripts, follow their real contract exactly:
+stdin-only JSON payloads, required top-level object fields present even when
+they are empty objects, and the documented command form for each helper.
+
 ## Board Model At A Glance
 
 Keep only this mental model in mind:
@@ -425,6 +429,7 @@ Use `ensure-card-correctness` for:
 - lightweight source probing when only readiness matters
 - real-flow source preflight when the agent must prove the fetch path works
 - compute evaluation
+- materialized `provides[]` and `view` checks when a card change affects published outputs or rendered bindings
 - full-cycle simulation
 - repair routing
 
