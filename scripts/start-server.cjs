@@ -20,11 +20,6 @@ const boardLiveCardsCliJs = path.resolve(boardDir, 'scripts', 'yaml-flow', 'boar
 const stepMachineCliPath = path.resolve(boardDir, 'scripts', 'yaml-flow', 'step-machine-cli.mjs');
 const mcpServerPath = path.resolve(workspaceDir, 'mcp-server', 'src', 'index.js');
 const frontendDir = path.resolve(workspaceDir, 'docs');
-const viteDir = path.join(boardDir, 'web', 'vite');
-const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const npmExecPath = typeof process.env.npm_execpath === 'string' && process.env.npm_execpath
-  ? process.env.npm_execpath
-  : '';
 
 if (!fs.existsSync(boardLiveCardsCliJs)) {
   console.error(`[start-server] Missing ${boardLiveCardsCliJs}. Run \"npm install\" first.`);
@@ -38,35 +33,9 @@ if (!fs.existsSync(mcpServerPath)) {
   console.error(`[start-server] Missing ${mcpServerPath}. Run \"npm install\" first.`);
   process.exit(1);
 }
-if (!fs.existsSync(viteDir)) {
-  console.error(`[start-server] Missing ${viteDir}. Run \"npm install\" first.`);
-  process.exit(1);
-}
-
-function runNpmCommandSync(args, options = {}) {
-  if (npmExecPath) {
-    execFileSync(process.execPath, [npmExecPath, ...args], options);
-    return;
-  }
-
-  if (process.platform === 'win32') {
-    execFileSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/c', npmCmd, ...args], options);
-    return;
-  }
-
-  execFileSync(npmCmd, args, options);
-}
-
 if (!fs.existsSync(frontendDir)) {
-  console.log(`[start-server] Missing ${frontendDir}. Building frontend...`);
-  runNpmCommandSync(['--prefix', viteDir, 'run', 'build'], {
-    cwd: workspaceDir,
-    stdio: 'inherit',
-  });
-  if (!fs.existsSync(frontendDir)) {
-    console.error(`[start-server] Frontend build did not produce ${frontendDir}.`);
-    process.exit(1);
-  }
+  console.error(`[start-server] Missing ${frontendDir}. Frontend artifacts now live in docs/. Fetch or rebuild them from the separate demo-boards-frontend repo.`);
+  process.exit(1);
 }
 
 const sharedEnv = {
