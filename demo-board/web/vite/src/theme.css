@@ -873,6 +873,179 @@ a {
   background: linear-gradient(180deg, rgba(219, 230, 239, 0.98), rgba(196, 210, 223, 0.98));
 }
 
+.board-settings-toggle {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  width: 3rem;
+  height: 3rem;
+  z-index: 1200;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(18, 29, 47, 0.98), rgba(13, 22, 37, 0.98));
+  color: var(--color-accent-strong);
+  box-shadow: 0 18px 34px rgba(62, 86, 112, 0.24);
+  opacity: 0.75;
+}
+
+.board-app-shell[data-theme='mist-ops'] .board-settings-toggle {
+  background: linear-gradient(180deg, rgba(208, 220, 231, 0.99), rgba(186, 201, 215, 0.99));
+  border-color: rgba(64, 96, 131, 0.34);
+}
+
+.board-settings-toggle:hover,
+.board-settings-toggle:focus-visible {
+  opacity: 0.85;
+  color: #f4fbff;
+  border-color: rgba(125, 199, 255, 0.44);
+  background: linear-gradient(180deg, rgba(27, 40, 64, 0.98), rgba(16, 28, 46, 0.98));
+}
+
+.board-app-shell[data-theme='mist-ops'] .board-settings-toggle:hover,
+.board-app-shell[data-theme='mist-ops'] .board-settings-toggle:focus-visible {
+  color: var(--color-accent-strong);
+  background: linear-gradient(180deg, rgba(219, 230, 239, 0.98), rgba(196, 210, 223, 0.98));
+}
+
+.board-settings-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1210;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 1rem 1rem 5rem;
+}
+
+.board-settings-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(8, 15, 24, 0.44);
+}
+
+.board-settings-modal {
+  position: relative;
+  margin-left: auto;
+  width: min(28rem, calc(100vw - 2rem));
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-color: rgba(59, 91, 126, 0.18);
+  box-shadow: 0 26px 58px rgba(73, 97, 123, 0.28), 0 4px 14px rgba(73, 97, 123, 0.12);
+  color: var(--color-text);
+}
+
+.board-app-shell[data-theme='mist-ops'] .board-settings-modal {
+  border-color: rgba(64, 96, 131, 0.24);
+  background: linear-gradient(180deg, rgba(226, 234, 241, 0.995), rgba(214, 223, 232, 0.995));
+}
+
+.board-settings-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.9rem 1rem 0.8rem;
+  border-bottom: 1px solid rgba(110, 154, 215, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0));
+}
+
+.board-app-shell[data-theme='mist-ops'] .board-settings-modal__header {
+  border-bottom: 1px solid rgba(78, 106, 138, 0.1);
+  background: linear-gradient(180deg, rgba(233, 240, 246, 0.98), rgba(224, 232, 239, 0.88));
+}
+
+.board-settings-modal__eyebrow {
+  color: var(--color-accent-strong);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.board-settings-modal__title {
+  margin: 0.2rem 0 0;
+  color: var(--color-text);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.board-settings-modal__close {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.board-settings-form {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.9rem 1rem 1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(102, 136, 171, 0.55) rgba(207, 218, 229, 0.36);
+}
+
+.board-settings-form::-webkit-scrollbar {
+  width: 10px;
+}
+
+.board-settings-form::-webkit-scrollbar-track {
+  background: rgba(207, 218, 229, 0.28);
+  border-radius: 999px;
+}
+
+.board-settings-form::-webkit-scrollbar-thumb {
+  background: rgba(102, 136, 171, 0.52);
+  border-radius: 999px;
+  border: 2px solid rgba(207, 218, 229, 0.22);
+}
+
+.board-settings-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.board-settings-field > span {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.board-settings-field > input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.7rem 0.8rem;
+}
+
+.board-settings-field > input:focus {
+  border-color: rgba(83, 133, 137, 0.28);
+  box-shadow: 0 0 0 0.15rem rgba(166, 216, 220, 0.2);
+}
+
+.board-settings-form__hint {
+  margin: 0.15rem 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-soft);
+}
+
+.board-settings-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(110, 154, 215, 0.12);
+}
+
+.board-app-shell[data-theme='mist-ops'] .board-settings-form__actions {
+  border-top: 1px solid rgba(78, 106, 138, 0.1);
+}
+
 .board-ingest-pane {
   pointer-events: auto;
   overflow: hidden;

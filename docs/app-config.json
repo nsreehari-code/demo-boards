@@ -7,6 +7,6 @@
   },
   "pageTitle": "Live",
   "pageSubtitle": "Live operational intelligence for agent workflows",
-  "refreshAllIntervalMs": 300000,
+  "refreshAllIntervalSeconds": 300,
   "serverOrigin": "http://localhost:7799"
 }

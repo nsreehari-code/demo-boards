@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useBoardState } from './hooks/useBoardState.js';
 import { MainBoard }  from './components/MainBoard.jsx';
-import { DEFAULT_BOARD_ID, PAGE_SUBTITLE, PAGE_TITLE, REFRESH_ALL_INTERVAL_MS } from './lib/appConfig.js';
+import { DEFAULT_BOARD_ID, PAGE_SUBTITLE, PAGE_TITLE, REFRESH_ALL_INTERVAL_SECONDS } from './lib/appConfig.js';
 
 const BOARD_ID = DEFAULT_BOARD_ID;
 const DEFAULT_THEME = 'mist-ops';
+const REFRESH_ALL_INTERVAL_MS = REFRESH_ALL_INTERVAL_SECONDS * 1000;
 
 function formatCountdown(remainingMs) {
   const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));

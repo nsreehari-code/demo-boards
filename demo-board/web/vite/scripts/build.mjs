@@ -11,7 +11,7 @@ const docsDir = resolve(repoRoot, 'docs');
 const serverConfigPath = resolve(viteRoot, '..', '..', 'server-config.json');
 const FALLBACK_CONFIG = {
   port: 7799,
-  refreshAllIntervalMs: 5 * 60 * 1000,
+  refreshAllIntervalSeconds: 5 * 60,
   defaultBoard: 'live',
   title: 'Live',
   subtitle: 'Live operational intelligence for agent workflows',
@@ -58,33 +58,32 @@ function pickDefaultBoard(config) {
 function toRuntimeConfig(serverConfig) {
   const defaultBoardId = process.env.VITE_APP_DEFAULT_BOARD || pickDefaultBoard(serverConfig);
   const defaultBoard = serverConfig?.boards?.[defaultBoardId] ?? {};
-  const pageSubtitle = process.env.VITE_APP_PAGE_SUBTITLE
+  const defaultBoardLabel = process.env.VITE_APP_DEFAULT_BOARD_LABEL || (typeof defaultBoard?.label === 'string' && defaultBoard.label.trim() ? defaultBoard.label.trim() : defaultBoardId);
+  const defaultBoardSubtitle = process.env.VITE_APP_DEFAULT_BOARD_SUBTITLE
     || (typeof defaultBoard?.subtitle === 'string' && defaultBoard.subtitle.trim()
       ? defaultBoard.subtitle.trim()
       : (typeof serverConfig?.subtitle === 'string' && serverConfig.subtitle.trim()
         ? serverConfig.subtitle.trim()
         : FALLBACK_CONFIG.subtitle));
-  const pageTitle = process.env.VITE_APP_PAGE_TITLE
-    || (typeof serverConfig?.title === 'string' && serverConfig.title.trim()
-      ? serverConfig.title.trim()
-      : (typeof defaultBoard?.label === 'string' && defaultBoard.label.trim()
-        ? defaultBoard.label.trim()
-        : FALLBACK_CONFIG.title));
   const serverPort = Number(serverConfig?.port);
-  const refreshAllIntervalMs = Number(serverConfig?.refreshAllIntervalMs);
+  const refreshAllIntervalSeconds = Number(serverConfig?.refreshAllIntervalSeconds);
+  const legacyRefreshAllIntervalMs = Number(serverConfig?.refreshAllIntervalMs);
+  const resolvedRefreshAllIntervalSeconds = Number.isFinite(refreshAllIntervalSeconds) && refreshAllIntervalSeconds > 0
+    ? refreshAllIntervalSeconds
+    : (Number.isFinite(legacyRefreshAllIntervalMs) && legacyRefreshAllIntervalMs > 0
+      ? legacyRefreshAllIntervalMs / 1000
+      : FALLBACK_CONFIG.refreshAllIntervalSeconds);
 
   return {
     defaultBoardId,
     defaultBoard: {
       id: defaultBoardId,
-      label: process.env.VITE_APP_DEFAULT_BOARD_LABEL || (typeof defaultBoard?.label === 'string' && defaultBoard.label.trim() ? defaultBoard.label.trim() : defaultBoardId),
-      subtitle: process.env.VITE_APP_DEFAULT_BOARD_SUBTITLE || pageSubtitle,
+      label: defaultBoardLabel,
+      subtitle: defaultBoardSubtitle,
     },
-    pageTitle,
-    pageSubtitle,
-    refreshAllIntervalMs: Number.isFinite(refreshAllIntervalMs) && refreshAllIntervalMs > 0
-      ? refreshAllIntervalMs
-      : FALLBACK_CONFIG.refreshAllIntervalMs,
+    pageTitle: defaultBoardLabel,
+    pageSubtitle: defaultBoardSubtitle,
+    refreshAllIntervalSeconds: resolvedRefreshAllIntervalSeconds,
     serverOrigin: process.env.VITE_SERVER_ORIGIN || `http://localhost:${Number.isFinite(serverPort) && serverPort > 0 ? serverPort : FALLBACK_CONFIG.port}`,
   };
 }
