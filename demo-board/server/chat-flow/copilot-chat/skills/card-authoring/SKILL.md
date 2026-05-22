@@ -16,6 +16,9 @@ Use this skill when the task is to create a new card, not modify an existing
 `card-store-commands` is a prerequisite skill for this workflow because cards
 always originate from the board card store.
 
+Use `card-source-defs` whenever the new card needs authored `source_defs[]`
+and you need to know which source kinds or source fields are actually valid.
+
 Use it especially when the request says things like:
 
 - create a new card
@@ -79,7 +82,7 @@ Start from this shape and add only the fields the new card actually needs:
 
 - Every source entry must have unique `bindTo` and `outputFile` values within the card.
 - Add `source_defs[]` only when the card must fetch or derive source-backed data.
-- Fields beyond `bindTo` and `outputFile` are source-specific executor fields. Reuse known working patterns instead of guessing new ones.
+- Fields beyond the shared source fields are kind-specific. Use `card-source-defs` to discover the supported `inputSchema` instead of guessing from nearby examples.
 - If the card needs projections, declare them under `source_defs[].projections`.
 - `projections` may read only from `card_data` and `requires`.
 - Do not reference `fetched_sources`, `computed_values`, or `source_defs` inside `projections`.
@@ -111,10 +114,11 @@ Start from this shape and add only the fields the new card actually needs:
 1. Find the closest existing card pattern, if one exists, by using `card-store-commands`.
 2. Decide the minimum card contract needed: `card_data`, `requires`, `provides`, `source_defs`, `compute`, and `view`.
 3. Lay out the token wiring: what this card requires, what it computes, and what it provides.
-4. Create the new card with only the necessary fields and persist it through `card-store-commands`.
-5. If the card depends on projections or source inputs, model only the inputs the card actually consumes.
-6. If the card computes derived values, add only the compute bindings needed for the requested output.
-7. Once the draft card exists, hand off immediately to `ensure-card-correctness`.
+4. If the card needs sources, use `card-source-defs` to choose the source kind and the valid authored fields for that kind.
+5. Create the new card with only the necessary fields and persist it through `card-store-commands`.
+6. If the card depends on projections or source inputs, model only the inputs the card actually consumes.
+7. If the card computes derived values, add only the compute bindings needed for the requested output.
+8. Once the draft card exists, hand off immediately to `ensure-card-correctness`.
 
 ## How to Build a New Card
 
@@ -140,9 +144,13 @@ Start from this shape and add only the fields the new card actually needs:
 
 After authoring, use `ensure-card-correctness` as the required follow-up skill.
 
+If the remaining uncertainty is specifically about `source_defs[]` shape,
+field names, or supported source kinds, use `card-source-defs` before the
+correctness pass.
+
 Use that skill to:
 
 - validate the new card structure
-- probe any authored sources
+- run `run-source-preflight` for any authored sources so the agent can verify the real source path works
 - evaluate authored compute paths
 - run full simulation only if narrower checks are insufficient

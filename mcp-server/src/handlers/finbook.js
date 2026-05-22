@@ -57,8 +57,9 @@ function loadModule(modulePath) {
 }
 
 function loadFinbookModules(repoDir) {
-  const repoApiPath = path.join(repoDir, 'lib', 'finbook-api.js');
-  const repoContractPath = path.join(repoDir, 'lib', 'finbook-contract.js');
+  const managedTruthsetsBase = path.join(repoDir, 'managed-truthsets', 'lib');
+  const repoApiPath = path.join(managedTruthsetsBase, 'finbook-api.js');
+  const repoContractPath = path.join(managedTruthsetsBase, 'finbook-contract.js');
   const overlayBase = path.resolve(repoDir, '..', '..', 'finbook-domain', 'finbook-data-overlay', 'lib');
   const overlayApiPath = path.join(overlayBase, 'finbook-api.js');
   const overlayContractPath = path.join(overlayBase, 'finbook-contract.js');
@@ -101,8 +102,289 @@ function buildStatePayload(snapshot) {
   };
 }
 
+function getWorkingDb(api, dbFile) {
+  return loadStateSnapshot(api, dbFile, 'working').workingDb;
+}
+
+function getOptionalIndex(args) {
+  return Number.isInteger(args?.index) ? args.index : undefined;
+}
+
+function appendJournalOperation(api, dbFile, operation, payload, meta) {
+  const workingDb = getWorkingDb(api, dbFile);
+  const journalEntry = api.createJournalEntry(operation, payload, meta);
+  const preview = api.applyJournal(workingDb, [journalEntry]);
+  const journalFile = api.getJournalFilePath(dbFile);
+  api.appendJournalEntries(journalFile, [journalEntry]);
+  return {
+    journalEntry,
+    result: preview.results[0],
+    workingDb: preview.db,
+  };
+}
+
 function getToolAction(toolName) {
   return String(toolName || '').replace(/^finbook(?:\.[^.]+)?\./, '');
+}
+
+function mapIncomeTypeToTable(incomeType) {
+  const normalized = typeof incomeType === 'string' ? incomeType.trim().toLowerCase() : '';
+  return {
+    salary: 'SalaryIncome',
+    foreign: 'ForeignIncome',
+    property: 'PropertyIncome',
+    other: 'OtherIncome',
+  }[normalized] || null;
+}
+
+function inferJournalTable(entry) {
+  const payload = entry?.payload || {};
+  if (typeof payload.table === 'string' && payload.table) {
+    return payload.table;
+  }
+  switch (entry?.operation) {
+    case 'finbook.record_stock_purchase':
+      return 'StockPurchasesOrTransferIns';
+    case 'finbook.record_stock_sale':
+      return 'StockSalesOrTransferOuts';
+    case 'finbook.record_income':
+      return mapIncomeTypeToTable(payload.incomeType);
+    case 'finbook.record_capital_gain_outside_stock_transactions':
+      return 'CapitalGainsConsolidated';
+    case 'finbook.record_advance_tax_paid':
+      return 'AdvanceTax';
+    default:
+      return null;
+  }
+}
+
+function incrementCounter(map, key) {
+  if (!key) return;
+  map.set(key, (map.get(key) || 0) + 1);
+}
+
+function toCountList(counter) {
+  return Array.from(counter.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
+}
+
+function pluralize(count, singular, plural = `${singular}s`) {
+  return count === 1 ? singular : plural;
+}
+
+function getSemanticKindMeta(entry) {
+  switch (entry?.operation) {
+    case 'finbook.patch_config':
+      return { kind: 'config_update', label: 'config update' };
+    case 'finbook.append_repo_config_entry':
+      return { kind: 'repo_reference_append', label: 'repo reference append' };
+    case 'finbook.append_account_profile_entry':
+      return { kind: 'account_profile_update', label: 'account profile update' };
+    case 'finbook.upsert_row':
+      return { kind: 'row_upsert', label: 'data update' };
+    case 'finbook.delete_row':
+      return { kind: 'row_delete', label: 'row deletion' };
+    case 'finbook.lock_row':
+      return { kind: 'row_lock', label: 'row lock' };
+    case 'finbook.unlock_row':
+      return { kind: 'row_unlock', label: 'row unlock' };
+    case 'finbook.record_stock_purchase':
+      return { kind: 'stock_purchase_recorded', label: 'stock purchase' };
+    case 'finbook.record_stock_sale':
+      return { kind: 'stock_sale_recorded', label: 'stock sale' };
+    case 'finbook.record_income':
+      return { kind: 'income_recorded', label: 'income record' };
+    case 'finbook.record_capital_gain_outside_stock_transactions':
+      return { kind: 'capital_gain_recorded', label: 'capital gain record' };
+    case 'finbook.record_advance_tax_paid':
+      return { kind: 'advance_tax_recorded', label: 'advance tax record' };
+    default:
+      return { kind: 'other_change', label: 'change' };
+  }
+}
+
+function incrementSemanticCounter(counter, meta) {
+  if (!meta?.kind) return;
+  const current = counter.get(meta.kind);
+  if (current) {
+    current.count += 1;
+    return;
+  }
+  counter.set(meta.kind, {
+    kind: meta.kind,
+    label: meta.label,
+    count: 1,
+  });
+}
+
+function toSemanticCountList(counter) {
+  return Array.from(counter.values())
+    .sort((left, right) => right.count - left.count || left.kind.localeCompare(right.kind));
+}
+
+function buildCardTitle(totalEntries, accountSummaries, changeKinds) {
+  if (totalEntries === 0) {
+    return 'No pending changes';
+  }
+
+  const topKind = changeKinds[0];
+  const subject = topKind
+    ? `${topKind.count} ${pluralize(topKind.count, topKind.label)}`
+    : `${totalEntries} pending ${pluralize(totalEntries, 'change')}`;
+
+  if (accountSummaries.length === 1) {
+    return `${subject} for ${accountSummaries[0].account}`;
+  }
+
+  if (accountSummaries.length > 1) {
+    return `${totalEntries} pending changes across ${accountSummaries.length} accounts`;
+  }
+
+  return `${totalEntries} pending ${pluralize(totalEntries, 'change')}`;
+}
+
+function buildCardSubtitle(totalEntries, tableCounts, timeRange, accountSummaries) {
+  if (totalEntries === 0) {
+    return 'Working state matches committed state';
+  }
+
+  const parts = [];
+  if (accountSummaries.length > 0) {
+    const topAccounts = accountSummaries.slice(0, 2).map((entry) => entry.account).join(', ');
+    parts.push(`Accounts: ${topAccounts}`);
+  }
+  if (tableCounts.length > 0) {
+    const topTables = tableCounts.slice(0, 2).map((entry) => entry.name).join(', ');
+    parts.push(`Affects ${topTables}`);
+  }
+  if (timeRange?.lastCreatedAt) {
+    parts.push(`Latest change ${timeRange.lastCreatedAt}`);
+  }
+  return parts.join(' | ') || 'Pending changes are waiting to be committed';
+}
+
+function buildShortSummary(totalEntries, changeKinds, accountSummaries) {
+  if (totalEntries === 0) {
+    return 'There are no pending journal changes.';
+  }
+
+  const changeText = changeKinds.length > 0
+    ? changeKinds.map((entry) => `${entry.count} ${pluralize(entry.count, entry.label)}`).join(', ')
+    : `${totalEntries} pending ${pluralize(totalEntries, 'change')}`;
+
+  if (accountSummaries.length === 1) {
+    return `Pending changes for ${accountSummaries[0].account}: ${changeText}.`;
+  }
+
+  if (accountSummaries.length > 1) {
+    return `Pending changes across ${accountSummaries.length} accounts: ${changeText}.`;
+  }
+
+  return `Pending changes: ${changeText}.`;
+}
+
+function getAccountKey(entry) {
+  return typeof entry?.payload?.account === 'string' && entry.payload.account
+    ? entry.payload.account
+    : 'repo';
+}
+
+function buildAccountGroups(entries) {
+  const groups = new Map();
+
+  entries.forEach((entry) => {
+    const account = getAccountKey(entry);
+    const table = inferJournalTable(entry);
+    const semanticMeta = getSemanticKindMeta(entry);
+    let group = groups.get(account);
+    if (!group) {
+      group = {
+        account,
+        totalEntries: 0,
+        entries: [],
+        changeKindCounter: new Map(),
+        tableCounter: new Map(),
+        firstCreatedAt: null,
+        lastCreatedAt: null,
+      };
+      groups.set(account, group);
+    }
+
+    group.totalEntries += 1;
+    group.entries.push(entry);
+    incrementSemanticCounter(group.changeKindCounter, semanticMeta);
+    incrementCounter(group.tableCounter, table);
+
+    if (typeof entry.createdAt === 'string' && entry.createdAt) {
+      if (!group.firstCreatedAt || entry.createdAt < group.firstCreatedAt) group.firstCreatedAt = entry.createdAt;
+      if (!group.lastCreatedAt || entry.createdAt > group.lastCreatedAt) group.lastCreatedAt = entry.createdAt;
+    }
+  });
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      account: group.account,
+      totalEntries: group.totalEntries,
+      shortSummary: buildShortSummary(group.totalEntries, toSemanticCountList(group.changeKindCounter), [{ account: group.account }]),
+      changeKinds: toSemanticCountList(group.changeKindCounter),
+      affectedTables: toCountList(group.tableCounter),
+      timeRange: group.firstCreatedAt && group.lastCreatedAt
+        ? {
+            firstCreatedAt: group.firstCreatedAt,
+            lastCreatedAt: group.lastCreatedAt,
+          }
+        : null,
+      entries: group.entries,
+    }))
+    .sort((left, right) => right.totalEntries - left.totalEntries || left.account.localeCompare(right.account));
+}
+
+function summarizeJournalEntries(entries) {
+  const semanticKindCounter = new Map();
+  const accountCounter = new Map();
+  const tableCounter = new Map();
+  let firstCreatedAt = null;
+  let lastCreatedAt = null;
+
+  entries.forEach((entry) => {
+    incrementSemanticCounter(semanticKindCounter, getSemanticKindMeta(entry));
+
+    const account = getAccountKey(entry);
+    const table = inferJournalTable(entry);
+
+    incrementCounter(accountCounter, account);
+    incrementCounter(tableCounter, table);
+
+    if (typeof entry.createdAt === 'string' && entry.createdAt) {
+      if (!firstCreatedAt || entry.createdAt < firstCreatedAt) firstCreatedAt = entry.createdAt;
+      if (!lastCreatedAt || entry.createdAt > lastCreatedAt) lastCreatedAt = entry.createdAt;
+    }
+  });
+
+  const changeKinds = toSemanticCountList(semanticKindCounter);
+  const accountCounts = toCountList(accountCounter);
+  const tableCounts = toCountList(tableCounter);
+  const accountSummaries = buildAccountGroups(entries);
+  const timeRange = firstCreatedAt && lastCreatedAt
+    ? {
+        firstCreatedAt,
+        lastCreatedAt,
+      }
+    : null;
+
+  return {
+    status: entries.length === 0 ? 'no_pending_changes' : 'pending_changes',
+    totalEntries: entries.length,
+    cardTitle: buildCardTitle(entries.length, accountSummaries, changeKinds),
+    cardSubtitle: buildCardSubtitle(entries.length, tableCounts, timeRange, accountSummaries),
+    shortSummary: buildShortSummary(entries.length, changeKinds, accountSummaries),
+    changeKinds,
+    affectedAccounts: accountCounts,
+    accountGroups: accountSummaries,
+    affectedTables: tableCounts,
+    timeRange,
+  };
 }
 
 export async function handleFinbookTool(args, tool) {
@@ -148,13 +430,34 @@ export async function handleFinbookTool(args, tool) {
         return toMcpResult(contract.success(operation, {}, api.validateWorkingState(snapshot.workingDb), meta));
       }
 
+      case 'list_journal_entries': {
+        const journalFile = api.getJournalFilePath(dbFile);
+        const allEntries = api.loadJournal(journalFile);
+        const activeEntries = api.getActiveJournalEntries(allEntries);
+        const params = {};
+        return toMcpResult(contract.success(operation, params, {
+          totalEntries: activeEntries.length,
+          entries: activeEntries,
+        }, meta));
+      }
+
+      case 'get_journal_summary': {
+        const journalFile = api.getJournalFilePath(dbFile);
+        const allEntries = api.loadJournal(journalFile);
+        const activeEntries = api.getActiveJournalEntries(allEntries);
+        return toMcpResult(contract.success(operation, {}, {
+          summary: summarizeJournalEntries(activeEntries),
+          entries: activeEntries,
+        }, meta));
+      }
+
       case 'list_accounts': {
-        const db = api.loadDb(dbFile);
+        const db = getWorkingDb(api, dbFile);
         return toMcpResult(contract.success(operation, {}, { accounts: api.listAccounts(db) }, meta));
       }
 
       case 'get_repo_config': {
-        const db = api.loadDb(dbFile);
+        const db = getWorkingDb(api, dbFile);
         return toMcpResult(contract.success(operation, {}, api.getRepoConfig(db), meta));
       }
 
@@ -162,7 +465,7 @@ export async function handleFinbookTool(args, tool) {
         const params = {
           account: args?.account || null,
         };
-        const db = api.loadDb(dbFile);
+        const db = getWorkingDb(api, dbFile);
         return toMcpResult(contract.success(operation, params, api.getAccountProfile(db, args.account), meta));
       }
 
@@ -172,7 +475,7 @@ export async function handleFinbookTool(args, tool) {
           table: args?.table || null,
           fy: args?.fy || null,
         };
-        const db = api.loadDb(dbFile);
+        const db = getWorkingDb(api, dbFile);
         const rows = api.listTableRows(db, args.account, args.table, { fy: args.fy || undefined });
         return toMcpResult(contract.success(operation, params, { count: rows.length, rows }, meta));
       }
@@ -184,7 +487,7 @@ export async function handleFinbookTool(args, tool) {
           fy: args?.fy || null,
           asOn: args?.asOn || null,
         };
-        const db = api.loadDb(dbFile);
+        const db = getWorkingDb(api, dbFile);
         const result = api.runReport(db, args.account, args.report, {
           fy: args.fy || undefined,
           asOn: args.asOn || undefined,
@@ -200,7 +503,7 @@ export async function handleFinbookTool(args, tool) {
           fy: args?.fy || null,
           asOn: args?.asOn || null,
         };
-        const db = api.loadDb(dbFile);
+        const db = getWorkingDb(api, dbFile);
         const result = api.runReport(db, args.account, args.view, {
           fy: args.fy || undefined,
           asOn: args.asOn || undefined,
@@ -215,7 +518,7 @@ export async function handleFinbookTool(args, tool) {
           fy: args?.fy || null,
           asOn: args?.asOn || null,
         };
-        const db = api.loadDb(dbFile);
+        const db = getWorkingDb(api, dbFile);
         const result = api.exportAccount(db, args.account, args.fy || 'All', { asOnDate: args.asOn || undefined });
         return toMcpResult(contract.success(operation, params, result, meta));
       }
@@ -225,9 +528,12 @@ export async function handleFinbookTool(args, tool) {
           category: args?.category || null,
           key: args?.key || null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.appendRepoConfigEntry(db, args.category, args.key, args.value);
-        api.saveDb(dbFile, db);
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          category: args?.category,
+          key: args?.key,
+          value: args?.value,
+        }, meta);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
@@ -237,9 +543,13 @@ export async function handleFinbookTool(args, tool) {
           category: args?.category || null,
           key: args?.key || null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.appendAccountProfileEntry(db, args.account, args.category, args.key, args.value);
-        api.saveDb(dbFile, db);
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          account: args?.account,
+          category: args?.category,
+          key: args?.key,
+          value: args?.value,
+        }, meta);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
@@ -249,11 +559,13 @@ export async function handleFinbookTool(args, tool) {
           table: args?.table || null,
           index: Number.isInteger(args?.index) ? args.index : null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.upsertRow(db, args.account, args.table, args.row, {
-          index: Number.isInteger(args?.index) ? args.index : undefined,
-        });
-        api.saveDb(dbFile, db);
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          account: args?.account,
+          table: args?.table,
+          row: args?.row,
+          ...(Number.isInteger(args?.index) ? { index: args.index } : {}),
+        }, meta);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
@@ -263,14 +575,16 @@ export async function handleFinbookTool(args, tool) {
           table: args?.table || null,
           index: Number.isInteger(args?.index) ? args.index : null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.deleteRow(db, args.account, args.table, args.row || {}, {
-          index: Number.isInteger(args?.index) ? args.index : undefined,
-        });
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          account: args?.account,
+          table: args?.table,
+          row: args?.row || {},
+          ...(Number.isInteger(args?.index) ? { index: args.index } : {}),
+        }, meta);
         if (!result.deleted) {
           return toMcpResult(contract.failure(operation, params, 'Row not found', meta, 'not_found'));
         }
-        api.saveDb(dbFile, db);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
@@ -280,14 +594,16 @@ export async function handleFinbookTool(args, tool) {
           table: args?.table || null,
           index: Number.isInteger(args?.index) ? args.index : null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.lockRow(db, args.account, args.table, args.row || {}, {
-          index: Number.isInteger(args?.index) ? args.index : undefined,
-        });
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          account: args?.account,
+          table: args?.table,
+          row: args?.row || {},
+          ...(Number.isInteger(args?.index) ? { index: args.index } : {}),
+        }, meta);
         if (!result.locked) {
           return toMcpResult(contract.failure(operation, params, 'Row not found', meta, 'not_found'));
         }
-        api.saveDb(dbFile, db);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
@@ -297,14 +613,16 @@ export async function handleFinbookTool(args, tool) {
           table: args?.table || null,
           index: Number.isInteger(args?.index) ? args.index : null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.unlockRow(db, args.account, args.table, args.row || {}, {
-          index: Number.isInteger(args?.index) ? args.index : undefined,
-        });
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          account: args?.account,
+          table: args?.table,
+          row: args?.row || {},
+          ...(Number.isInteger(args?.index) ? { index: args.index } : {}),
+        }, meta);
         if (!result.unlocked) {
           return toMcpResult(contract.failure(operation, params, 'Row not found', meta, 'not_found'));
         }
-        api.saveDb(dbFile, db);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
@@ -313,11 +631,12 @@ export async function handleFinbookTool(args, tool) {
           account: args?.account || null,
           index: Number.isInteger(args?.index) ? args.index : null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.recordStockPurchase(db, args.account, args.entry, {
-          index: Number.isInteger(args?.index) ? args.index : undefined,
-        });
-        api.saveDb(dbFile, db);
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          account: args?.account,
+          entry: args?.entry,
+          ...(Number.isInteger(args?.index) ? { index: args.index } : {}),
+        }, meta);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
@@ -326,11 +645,12 @@ export async function handleFinbookTool(args, tool) {
           account: args?.account || null,
           index: Number.isInteger(args?.index) ? args.index : null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.recordStockSale(db, args.account, args.entry, {
-          index: Number.isInteger(args?.index) ? args.index : undefined,
-        });
-        api.saveDb(dbFile, db);
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          account: args?.account,
+          entry: args?.entry,
+          ...(Number.isInteger(args?.index) ? { index: args.index } : {}),
+        }, meta);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
@@ -340,11 +660,13 @@ export async function handleFinbookTool(args, tool) {
           incomeType: args?.incomeType || null,
           index: Number.isInteger(args?.index) ? args.index : null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.recordIncome(db, args.account, args.incomeType, args.entry, {
-          index: Number.isInteger(args?.index) ? args.index : undefined,
-        });
-        api.saveDb(dbFile, db);
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          account: args?.account,
+          incomeType: args?.incomeType,
+          entry: args?.entry,
+          ...(Number.isInteger(args?.index) ? { index: args.index } : {}),
+        }, meta);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
@@ -353,11 +675,12 @@ export async function handleFinbookTool(args, tool) {
           account: args?.account || null,
           index: Number.isInteger(args?.index) ? args.index : null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.recordCapitalGainOutsideStockTransactions(db, args.account, args.entry, {
-          index: Number.isInteger(args?.index) ? args.index : undefined,
-        });
-        api.saveDb(dbFile, db);
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          account: args?.account,
+          entry: args?.entry,
+          ...(Number.isInteger(args?.index) ? { index: args.index } : {}),
+        }, meta);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
       }
 
@@ -366,45 +689,13 @@ export async function handleFinbookTool(args, tool) {
           account: args?.account || null,
           index: Number.isInteger(args?.index) ? args.index : null,
         };
-        const db = api.loadDb(dbFile);
-        const result = api.recordAdvanceTaxPaid(db, args.account, args.entry, {
-          index: Number.isInteger(args?.index) ? args.index : undefined,
-        });
-        api.saveDb(dbFile, db);
+        const { journalEntry, result } = appendJournalOperation(api, dbFile, operation, {
+          account: args?.account,
+          entry: args?.entry,
+          ...(Number.isInteger(args?.index) ? { index: args.index } : {}),
+        }, meta);
+        result.journalEntryId = journalEntry.entryId;
         return toMcpResult(contract.success(operation, params, result, meta));
-      }
-
-      case 'lore': {
-        const cmd = args?.cmd;
-        const key = args?.key || null;
-        const value = Object.prototype.hasOwnProperty.call(args || {}, 'value') ? args.value : undefined;
-        const includeDeprecated = args?.includeDeprecated === true;
-        const params = { cmd: cmd || null, key };
-        const loreFile = api.getLoreFilePath(dbFile);
-        const loreDb = api.loadLoreDb(loreFile);
-        if (cmd === 'get') {
-          return toMcpResult(contract.success(operation, params, { entry: api.loreGet(loreDb, key) }, meta));
-        }
-        if (cmd === 'get_all') {
-          const entries = api.loreGetAll(loreDb, { includeDeprecated });
-          return toMcpResult(contract.success(operation, params, { count: entries.length, entries }, meta));
-        }
-        if (cmd === 'set') {
-          const result = api.loreSet(loreDb, key, value);
-          api.saveLoreDb(loreFile, loreDb);
-          return toMcpResult(contract.success(operation, params, result, meta));
-        }
-        if (cmd === 'append') {
-          const result = api.loreAppend(loreDb, key, value);
-          api.saveLoreDb(loreFile, loreDb);
-          return toMcpResult(contract.success(operation, params, result, meta));
-        }
-        if (cmd === 'deprecate') {
-          const result = api.loreDeprecate(loreDb, key);
-          api.saveLoreDb(loreFile, loreDb);
-          return toMcpResult(contract.success(operation, params, result, meta));
-        }
-        throw new Error(`Unknown lore cmd: ${cmd}`);
       }
 
       default:

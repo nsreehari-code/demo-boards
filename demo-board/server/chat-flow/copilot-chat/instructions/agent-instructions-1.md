@@ -24,6 +24,7 @@ shared reference:
 
 - `card-authoring` for new cards
 - `card-editing` for existing cards
+- `card-source-defs` for supported source kinds, valid source fields, and source probing
 - `ensure-card-correctness` for validation, probing, and repair
 - `add-remove-card-from-board` for live board membership and retrigger semantics
 - `card-store-commands` for stored card CRUD
@@ -120,8 +121,8 @@ token relationships.
 ## Board Workers And Source Definitions
 
 `source_defs[]` are executed by the board worker task executor. The exact source
-kinds are executor-defined and must be discovered from capabilities rather than
-guessed.
+kinds and allowed source fields are executor-defined and must be discovered
+from capabilities rather than guessed.
 
 The current board worker registry includes source kinds such as:
 
@@ -129,6 +130,8 @@ The current board worker registry includes source kinds such as:
 - `copilot`
 - `mcp`
 - `mock`
+- `foundry`
+- `sqlite`
 
 Source definitions may be:
 
@@ -137,9 +140,15 @@ Source definitions may be:
 - tool-backed sources through `mcp`
 - sources that emit both data and dynamic `_view` hints
 
+Use `card-source-defs` when the question is specifically about which source
+kinds exist, which authored fields a kind accepts, or how to probe a source.
+
 The executor exposes capability discovery, validation, source preflight, and
 fetch execution. Use `ensure-card-correctness` for the authoritative validation,
-source-preflight, compute-check, and repair workflow.
+source-preflight, compute-check, and repair workflow. In that workflow, use
+`run-source-preflight` when the agent needs proof that the authored source
+works end to end, and use `probe-source-preflight` only for lightweight
+readiness, connectivity, or configuration probing.
 
 ## Agentic Chat And Context
 
@@ -333,8 +342,13 @@ See [agent-instructions-cardlayout.md](agent-instructions-cardlayout.md).
 
 ## Source `customFields` and the Task Executor
 
-Every field on a source entry beyond `bindTo` and `outputFile` is executor-defined.
-The runtime passes the source object through unchanged.
+Treat source definitions as having two authored layers:
+
+- shared authored fields from `commonSourceDefFields`
+- kind-specific authored fields from the chosen source kind's `inputSchema`
+
+The runtime passes the source object through unchanged, but the executor now
+validates authored source fields against that declared contract.
 
 Keep only these rules here:
 
@@ -342,11 +356,13 @@ Keep only these rules here:
 - query the executor when possible
 - keep LLM work inside `source_defs[]`
 - use `projections` only from `card_data` and `requires`
+- do not author `supports`; it is capability metadata, not a card field
 
 Use:
 
 - `card-authoring` for source design rules during creation
 - `card-editing` for source repair and minimal source changes
+- `card-source-defs` for supported source kinds, valid source fields, and source probing
 - `ensure-card-correctness` for source probing and repair workflow
 
 ### source_defs projections
@@ -362,7 +378,7 @@ repair rules around projections.
 
 ### Discovering supported source kinds
 
-Rather than guessing which source `customFields` the registered executor supports, query it directly:
+Rather than guessing which source kinds or source fields the registered executor supports, query it directly:
 
 ```bash
 node board-live-cards-cli.js describe-task-executor-capabilities --rg <boardDir>
@@ -370,6 +386,8 @@ node board-live-cards-cli.js describe-task-executor-capabilities --rg <boardDir>
 
 Use this before authoring or repairing a source. If the kind is missing from the
 capabilities output, the executor must be extended before the card will work.
+Treat `commonSourceDefFields` plus the chosen kind's `inputSchema` as the
+source of truth for authored `source_defs[]` fields.
 
 ## LLM Calls — Use a Source
 
@@ -403,7 +421,8 @@ Use `ensure-card-correctness` for:
 
 - validation order
 - preflight commands
-- source probing
+- lightweight source probing when only readiness matters
+- real-flow source preflight when the agent must prove the fetch path works
 - compute evaluation
 - full-cycle simulation
 - repair routing

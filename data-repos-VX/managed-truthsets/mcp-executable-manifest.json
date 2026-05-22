@@ -1,0 +1,556 @@
+{
+  "manifestVersion": "finbook.mcp.executable.v1",
+  "service": "finbook",
+  "server": {
+    "name": "finbook-mcp",
+    "version": "0.1.0",
+    "description": "Executable MCP manifest for the Finbook tool surface"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlEnvVar": "FINBOOK_MCP_SERVER_URL",
+    "urlDefault": "http://127.0.0.1:7801/mcp"
+  },
+  "tools": [
+    {
+      "name": "finbook.get_contract",
+      "title": "Finbook Get Contract",
+      "description": "Return the current Finbook MCP contract so agents can discover the supported tool surface, optionally including the semantic manifest and the public executable manifest.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeSemanticManifest": {
+            "type": "boolean",
+            "description": "When true, include the semantic Finbook MCP manifest in the response. Defaults to true for HTTP discovery."
+          },
+          "includeExecutableManifest": {
+            "type": "boolean",
+            "description": "When true, include the public executable Finbook MCP manifest in the response. Defaults to true for HTTP discovery."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.describe_semantic_structure",
+      "title": "Finbook Describe Semantic Structure",
+      "description": "Describe the semantic structure of the Finbook database: account model, transactional tables, reference data, computed views, and preferred mutation patterns.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.get_schema",
+      "title": "Finbook Get Schema",
+      "description": "Return Finbook schema metadata for all supported tables and computed fields.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.get_committed_state",
+      "title": "Finbook Get Committed State",
+      "description": "Return the full committed Finbook state snapshot as a fallback read tool for broad reasoning.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.get_working_state",
+      "title": "Finbook Get Working State",
+      "description": "Return the full working Finbook state snapshot, including pending server-journal changes, as a fallback read tool for broad reasoning.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.validate_working_state",
+      "title": "Finbook Validate Working State",
+      "description": "Validate the current Finbook working state and return deterministic structural errors and warnings without requiring file access.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.list_journal_entries",
+      "title": "Finbook List Journal Entries",
+      "description": "Return the effective uncommitted journal entries that contribute to the current working state since the last commit. Discarded entries are filtered out.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.get_journal_summary",
+      "title": "Finbook Get Journal Summary",
+      "description": "Return a user-oriented semantic summary of the effective uncommitted journal entries that contribute to the current working state since the last commit. The summary is computed only from cleaned active entries and is shaped for cards or brief UI summaries.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.list_accounts",
+      "title": "Finbook List Accounts",
+      "description": "List available Finbook accounts in the connected data repo.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.get_repo_config",
+      "title": "Finbook Get Repo Config",
+      "description": "Return repo-level Finbook configuration and append-only reference tables.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.get_account_profile",
+      "title": "Finbook Get Account Profile",
+      "description": "Return append-only account profile/reference data for one Finbook account.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          }
+        },
+        "required": [
+          "account"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.list_table_rows",
+      "title": "Finbook List Table Rows",
+      "description": "Return computed rows for a Finbook table, optionally filtered by financial year.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "table": {
+            "type": "string",
+            "description": "Exact Finbook table name."
+          },
+          "fy": {
+            "type": "string",
+            "description": "Optional FY filter such as 2024-25."
+          }
+        },
+        "required": [
+          "account",
+          "table"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.get_computed_view",
+      "title": "Finbook Get Computed View",
+      "description": "Return one named computed Finbook view for an account. Preferred over export_account for agent and application access to computed results.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "income-summary",
+              "capital-gains",
+              "stock-transactions",
+              "holdings",
+              "stock-purchases",
+              "stock-sales"
+            ],
+            "description": "Named computed Finbook view."
+          },
+          "fy": {
+            "type": "string",
+            "description": "Optional FY filter such as 2024-25."
+          },
+          "asOn": {
+            "type": "string",
+            "description": "Optional as-on date in YYYY-MM-DD format for holdings."
+          }
+        },
+        "required": [
+          "account",
+          "view"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.run_report",
+      "title": "Finbook Run Report",
+      "description": "Run a shared Finbook computed report for an account. Compatibility alias for finbook.get_computed_view.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "report": {
+            "type": "string",
+            "enum": [
+              "income-summary",
+              "capital-gains",
+              "stock-transactions",
+              "holdings",
+              "stock-purchases",
+              "stock-sales"
+            ],
+            "description": "Shared Finbook report name."
+          },
+          "fy": {
+            "type": "string",
+            "description": "Optional FY filter such as 2024-25."
+          },
+          "asOn": {
+            "type": "string",
+            "description": "Optional as-on date in YYYY-MM-DD format for holdings."
+          }
+        },
+        "required": [
+          "account",
+          "report"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.append_repo_config_entry",
+      "title": "Finbook Append Repo Config Entry",
+      "description": "Append one repo-config reference entry. This is the preferred append-only tool for repo-level Finbook master data.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Repo config category name."
+          },
+          "key": {
+            "type": "string",
+            "description": "Unique append-only key within the category."
+          },
+          "value": {
+            "description": "Optional value payload for the appended entry."
+          }
+        },
+        "required": [
+          "category",
+          "key"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.append_account_profile_entry",
+      "title": "Finbook Append Account Profile Entry",
+      "description": "Append one account-profile reference entry. This is the preferred append-only tool for account master data.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "category": {
+            "type": "string",
+            "description": "Account profile category name."
+          },
+          "key": {
+            "type": "string",
+            "description": "Unique append-only key within the category."
+          },
+          "value": {
+            "description": "Optional value payload for the appended entry."
+          }
+        },
+        "required": [
+          "account",
+          "category",
+          "key"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.upsert_row",
+      "title": "Finbook Upsert Row",
+      "description": "Create or update one Finbook row in a table as a generic fallback when no more semantic write tool applies.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "table": {
+            "type": "string",
+            "description": "Exact Finbook table name."
+          },
+          "row": {
+            "type": "object",
+            "description": "Row payload to create or merge."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional explicit row index to update."
+          }
+        },
+        "required": [
+          "account",
+          "table",
+          "row"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.delete_row",
+      "title": "Finbook Delete Row",
+      "description": "Delete one Finbook row from a table by index or row reference as a generic correction tool.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "table": {
+            "type": "string",
+            "description": "Exact Finbook table name."
+          },
+          "row": {
+            "type": "object",
+            "description": "Optional row reference when deleting by dedup keys."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional explicit row index to delete."
+          }
+        },
+        "required": [
+          "account",
+          "table"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "index"
+            ]
+          },
+          {
+            "required": [
+              "row"
+            ]
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.record_stock_purchase",
+      "title": "Finbook Record Stock Purchase",
+      "description": "Record a stock purchase or transfer-in entry in Finbook. Preferred over the generic row tool for stock-purchase writes.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "entry": {
+            "type": "object",
+            "description": "Stock purchase entry payload for StockPurchasesOrTransferIns."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional explicit row index to update."
+          }
+        },
+        "required": [
+          "account",
+          "entry"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.record_stock_sale",
+      "title": "Finbook Record Stock Sale",
+      "description": "Record a stock sale or transfer-out entry in Finbook. Preferred over the generic row tool for stock-sale writes.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "entry": {
+            "type": "object",
+            "description": "Stock sale entry payload for StockSalesOrTransferOuts."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional explicit row index to update."
+          }
+        },
+        "required": [
+          "account",
+          "entry"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.record_income",
+      "title": "Finbook Record Income",
+      "description": "Record a non-stock income entry using one of the known Finbook income types: salary, foreign, property, or other. Preferred over the generic row tool for income writes.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "incomeType": {
+            "type": "string",
+            "enum": [
+              "salary",
+              "foreign",
+              "property",
+              "other"
+            ],
+            "description": "Known Finbook income type."
+          },
+          "entry": {
+            "type": "object",
+            "description": "Income entry payload for the selected income type table."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional explicit row index to update."
+          }
+        },
+        "required": [
+          "account",
+          "incomeType",
+          "entry"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.record_capital_gain_outside_stock_transactions",
+      "title": "Finbook Record Capital Gain Outside Stock Transactions",
+      "description": "Record a manual or consolidated capital gain entry that cannot be derived from recorded stock purchase and sale transactions. Preferred over the generic row tool for manual capital gains.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "entry": {
+            "type": "object",
+            "description": "CapitalGainsConsolidated entry payload."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional explicit row index to update."
+          }
+        },
+        "required": [
+          "account",
+          "entry"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "finbook.record_advance_tax_paid",
+      "title": "Finbook Record Advance Tax Paid",
+      "description": "Record an advance-tax payment entry in Finbook. Preferred over the generic row tool for advance-tax writes.",
+      "handler": "finbook",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account code or display name."
+          },
+          "entry": {
+            "type": "object",
+            "description": "AdvanceTax entry payload."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional explicit row index to update."
+          }
+        },
+        "required": [
+          "account",
+          "entry"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

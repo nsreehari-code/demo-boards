@@ -7,8 +7,44 @@
     "describe-capabilities",
     "validate-source-def",
     "validate-card-preflight",
-    "probe-source-preflight"
+    "probe-source-preflight",
+    "run-source-preflight"
   ],
+  "commonSourceDefFields": {
+    "bindTo": {
+      "type": "string",
+      "required": true,
+      "description": "Namespace key — fetched result is written to fetched_sources.<bindTo>."
+    },
+    "outputFile": {
+      "type": "string",
+      "required": true,
+      "description": "Board-relative output path written by the source executor."
+    },
+    "projections": {
+      "type": "object",
+      "required": false,
+      "description": "Named projections resolved from card_data/requires before source execution.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "optionalForCompletionGating": {
+      "type": "boolean",
+      "required": false,
+      "description": "When true this source does not block default completion gating."
+    },
+    "timeout": {
+      "type": "integer",
+      "required": false,
+      "description": "Executor timeout in milliseconds."
+    },
+    "script": {
+      "type": "string",
+      "required": false,
+      "description": "Legacy direct-run command when no task executor is registered."
+    }
+  },
   "extraSchema": {
     "description": "Board topology context passed via --extra (base64-encoded JSON, baked at init).",
     "properties": {
@@ -56,6 +92,14 @@
         "field": "urls"
       },
       "flow": "./source-def-flows/url.flow.json",
+      "supports": {
+        "interpolation": true,
+        "projections": true,
+        "fanOut": true,
+        "httpCaching": true,
+        "customHeaders": true,
+        "customMethod": true
+      },
       "validate": [
         {
           "field": "urls",
@@ -120,6 +164,12 @@
         ]
       },
       "flow": "./source-def-flows/copilot.flow.json",
+      "supports": {
+        "promptTemplates": true,
+        "argumentInterpolation": true,
+        "structuredResults": true,
+        "sandboxedExecution": true
+      },
       "validate": [
         {
           "anyOf": [
@@ -161,6 +211,12 @@
         "field": "mcp"
       },
       "flow": "./source-def-flows/mcp.flow.json",
+      "supports": {
+        "namedRegistryServer": true,
+        "inlineServerConfig": true,
+        "toolArguments": true,
+        "hostedIntegrations": true
+      },
       "validate": [
         {
           "field": "mcp",
@@ -211,6 +267,11 @@
         "field": "mock"
       },
       "flow": "./source-def-flows/mock.flow.json",
+      "supports": {
+        "mockLookup": true,
+        "offlineTesting": true,
+        "projectionAwareProbing": true
+      },
       "validate": [
         {
           "field": "mock",
@@ -236,6 +297,12 @@
         "field": "foundry"
       },
       "flow": "./source-def-flows/foundry.flow.json",
+      "supports": {
+        "promptTemplates": true,
+        "managedIdentity": true,
+        "structuredResults": true,
+        "agentInvocation": true
+      },
       "validate": [
         {
           "field": "foundry",
@@ -275,6 +342,12 @@
         "field": "sqlite"
       },
       "flow": "./source-def-flows/sqlite.flow.json",
+      "supports": {
+        "parameterizedQueries": true,
+        "readQueries": true,
+        "execMode": true,
+        "localDatabaseAccess": true
+      },
       "validate": [
         {
           "field": "sqlite",

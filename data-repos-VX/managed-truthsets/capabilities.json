@@ -1,0 +1,155 @@
+{
+  "description": "Tax toolkit data layer — income records, capital gains, stock transactions, cross-verification across multiple brokerage accounts.",
+  "tables": [
+    {
+      "name": "AdvanceTax",
+      "description": "Advance tax payment records by quarter.",
+      "fields": [
+        "PaymentDate",
+        "EffectiveDate",
+        "TaxAmountPaid",
+        "PaymentDescription",
+        "Remarks",
+        "IsLocked"
+      ]
+    },
+    {
+      "name": "CapitalGainsConsolidated",
+      "description": "Manual capital gains entries (STCG/LTCG) from non-stock-lot sources.",
+      "fields": [
+        "IncomeDate",
+        "GainsType",
+        "IncomeDescription",
+        "SaleValue",
+        "AcquisitionCost",
+        "Expenses",
+        "TDSDeducted",
+        "TDSDeductor",
+        "NonTaxable",
+        "Remarks",
+        "IsLocked"
+      ]
+    },
+    {
+      "name": "ForeignAccounts",
+      "description": "Foreign brokerage/bank accounts held by this person (append-only reference).",
+      "fields": [
+        "ForeignAccount",
+        "Entity",
+        "AccountNumber"
+      ]
+    },
+    {
+      "name": "ForeignIncome",
+      "description": "Foreign-source income — dividends, interest, consulting from non-Indian sources.",
+      "fields": [
+        "IncomeDate",
+        "IncomeSource",
+        "IncomeType",
+        "ForeignAccount",
+        "Currency",
+        "IncomeAmount",
+        "TaxesWithheld",
+        "ExchangeRateToINR",
+        "NonTaxable",
+        "Remarks",
+        "IsLocked"
+      ]
+    },
+    {
+      "name": "OtherIncome",
+      "description": "Miscellaneous income — bank interest, gifts, etc.",
+      "fields": [
+        "IncomeDate",
+        "IncomeDescription",
+        "IncomeAmount",
+        "TDSDeducted",
+        "TDSDeductor",
+        "NonTaxable",
+        "Remarks",
+        "IsLocked"
+      ]
+    },
+    {
+      "name": "Properties",
+      "description": "Properties owned, used as lookup for PropertyIncome (append-only reference).",
+      "fields": [
+        "PropertyID",
+        "PropertyAddress",
+        "OwnershipSharePercent",
+        "PropertyType"
+      ]
+    },
+    {
+      "name": "PropertyIncome",
+      "description": "Rental and property-related income records.",
+      "fields": [
+        "IncomeDate",
+        "PropertyID",
+        "GrossIncome",
+        "TotalExpenses",
+        "TDSDeducted",
+        "TDSDeductor",
+        "Details",
+        "IsLocked"
+      ]
+    },
+    {
+      "name": "SalaryIncome",
+      "description": "Salary and payroll-derived income entries.",
+      "fields": [
+        "EffectiveDate",
+        "Employer",
+        "GrossTaxable",
+        "TaxablePerquisites",
+        "Exemptions",
+        "Deductions",
+        "TDSDeducted",
+        "Remarks",
+        "IsLocked"
+      ]
+    },
+    {
+      "name": "StockPurchasesOrTransferIns",
+      "description": "Stock purchase lots and transfer-ins with cost basis for portfolio tracking.",
+      "fields": [
+        "PurchaseDate",
+        "BrokerageName",
+        "SecurityName",
+        "CurrencyCode",
+        "PurchaseQuantity",
+        "PurchasePricePerUnit",
+        "PurchaseExpenses",
+        "ExchangeRateToINR",
+        "LotTag",
+        "IsSTTPaid",
+        "IsTransferIn",
+        "IsLocked",
+        "PurchaseLotID"
+      ]
+    },
+    {
+      "name": "StockSalesOrTransferOuts",
+      "description": "Stock sale lots and transfer-outs referencing prior purchase lots.",
+      "fields": [
+        "SaleDate",
+        "SecurityName",
+        "BrokerageName",
+        "SaleQuantity",
+        "SaleAmount",
+        "SaleExpenses",
+        "DomesticExpensesINR",
+        "ExchangeRateToINR",
+        "PurchaseLots",
+        "IsTransferOut",
+        "Remarks",
+        "IsLocked"
+      ]
+    }
+  ],
+  "features": [
+    "multi-account",
+    "cross-verification",
+    "tax-computation"
+  ]
+}

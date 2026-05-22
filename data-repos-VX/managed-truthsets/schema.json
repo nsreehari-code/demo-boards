@@ -1,0 +1,850 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Finbook Database",
+  "description": "Schema for the Finbook database — tracks income, capital gains, stock transactions, and advance tax across multiple brokerage accounts.",
+  "type": "object",
+  "required": [
+    "accounts"
+  ],
+  "properties": {
+    "config": {
+      "type": "object",
+      "description": "Repo-wide settings and append-only reference tables shared across all accounts.",
+      "properties": {
+        "ForeignStockTickers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Foreign stock ticker symbols (e.g. AAPL, GOOG)."
+        },
+        "ForeignCurrencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Foreign currency codes (e.g. USD, EUR)."
+        },
+        "CurrencyRates": {
+          "type": "object",
+          "description": "Exchange rates to INR keyed by currency code.",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "CurrencySymbols": {
+          "type": "object",
+          "description": "Display symbols keyed by currency code.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "ForeignIncomeSource": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tag list of income sources (e.g. Stocks, Consulting)."
+        },
+        "ForeignIncomeType": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tag list of income types (e.g. Dividends, Interest)."
+        },
+        "CapitalGainsTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Capital gains types (e.g. STCG, LTCG)."
+        },
+        "CapitalGainsQuarters": {
+          "type": "array",
+          "description": "Advance tax quarter definitions for capital gains (CgQ).",
+          "items": {
+            "type": "object",
+            "required": [
+              "quarter",
+              "from",
+              "to"
+            ],
+            "properties": {
+              "quarter": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string",
+                "description": "Start date in DD-MMM format."
+              },
+              "to": {
+                "type": "string",
+                "description": "End date in DD-MMM format."
+              }
+            }
+          }
+        },
+        "FYQuarters": {
+          "type": "array",
+          "description": "Financial year quarter definitions (QFY: Q1–Q4, Apr–Mar).",
+          "items": {
+            "type": "object",
+            "required": [
+              "quarter",
+              "from",
+              "to"
+            ],
+            "properties": {
+              "quarter": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string",
+                "description": "Start date in DD-MMM format."
+              },
+              "to": {
+                "type": "string",
+                "description": "End date in DD-MMM format."
+              }
+            }
+          }
+        },
+        "ShowRupeeSymbol": {
+          "type": "boolean",
+          "description": "Whether to show ₹ symbol in the UI."
+        }
+      },
+      "additionalProperties": true
+    },
+    "accounts": {
+      "type": "array",
+      "description": "List of account holders, each with transactional tables and reference data.",
+      "items": {
+        "type": "object",
+        "required": [
+          "account",
+          "name"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Unique account code."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name of the account holder."
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether this account is active."
+          },
+          "ForeignAccounts": {
+            "type": "array",
+            "description": "Foreign brokerage/bank accounts held by this person (append-only reference).",
+            "items": {
+              "type": "object",
+              "required": [],
+              "properties": {
+                "ForeignAccount": {
+                  "type": "string",
+                  "description": "References ForeignAccounts.ForeignAccount."
+                },
+                "Entity": {
+                  "type": "string",
+                  "description": "Institution name."
+                },
+                "AccountNumber": {
+                  "type": "string",
+                  "description": "Account number."
+                }
+              }
+            }
+          },
+          "Properties": {
+            "type": "array",
+            "description": "Properties owned, used as lookup for PropertyIncome (append-only reference).",
+            "items": {
+              "type": "object",
+              "required": [],
+              "properties": {
+                "PropertyID": {
+                  "type": "string",
+                  "description": "References Properties.PropertyID."
+                },
+                "PropertyAddress": {
+                  "type": "string",
+                  "description": "Property address."
+                },
+                "OwnershipSharePercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Ownership share percentage (0–100)."
+                },
+                "PropertyType": {
+                  "type": "string",
+                  "description": "Property type."
+                }
+              }
+            }
+          },
+          "AdvanceTax": {
+            "type": "array",
+            "description": "Advance tax payment records by quarter.",
+            "items": {
+              "type": "object",
+              "required": [
+                "EffectiveDate",
+                "TaxAmountPaid"
+              ],
+              "properties": {
+                "PaymentDate": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Payment date."
+                },
+                "EffectiveDate": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Record effective date."
+                },
+                "TaxAmountPaid": {
+                  "type": "number",
+                  "description": "Advance tax paid in ₹."
+                },
+                "PaymentDescription": {
+                  "type": "string",
+                  "description": "Payment description."
+                },
+                "Remarks": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Free-form notes."
+                },
+                "IsLocked": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if this row is locked."
+                },
+                "AdvanceTaxID": {
+                  "type": "string",
+                  "description": "AdvanceTaxID"
+                },
+                "QFY": {
+                  "type": "string",
+                  "description": "QFY"
+                },
+                "CgQ": {
+                  "type": "string",
+                  "description": "CgQ"
+                },
+                "Deleted": {
+                  "type": "boolean",
+                  "description": "Soft-delete flag."
+                }
+              }
+            }
+          },
+          "CapitalGainsConsolidated": {
+            "type": "array",
+            "description": "Manual capital gains entries (STCG/LTCG) from non-stock-lot sources.",
+            "items": {
+              "type": "object",
+              "required": [
+                "IncomeDate",
+                "IncomeDescription"
+              ],
+              "properties": {
+                "IncomeDate": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Income effective date."
+                },
+                "GainsType": {
+                  "type": "string",
+                  "description": "STCG or LTCG."
+                },
+                "IncomeDescription": {
+                  "type": "string",
+                  "description": "Description of the income or gain."
+                },
+                "SaleValue": {
+                  "type": "number",
+                  "description": "Sale proceeds in ₹."
+                },
+                "AcquisitionCost": {
+                  "type": "number",
+                  "description": "Purchase cost in ₹."
+                },
+                "Expenses": {
+                  "type": "number",
+                  "description": "Transaction expenses in ₹."
+                },
+                "TDSDeducted": {
+                  "type": "number",
+                  "description": "TDS deducted in ₹."
+                },
+                "TDSDeductor": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Name of the TDS deductor."
+                },
+                "NonTaxable": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if exempt from Indian tax."
+                },
+                "Remarks": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Free-form notes."
+                },
+                "IsLocked": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if this row is locked."
+                },
+                "CapitalGainsID": {
+                  "type": "string",
+                  "description": "CapitalGainsID"
+                },
+                "IncomeAmount": {
+                  "type": "string",
+                  "description": "Amount in foreign currency."
+                },
+                "QFY": {
+                  "type": "string",
+                  "description": "QFY"
+                },
+                "CgQ": {
+                  "type": "string",
+                  "description": "CgQ"
+                },
+                "Deleted": {
+                  "type": "boolean",
+                  "description": "Soft-delete flag."
+                }
+              }
+            }
+          },
+          "ForeignIncome": {
+            "type": "array",
+            "description": "Foreign-source income — dividends, interest, consulting from non-Indian sources.",
+            "items": {
+              "type": "object",
+              "required": [
+                "IncomeDate",
+                "IncomeSource",
+                "Currency",
+                "IncomeAmount",
+                "ExchangeRateToINR"
+              ],
+              "properties": {
+                "IncomeDate": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Income effective date."
+                },
+                "IncomeSource": {
+                  "type": "string",
+                  "description": "Source tag from config."
+                },
+                "IncomeType": {
+                  "type": "string",
+                  "description": "Type tag from config."
+                },
+                "ForeignAccount": {
+                  "type": "string",
+                  "description": "References ForeignAccounts.ForeignAccount."
+                },
+                "Currency": {
+                  "type": "string",
+                  "description": "Currency code from config."
+                },
+                "IncomeAmount": {
+                  "type": "number",
+                  "description": "Amount in foreign currency."
+                },
+                "TaxesWithheld": {
+                  "type": "number",
+                  "description": "Tax withheld in foreign currency."
+                },
+                "ExchangeRateToINR": {
+                  "type": "number",
+                  "description": "Exchange rate used for INR conversion."
+                },
+                "NonTaxable": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if exempt from Indian tax."
+                },
+                "Remarks": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Free-form notes."
+                },
+                "IsLocked": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if this row is locked."
+                },
+                "ForeignIncomeID": {
+                  "type": "string",
+                  "description": "ForeignIncomeID"
+                },
+                "IncomeAmountINR": {
+                  "type": "string",
+                  "description": "IncomeAmountINR"
+                },
+                "TaxesWithheldINR": {
+                  "type": "string",
+                  "description": "TaxesWithheldINR"
+                },
+                "QFY": {
+                  "type": "string",
+                  "description": "QFY"
+                },
+                "Deleted": {
+                  "type": "boolean",
+                  "description": "Soft-delete flag."
+                }
+              }
+            }
+          },
+          "OtherIncome": {
+            "type": "array",
+            "description": "Miscellaneous income — bank interest, gifts, etc.",
+            "items": {
+              "type": "object",
+              "required": [
+                "IncomeDate",
+                "IncomeDescription",
+                "IncomeAmount"
+              ],
+              "properties": {
+                "IncomeDate": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Income effective date."
+                },
+                "IncomeDescription": {
+                  "type": "string",
+                  "description": "Description of the income or gain."
+                },
+                "IncomeAmount": {
+                  "type": "number",
+                  "description": "Amount in foreign currency."
+                },
+                "TDSDeducted": {
+                  "type": "number",
+                  "description": "TDS deducted in ₹."
+                },
+                "TDSDeductor": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Name of the TDS deductor."
+                },
+                "NonTaxable": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if exempt from Indian tax."
+                },
+                "Remarks": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Free-form notes."
+                },
+                "IsLocked": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if this row is locked."
+                },
+                "OtherIncomeID": {
+                  "type": "string",
+                  "description": "OtherIncomeID"
+                },
+                "QFY": {
+                  "type": "string",
+                  "description": "QFY"
+                },
+                "Deleted": {
+                  "type": "boolean",
+                  "description": "Soft-delete flag."
+                }
+              }
+            }
+          },
+          "PropertyIncome": {
+            "type": "array",
+            "description": "Rental and property-related income records.",
+            "items": {
+              "type": "object",
+              "required": [
+                "IncomeDate",
+                "PropertyID",
+                "GrossIncome"
+              ],
+              "properties": {
+                "IncomeDate": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Income effective date."
+                },
+                "PropertyID": {
+                  "type": "string",
+                  "description": "References Properties.PropertyID."
+                },
+                "GrossIncome": {
+                  "type": "number",
+                  "description": "Gross income in ₹."
+                },
+                "TotalExpenses": {
+                  "type": "number",
+                  "description": "Deductible expenses in ₹."
+                },
+                "TDSDeducted": {
+                  "type": "number",
+                  "description": "TDS deducted in ₹."
+                },
+                "TDSDeductor": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Name of the TDS deductor."
+                },
+                "Details": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Additional detail text."
+                },
+                "IsLocked": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if this row is locked."
+                },
+                "PropertyIncomeID": {
+                  "type": "string",
+                  "description": "PropertyIncomeID"
+                },
+                "NetIncome": {
+                  "type": "string",
+                  "description": "NetIncome"
+                },
+                "QFY": {
+                  "type": "string",
+                  "description": "QFY"
+                },
+                "Deleted": {
+                  "type": "boolean",
+                  "description": "Soft-delete flag."
+                }
+              }
+            }
+          },
+          "SalaryIncome": {
+            "type": "array",
+            "description": "Salary and payroll-derived income entries.",
+            "items": {
+              "type": "object",
+              "required": [
+                "EffectiveDate",
+                "Employer",
+                "GrossTaxable"
+              ],
+              "properties": {
+                "EffectiveDate": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Record effective date."
+                },
+                "Employer": {
+                  "type": "string",
+                  "description": "Employer name."
+                },
+                "GrossTaxable": {
+                  "type": "number",
+                  "description": "Gross taxable income."
+                },
+                "TaxablePerquisites": {
+                  "type": "number",
+                  "description": "Taxable value of perquisites."
+                },
+                "Exemptions": {
+                  "type": "number",
+                  "description": "Total exemptions."
+                },
+                "Deductions": {
+                  "type": "number",
+                  "description": "Deductions under Chapter VI-A."
+                },
+                "TDSDeducted": {
+                  "type": "number",
+                  "description": "TDS deducted in ₹."
+                },
+                "Remarks": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Free-form notes."
+                },
+                "IsLocked": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if this row is locked."
+                },
+                "SalaryIncomeID": {
+                  "type": "string",
+                  "description": "SalaryIncomeID"
+                },
+                "GrossTaxableIncome": {
+                  "type": "string",
+                  "description": "GrossTaxableIncome"
+                },
+                "NetTaxableIncome": {
+                  "type": "string",
+                  "description": "NetTaxableIncome"
+                },
+                "QFY": {
+                  "type": "string",
+                  "description": "QFY"
+                },
+                "Deleted": {
+                  "type": "boolean",
+                  "description": "Soft-delete flag."
+                }
+              }
+            }
+          },
+          "StockPurchasesOrTransferIns": {
+            "type": "array",
+            "description": "Stock purchase lots and transfer-ins with cost basis for portfolio tracking.",
+            "items": {
+              "type": "object",
+              "required": [
+                "PurchaseDate",
+                "SecurityName",
+                "CurrencyCode",
+                "PurchaseQuantity",
+                "PurchasePricePerUnit",
+                "ExchangeRateToINR"
+              ],
+              "properties": {
+                "PurchaseDate": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Purchase or transfer-in date."
+                },
+                "BrokerageName": {
+                  "type": "string",
+                  "description": "Brokerage or custodian name."
+                },
+                "SecurityName": {
+                  "type": "string",
+                  "description": "Security name or ticker."
+                },
+                "CurrencyCode": {
+                  "type": "string",
+                  "description": "Currency code of the transaction."
+                },
+                "PurchaseQuantity": {
+                  "type": "number",
+                  "description": "Units purchased."
+                },
+                "PurchasePricePerUnit": {
+                  "type": "number",
+                  "description": "Price per unit in purchase currency."
+                },
+                "PurchaseExpenses": {
+                  "type": "number",
+                  "description": "Transaction expenses."
+                },
+                "ExchangeRateToINR": {
+                  "type": "number",
+                  "description": "Exchange rate used for INR conversion."
+                },
+                "LotTag": {
+                  "type": "number",
+                  "description": "Optional lot tag."
+                },
+                "IsSTTPaid": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if STT was paid on this purchase."
+                },
+                "IsTransferIn": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if this is an in-kind transfer-in, not a purchase."
+                },
+                "IsLocked": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if this row is locked."
+                },
+                "PurchaseLotID": {
+                  "type": "string",
+                  "description": "Auto-assigned lot identifier."
+                },
+                "StockPurchaseID": {
+                  "type": "string",
+                  "description": "StockPurchaseID"
+                },
+                "TotalPurchaseValue": {
+                  "type": "string",
+                  "description": "TotalPurchaseValue"
+                },
+                "TotalPurchasePricePerUnit": {
+                  "type": "string",
+                  "description": "TotalPurchasePricePerUnit"
+                },
+                "TotalPurchaseValueINR": {
+                  "type": "string",
+                  "description": "TotalPurchaseValueINR"
+                },
+                "QFY": {
+                  "type": "string",
+                  "description": "QFY"
+                },
+                "Deleted": {
+                  "type": "boolean",
+                  "description": "Soft-delete flag."
+                }
+              }
+            }
+          },
+          "StockSalesOrTransferOuts": {
+            "type": "array",
+            "description": "Stock sale lots and transfer-outs referencing prior purchase lots.",
+            "items": {
+              "type": "object",
+              "required": [
+                "SaleDate",
+                "SecurityName",
+                "SaleQuantity",
+                "SaleAmount",
+                "ExchangeRateToINR"
+              ],
+              "properties": {
+                "SaleDate": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Sale or transfer-out date."
+                },
+                "SecurityName": {
+                  "type": "string",
+                  "description": "Security name or ticker."
+                },
+                "BrokerageName": {
+                  "type": "string",
+                  "description": "Brokerage or custodian name."
+                },
+                "SaleQuantity": {
+                  "type": "number",
+                  "description": "Units sold."
+                },
+                "SaleAmount": {
+                  "type": "number",
+                  "description": "Sale proceeds (total)."
+                },
+                "SaleExpenses": {
+                  "type": "number",
+                  "description": "Transaction expenses in sale currency."
+                },
+                "DomesticExpensesINR": {
+                  "type": "number",
+                  "description": "Domestic expenses in ₹."
+                },
+                "ExchangeRateToINR": {
+                  "type": "number",
+                  "description": "Exchange rate used for INR conversion."
+                },
+                "PurchaseLots": {
+                  "type": "array",
+                  "description": "Purchase lot references consumed by this sale.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "PurchaseLotID",
+                      "SaleQuantity"
+                    ],
+                    "properties": {
+                      "PurchaseLotID": {
+                        "type": "string"
+                      },
+                      "SaleQuantity": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                },
+                "IsTransferOut": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if this is an in-kind transfer-out, not a sale."
+                },
+                "Remarks": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Free-form notes."
+                },
+                "IsLocked": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True if this row is locked."
+                },
+                "StockSaleID": {
+                  "type": "string",
+                  "description": "StockSaleID"
+                },
+                "TotalSaleValue": {
+                  "type": "string",
+                  "description": "TotalSaleValue"
+                },
+                "TotalSalePricePerUnit": {
+                  "type": "string",
+                  "description": "TotalSalePricePerUnit"
+                },
+                "TotalSaleValueINR": {
+                  "type": "string",
+                  "description": "TotalSaleValueINR"
+                },
+                "QFY": {
+                  "type": "string",
+                  "description": "QFY"
+                },
+                "CgQ": {
+                  "type": "string",
+                  "description": "CgQ"
+                },
+                "Deleted": {
+                  "type": "boolean",
+                  "description": "Soft-delete flag."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

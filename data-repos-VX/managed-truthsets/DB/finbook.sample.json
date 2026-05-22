@@ -1,0 +1,54 @@
+{
+  "config": {
+    "Defaults": [
+      {
+        "Broker": "Interactive Brokers",
+        "Key": "sample-default-broker",
+        "Note": "Checked-in sample default"
+      }
+    ]
+  },
+  "accounts": [
+    {
+      "account": "Sample",
+      "name": "Sample Account",
+      "SalaryIncome": [
+        {
+          "EffectiveDate": "2024-06-15",
+          "Employer": "Acme Corp",
+          "GrossTaxable": 500000,
+          "TDSDeducted": 50000
+        }
+      ],
+      "ForeignIncome": [],
+      "PropertyIncome": [],
+      "CapitalGainsConsolidated": [],
+      "OtherIncome": [
+        {
+          "IncomeDate": "2024-07-01",
+          "IncomeDescription": "Savings interest",
+          "IncomeAmount": 1200
+        }
+      ],
+      "StockPurchasesOrTransferIns": [
+        {
+          "BrokerageName": "Interactive Brokers",
+          "SecurityName": "MSFT",
+          "CurrencyCode": "USD",
+          "IsSTTPaid": false,
+          "PurchaseDate": "2024-05-30",
+          "PurchaseQuantity": 10,
+          "PurchasePricePerUnit": 429.17,
+          "PurchaseExpenses": 0,
+          "ExchangeRateToINR": 83.5,
+          "PurchaseLotID": "MSFT - 429.17 - 30-May-2024",
+          "LotTag": 0
+        }
+      ],
+      "StockSalesOrTransferOuts": [],
+      "AdvanceTax": [],
+      "ForeignAccounts": [],
+      "Properties": []
+    }
+  ]
+}

@@ -104,7 +104,15 @@ function convertJsonSchemaNode(spec) {
     return applySchemaConstraints(schema, spec);
   }
   if (spec.type === 'object') {
-    return z.object(convertJsonSchemaToZodShape(spec));
+    const shape = convertJsonSchemaToZodShape(spec);
+    const allowsAdditionalProperties = spec.additionalProperties !== false;
+    if (allowsAdditionalProperties) {
+      if (spec.additionalProperties && typeof spec.additionalProperties === 'object') {
+        return z.object(shape).catchall(convertJsonSchemaNode(spec.additionalProperties));
+      }
+      return z.object(shape).catchall(z.any());
+    }
+    return z.object(shape);
   }
 
   return z.any();

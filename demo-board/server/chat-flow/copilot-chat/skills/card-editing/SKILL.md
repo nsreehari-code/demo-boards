@@ -49,6 +49,7 @@ Use it especially when the request says things like:
 
 - `requires[]` and `provides[]` are editable when the task is fixing a broken token contract.
 - When repairing expressions that read required tokens, use `requires.<key>` for normal token names and JSONata `$lookup(requires, 'my-key')` for hyphenated ones.
+- If the task changes `source_defs[]` shape or source field names, use `card-source-defs` to confirm which source kinds and fields are valid before editing.
 - If the task touches a source's `projections`, keep them limited to `card_data` and `requires`.
 - Do not introduce `fetched_sources`, `computed_values`, or `source_defs` into `projections` while repairing a source.
 - If the task introduces or repairs LLM behavior, keep it inside `source_defs[]`; do not invent a separate non-source mechanism.
@@ -58,9 +59,10 @@ Use it especially when the request says things like:
 1. Use `card-store-commands` to load the current card with the provided `store-ref` and `cardId`.
 2. Identify the smallest card slice that actually needs to change.
 3. Keep the existing structure and style unless the current shape is itself the problem.
-4. Apply the smallest edit that satisfies the request, then persist it through `card-store-commands`.
-5. If the change touches `source_defs[]`, `compute[]`, `requires[]`, `provides[]`, or `view`, immediately hand off to `ensure-card-correctness`.
-6. Stop after the requested card is correct. Do not expand into unrelated card cleanup.
+4. If the edit touches `source_defs[]`, use `card-source-defs` when you need to verify valid source kinds, source fields, or source probing steps.
+5. Apply the smallest edit that satisfies the request, then persist it through `card-store-commands`.
+6. If the change touches `source_defs[]`, `compute[]`, `requires[]`, `provides[]`, or `view`, immediately hand off to `ensure-card-correctness`.
+7. Stop after the requested card is correct. Do not expand into unrelated card cleanup.
 
 ## How to Edit Safely
 
@@ -86,9 +88,13 @@ Use it especially when the request says things like:
 
 After editing, use `ensure-card-correctness` as the required follow-up skill.
 
+If the uncertainty is specifically about supported source kinds, valid source
+fields, or source probing, use `card-source-defs` before or during that
+correctness pass.
+
 Use that skill to:
 
 - validate the edited card
-- probe touched sources
+- run `run-source-preflight` for touched sources so the agent can verify the real source path still works
 - evaluate touched compute paths
 - run full simulation only if narrower checks are insufficient

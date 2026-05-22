@@ -59,7 +59,10 @@ correctness checks.
 - If a source uses `projections`, those expressions may read only from `card_data` and `requires`.
 - Do not introduce `fetched_sources`, `computed_values`, or `source_defs` into `projections` while repairing a card.
 - If a source repair changes projections, build the smallest `mock-projections` payload that exercises that same source.
-- Treat source-specific fields beyond `bindTo` and `outputFile` as executor-defined; repair them by following known working patterns rather than guessing broad new shapes.
+- Treat source-specific fields beyond the shared source fields as kind-specific; use `card-source-defs` when you need to confirm the valid source fields instead of guessing broad new shapes.
+
+Use `card-source-defs` when the repair question is specifically about supported
+source kinds, valid source fields, or which source probe to run.
 
 ## Command Surface
 
@@ -101,10 +104,10 @@ Expected result shape:
 }
 ```
 
-### 2. Probe one source preflight
+### 2. Run one source actual fetch preflight
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js probe-source-preflight --source-idx 0
+node ./.github/scripts/board-live-cards-cli.js run-source-preflight --source-idx 0
 ```
 
 The stdin payload should contain either the raw card object or:
@@ -131,6 +134,29 @@ Required argument:
 Optional:
 
 - `--out-ref <ref>` if a downstream workflow explicitly needs the result stored
+
+Mental model:
+
+- `run-source-preflight` is the authoritative real-flow preflight.
+- It runs the selected source's real fetch path end to end for the current `source_def`.
+- Use it to verify that the chosen fetch path actually works with the current source definition and projections.
+- It is not a synthetic dry run, mock-only check, or metadata-only validation step.
+- `probe-source-preflight` is the lightweight variant and is useful only for quick readiness, connectivity, or configuration probing.
+
+Expected result includes fields like:
+
+- `bindTo`
+- `reachable`
+- `latencyMs`
+- `note`
+
+### 2a. Run one source lightweight probe
+
+```bash
+node ./.github/scripts/board-live-cards-cli.js probe-source-preflight --source-idx 0
+```
+
+Use this only when you need a lightweight readiness probe rather than proof that the full source flow works.
 
 Expected result includes fields like:
 
@@ -188,7 +214,6 @@ Actual payload contract:
 - the command reads `body["card-content"] ?? body`
 - the command reads `body["mock-fetched-sources"] ?? {}`
 - the command reads `body["mock-requires"] ?? {}`
-- the command optionally reads `body["task-executor-ref"]`
 - no `mock-projections` field is used directly by this command
 - source preflight still runs against the card's `source_defs[]`
 - `mock-fetched-sources` is optional; if omitted, the compute phase runs with an empty `fetched_sources` object
@@ -199,7 +224,7 @@ Follow this exact order.
 
 1. Run `validate-card-preflight` first.
 2. If it reports issues, repair the card definition first. Do not move to probing or compute until validation is clean.
-3. If the changed card has `source_defs[]`, build the smallest payload that exercises only the touched source and run `probe-source-preflight` for each changed source index.
+3. If the changed card has `source_defs[]`, build the smallest payload that exercises only the touched source and run `run-source-preflight` for each changed source index.
 4. If the changed card has `compute[]`, build the smallest representative mocks and run `eval-card-compute`.
 5. If targeted checks are individually clean but the card is still suspicious, run `simulate-card-cycle` to surface cross-layer inconsistencies.
 6. Repeat until validation is clean and every touched source or compute path has a passing result.
@@ -216,7 +241,8 @@ Follow this exact order.
 ## How to Interpret Failures
 
 - `validate-card-preflight` failures usually mean schema issues, invalid JSONata, invalid namespaces, or unsupported source fields.
-- `probe-source-preflight` failures usually mean projection shape problems, missing required source fields, or executor-specific connectivity/config issues.
+- `probe-source-preflight` failures usually mean readiness, connectivity, or configuration issues in the lightweight probe path.
+- `run-source-preflight` failures usually mean the actual fetch path failed because of projection shape problems, missing required source fields, or runtime connectivity/config issues.
 - `eval-card-compute` failures usually mean broken compute expressions or wrong mock input shape.
 - `simulate-card-cycle` failures usually mean multiple layers are inconsistent; use its sections to route the repair back to validation, source defs, or compute.
 
@@ -242,7 +268,6 @@ Common repair routing:
 - If evaluating compute, prefer `{ "card-content": <card>, "mock-fetched-sources": { ... }, "mock-requires": { ... } }`.
 - If simulating a full cycle, prefer `{ "card-content": <card>, "mock-requires": { ... } }`.
 - Add `mock-fetched-sources` only when you intentionally want to supply compute inputs instead of leaving `fetched_sources` empty for the compute phase.
-- Add `task-executor-ref` only when you need to override the board's configured executor.
 - Use realistic field names and shapes, but keep the payload as small as possible.
 - Preserve the actual `id`, `bindTo`, `outputFile`, and compute expressions from the card under repair.
 

@@ -1,0 +1,65 @@
+{
+  "description": "Computed financial views from Finbook data. Requires account name and view key.",
+  "parameters": {
+    "account": "Account name (required). Call without account to list available accounts.",
+    "fy": "Financial year like '2025-26', or omit for all years. Not all views use this parameter."
+  },
+  "views": [
+    {
+      "key": "income-summary",
+      "title": "Income Summary",
+      "description": "Income breakdown by category with totals for taxable income, relief under Chapter VI-A, and TDS.",
+      "fields": [
+        "byCategory",
+        "totalTaxableIncome",
+        "totalRelief",
+        "totalTDS"
+      ]
+    },
+    {
+      "key": "capital-gains",
+      "title": "Capital Gains",
+      "description": "Buy-sell matched transactions with gain/loss, holding period classification (LTCG/STCG), and aggregate totals.",
+      "fields": [
+        "transactions",
+        "totalGainLoss",
+        "ltcgTotal",
+        "stcgTotal"
+      ]
+    },
+    {
+      "key": "stock-transactions",
+      "title": "Stock Transactions",
+      "description": "All stock buy and sell entries with matching, transfer type, and FY/quarter classification.",
+      "fields": [
+        "rows"
+      ]
+    },
+    {
+      "key": "holdings",
+      "title": "Stock Holdings",
+      "description": "Current holdings with quantity, average cost, and total portfolio value as of a specified date.",
+      "fields": [
+        "asOnDate",
+        "holdings",
+        "totalPortfolioValue"
+      ]
+    },
+    {
+      "key": "stock-purchases",
+      "title": "Stock Purchases",
+      "description": "Raw stock purchase and transfer-in records.",
+      "fields": [
+        "rows"
+      ]
+    },
+    {
+      "key": "stock-sales",
+      "title": "Stock Sales",
+      "description": "Raw stock sale and transfer-out records.",
+      "fields": [
+        "rows"
+      ]
+    }
+  ]
+}

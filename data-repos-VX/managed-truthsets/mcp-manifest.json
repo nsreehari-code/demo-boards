@@ -1,0 +1,237 @@
+{
+  "manifestVersion": "finbook.mcp.manifest.v1",
+  "service": "finbook",
+  "contractVersion": "finbook.mcp.v2",
+  "summary": "Agent-facing semantic manifest for the Finbook MCP/tool surface. Describes what the system means, which tools exist, and how to use them safely without exposing transport or storage internals.",
+  "systemSemantics": {
+    "purpose": "Finbook manages personal tax truth for one repository as account-centered financial records plus append-only reference data and computed tax reports.",
+    "topLevelModel": [
+      {
+        "key": "config",
+        "kind": "repo-config",
+        "meaning": "Repo-wide settings and append-only reference tables shared across accounts."
+      },
+      {
+        "key": "accounts",
+        "kind": "account-collection",
+        "meaning": "Each account contains transactional tables plus append-only profile/reference data."
+      }
+    ],
+    "accountModel": {
+      "identity": "Accounts are addressed by account code or display name.",
+      "appendOnlyReferenceData": [
+        "Properties",
+        "ForeignAccounts"
+      ],
+      "governanceBoundary": "Account creation, enable or disable state, row locking, journal materialization, commit, and discard are governance or runtime actions and are not agent-safe MCP tools."
+    },
+    "transactionalTables": [
+      {
+        "table": "AdvanceTax",
+        "meaning": "Advance tax payment records.",
+        "preferredWriteTool": "finbook.record_advance_tax_paid"
+      },
+      {
+        "table": "CapitalGainsConsolidated",
+        "meaning": "Manual capital gains not derived from stock purchase/sale lots.",
+        "preferredWriteTool": "finbook.record_capital_gain_outside_stock_transactions"
+      },
+      {
+        "table": "ForeignAccounts",
+        "meaning": "Finbook transactional table.",
+        "preferredWriteTool": "finbook.upsert_row"
+      },
+      {
+        "table": "ForeignIncome",
+        "meaning": "Foreign-source income such as dividends or interest.",
+        "preferredWriteTool": "finbook.record_income"
+      },
+      {
+        "table": "OtherIncome",
+        "meaning": "Other taxable income records.",
+        "preferredWriteTool": "finbook.record_income"
+      },
+      {
+        "table": "Properties",
+        "meaning": "Finbook transactional table.",
+        "preferredWriteTool": "finbook.upsert_row"
+      },
+      {
+        "table": "PropertyIncome",
+        "meaning": "Property income and expense records.",
+        "preferredWriteTool": "finbook.record_income"
+      },
+      {
+        "table": "SalaryIncome",
+        "meaning": "Salary and payroll-derived income entries.",
+        "preferredWriteTool": "finbook.record_income"
+      },
+      {
+        "table": "StockPurchasesOrTransferIns",
+        "meaning": "Stock purchase lots and transfer-ins. PurchaseLotID identifies sale-referenceable lots.",
+        "preferredWriteTool": "finbook.record_stock_purchase"
+      },
+      {
+        "table": "StockSalesOrTransferOuts",
+        "meaning": "Stock sale lots and transfer-outs. PurchaseLots references prior purchase lots.",
+        "preferredWriteTool": "finbook.record_stock_sale"
+      }
+    ],
+    "computedViews": [
+      "income-summary",
+      "capital-gains",
+      "stock-transactions",
+      "holdings",
+      "stock-purchases",
+      "stock-sales"
+    ]
+  },
+  "toolPriorities": {
+    "orientation": [
+      "Start with finbook.describe_semantic_structure when the model, table meaning, or preferred mutation path is unclear.",
+      "Use finbook.get_contract when you need the machine-readable contract for the live tool surface."
+    ],
+    "readOrder": [
+      "Prefer targeted reads first: finbook.list_accounts, finbook.get_repo_config, finbook.get_account_profile, finbook.list_table_rows, and finbook.get_computed_view.",
+      "Use finbook.list_journal_entries or finbook.get_journal_summary when the question is specifically about pending uncommitted changes.",
+      "Use finbook.get_working_state or finbook.get_committed_state only as fallback reads for broad reasoning.",
+      "Prefer finbook.get_computed_view for named computed views and use finbook.run_report only as a compatibility alias."
+    ],
+    "writeOrder": [
+      "Prefer append-only tools for master data: finbook.append_repo_config_entry and finbook.append_account_profile_entry.",
+      "Prefer semantic transactional write tools before generic row tools.",
+      "Use finbook.upsert_row and finbook.delete_row only when no more specific semantic tool applies."
+    ],
+    "validation": [
+      "Call finbook.validate_working_state after tool-based writes before concluding work or asking for follow-up action."
+    ]
+  },
+  "tools": {
+    "orientation": [
+      {
+        "name": "finbook.get_contract",
+        "purpose": "Return the live machine-readable contract for the Finbook MCP/tool surface."
+      },
+      {
+        "name": "finbook.describe_semantic_structure",
+        "purpose": "Explain the meaning of the Finbook model, tables, computed views, and preferred write paths."
+      },
+      {
+        "name": "finbook.get_schema",
+        "purpose": "Return schema metadata for supported tables and computed fields."
+      }
+    ],
+    "targetedReads": [
+      {
+        "name": "finbook.list_accounts",
+        "purpose": "List the known Finbook accounts in the connected repository."
+      },
+      {
+        "name": "finbook.get_repo_config",
+        "purpose": "Read repo-wide configuration and append-only reference tables."
+      },
+      {
+        "name": "finbook.get_account_profile",
+        "purpose": "Read append-only account profile and reference data for a single account."
+      },
+      {
+        "name": "finbook.list_table_rows",
+        "purpose": "Read computed rows for one table, optionally scoped by financial year."
+      },
+      {
+        "name": "finbook.get_computed_view",
+        "purpose": "Return one named computed view such as holdings, capital gains, or income summary for an account."
+      },
+      {
+        "name": "finbook.run_report",
+        "purpose": "Compatibility alias for finbook.get_computed_view."
+      }
+    ],
+    "fallbackReads": [
+      {
+        "name": "finbook.get_committed_state",
+        "purpose": "Return the fully committed state snapshot for broad reasoning when targeted reads are insufficient."
+      },
+      {
+        "name": "finbook.get_working_state",
+        "purpose": "Return the current working state snapshot, including pending runtime changes, as a fallback broad read."
+      }
+    ],
+    "journalReads": [
+      {
+        "name": "finbook.list_journal_entries",
+        "purpose": "Return the effective uncommitted journal entries contributing to the current working state since the last commit."
+      },
+      {
+        "name": "finbook.get_journal_summary",
+        "purpose": "Return a user-oriented summary of the effective uncommitted journal entries contributing to the current working state."
+      }
+    ],
+    "appendOnlyWrites": [
+      {
+        "name": "finbook.append_repo_config_entry",
+        "purpose": "Append one repo-level master-data or reference entry without rewriting the whole category."
+      },
+      {
+        "name": "finbook.append_account_profile_entry",
+        "purpose": "Append one account-level master-data or reference entry without rewriting the whole category."
+      }
+    ],
+    "semanticTransactionalWrites": [
+      {
+        "name": "finbook.record_stock_purchase",
+        "purpose": "Record a stock purchase or transfer-in entry."
+      },
+      {
+        "name": "finbook.record_stock_sale",
+        "purpose": "Record a stock sale or transfer-out entry."
+      },
+      {
+        "name": "finbook.record_income",
+        "purpose": "Record salary, foreign, property, or other income using the named income family."
+      },
+      {
+        "name": "finbook.record_capital_gain_outside_stock_transactions",
+        "purpose": "Record manual or externally computed capital gains that do not come from tracked lot sales."
+      },
+      {
+        "name": "finbook.record_advance_tax_paid",
+        "purpose": "Record an advance-tax payment entry."
+      }
+    ],
+    "genericCorrections": [
+      {
+        "name": "finbook.upsert_row",
+        "purpose": "Create or update a row when no more specific semantic write tool applies."
+      },
+      {
+        "name": "finbook.delete_row",
+        "purpose": "Delete a row by reference as a generic correction tool."
+      }
+    ],
+    "validation": [
+      {
+        "name": "finbook.validate_working_state",
+        "purpose": "Validate structural integrity of the current working state after writes."
+      }
+    ]
+  },
+  "agentGuidance": {
+    "recordExtraction": [
+      "Prefer finbook.list_accounts, finbook.get_account_profile, finbook.get_repo_config, finbook.list_table_rows, and finbook.get_computed_view for targeted context.",
+      "Use finbook.describe_semantic_structure when table meaning or write-path choice is unclear."
+    ],
+    "claimRecording": [
+      "Prefer finbook.list_accounts, finbook.get_account_profile, finbook.list_table_rows, and finbook.get_computed_view before broad state reads."
+    ],
+    "claimVerification": [
+      "Prefer finbook.get_computed_view, finbook.list_table_rows, and finbook.get_account_profile for verification reasoning."
+    ]
+  },
+  "guardrails": [
+    "Use the Finbook MCP/tool surface instead of editing raw state files directly.",
+    "Do not treat committed or working state snapshots as the default query surface; use them only as fallback reads.",
+    "Do not treat admin export dumps as part of the agent-safe MCP surface; use targeted computed-view tools instead.",
+    "Do not assume governance or runtime actions such as commit, discard, journal replay, row locking, or account lifecycle controls are available as agent-safe tools."
+  ]
+}

@@ -6,6 +6,8 @@
   "main": "index.js",
   "scripts": {
     "test": "node demo-board/test/server-http-test.js && npm run mcp:test",
+    "finbook:build": "npm --prefix data-repos-VX/managed-truthsets run build",
+    "finbook:check": "npm --prefix data-repos-VX/managed-truthsets run check",
     "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt",
     "install:vite": "npm --prefix demo-board/web/vite install",
     "postinstall": "npm run install:foundry && npm run install:vite",
@@ -29,7 +31,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "latest",
     "better-sqlite3": "^12.9.0",
-    "yaml-flow": "^8.4.8"
+    "yaml-flow": "^8.4.9"
   },
   "devDependencies": {
     "http-server": "^14.1.1"

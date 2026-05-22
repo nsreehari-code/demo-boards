@@ -5,14 +5,16 @@
  *
  * Supported subcommands:
  *   run-source-fetch         — execute one source_def via its registered flow
- *   describe-capabilities    — emit registry-derived kinds, schemas, and probe info as JSON
+ *   describe-capabilities    — emit registry-derived kinds, supports, schemas, and probe info as JSON
  *   validate-source-def      — validate one source_def against registry rules from stdin
- *   probe-source-preflight   — perform a lightweight preflight for one source_def from stdin
+ *   probe-source-preflight   — perform a lightweight probe for one source_def from stdin
+ *   run-source-preflight     — perform an actual fetch preflight for one source_def from stdin
  *
  * Runtime invocation shapes used by board-live-cards:
  *   run-source-fetch --in-ref <b64ref> --out-ref <b64ref> [--err-ref <b64ref>] [--extra <base64json>]
  *   validate-source-def       <stdin: source JSON>
  *   probe-source-preflight    <stdin: source JSON> [--extra <base64json>]
+ *   run-source-preflight      <stdin: source JSON> [--extra <base64json>]
  *
  * Payload read from --in-ref (raw source definition or { source_def, callback } envelope):
  *   {
@@ -173,7 +175,10 @@ async function executeStepMachineSourceFlow(context) {
 
 async function resolveAndExecuteSourceFlow(sourceDef, extra, refs = {}) {
   const registry = loadSourceDefFlowsConfig();
-  const kind = resolveSourceKind(sourceDef, registry);
+  const { kind, kindSpec, errors } = validateSourceDefContract(sourceDef, registry);
+  if (errors.length > 0) {
+    throw new Error(`Invalid source definition: ${errors.join(' ')}`);
+  }
   const mockDb = kind === 'mock'
     ? (await import(pathToFileURL(path.join(WORKER_DIR, 'source-def-flows', 'mock-handler', 'mock-db.js')).href)).MOCK_DB
     : undefined;
@@ -282,7 +287,7 @@ async function runSourceFetchSubcommand(argv) {
 
 }
 
-async function probeSourcePreflightSubcommand(argv) {
+function parseOptionalExtraArg(argv) {
   const extraIdx = argv.indexOf('--extra');
   const extraB64 = extraIdx !== -1 ? argv[extraIdx + 1] : undefined;
 
@@ -291,14 +296,33 @@ async function probeSourcePreflightSubcommand(argv) {
     try { extra = JSON.parse(Buffer.from(extraB64, 'base64').toString('utf-8')); }
     catch { /* ignore malformed extra */ }
   }
+  return extra;
+}
+
+async function readJsonFromStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf-8').trim();
+}
+
+function validateRunSourcePreflightProjections(sourceDef) {
+  const projections = sourceDef?._projections;
+  if (!projections || typeof projections !== 'object' || Array.isArray(projections)) {
+    throw new Error('Missing _projections object for run-source-preflight');
+  }
+  if (Object.keys(projections).length === 0) {
+    throw new Error('Missing required projection values for run-source-preflight');
+  }
+}
+
+async function probeSourcePreflightSubcommand(argv) {
+  const extra = parseOptionalExtraArg(argv);
 
   const startedAt = Date.now();
   try {
-    const chunks = [];
-    for await (const chunk of process.stdin) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    const raw = Buffer.concat(chunks).toString('utf-8').trim();
+    const raw = await readJsonFromStdin();
     if (!raw) {
       console.log(JSON.stringify({ ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: 'Missing probe input JSON on stdin' }));
       return;
@@ -312,19 +336,64 @@ async function probeSourcePreflightSubcommand(argv) {
       return;
     }
 
-    const projections = sourceDef?._projections;
-    const mockProjectionsMissing = !projections || typeof projections !== 'object' || Array.isArray(projections) || Object.keys(projections).length === 0;
-    const mockProjectionWarning = mockProjectionsMissing
-      ? 'Mock projections / _projections missing. Hence mock run not performed.'
-      : undefined;
-
-    const { flowResult } = await resolveAndExecuteSourceFlow(sourceDef, extra);
+    const registry = loadSourceDefFlowsConfig();
+    const { kind, errors } = validateSourceDefContract(sourceDef, registry);
+    if (errors.length > 0) {
+      throw new Error(errors.join(' '));
+    }
+    const spec = registry?.kinds?.[kind] || {};
+    const probeInfo = spec?.probe && typeof spec.probe === 'object' ? spec.probe : null;
     console.log(JSON.stringify({
       ok: true,
       reachable: true,
       latencyMs: Date.now() - startedAt,
-      ...(mockProjectionWarning ? { error: mockProjectionWarning } : {}),
-      ...(!mockProjectionWarning ? { resultValue: flowResult?.resultValue } : {}),
+      kind,
+      note: 'Lightweight probe passed',
+      ...(probeInfo ? { probe: probeInfo } : {}),
+    }));
+    return;
+  } catch (err) {
+    const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
+    console.log(JSON.stringify({ ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: `probe failed: ${String(err && err.message || err)}${detail}` }));
+    return;
+  }
+}
+
+async function runSourcePreflightSubcommand(argv) {
+  const extra = parseOptionalExtraArg(argv);
+
+  const startedAt = Date.now();
+  try {
+    const raw = await readJsonFromStdin();
+    if (!raw) {
+      console.log(JSON.stringify({ ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: 'Missing run preflight input JSON on stdin' }));
+      return;
+    }
+
+    let sourceDef;
+    try {
+      sourceDef = JSON.parse(raw);
+    } catch (err) {
+      console.log(JSON.stringify({ ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: `Invalid run preflight JSON: ${String(err && err.message || err)}` }));
+      return;
+    }
+
+    const registry = loadSourceDefFlowsConfig();
+    const { errors } = validateSourceDefContract(sourceDef, registry);
+    if (errors.length > 0) {
+      throw new Error(errors.join(' '));
+    }
+
+    validateRunSourcePreflightProjections(sourceDef);
+
+    const { kind, flowResult } = await resolveAndExecuteSourceFlow(sourceDef, extra);
+    console.log(JSON.stringify({
+      ok: true,
+      reachable: true,
+      latencyMs: Date.now() - startedAt,
+      kind,
+      note: 'Actual fetch preflight passed',
+      resultValue: flowResult?.resultValue,
     }));
     return;
   } catch (err) {
@@ -345,7 +414,103 @@ function getByPath(obj, dottedPath) {
 function checkType(value, expectedType) {
   if (expectedType === 'array') return Array.isArray(value);
   if (expectedType === 'object') return value != null && typeof value === 'object' && !Array.isArray(value);
+  if (expectedType === 'integer') return Number.isInteger(value);
   return typeof value === expectedType;
+}
+
+function isPlainObject(value) {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeSchemaTypes(typeSpec) {
+  if (Array.isArray(typeSpec)) {
+    return typeSpec.filter((entry) => typeof entry === 'string' && entry.length > 0);
+  }
+  if (typeof typeSpec === 'string') {
+    return typeSpec.split('|').map((entry) => entry.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function validateValueAgainstSchema(value, schema, fieldPath) {
+  const errors = [];
+  if (!schema || typeof schema !== 'object') {
+    return errors;
+  }
+
+  if (value === undefined) {
+    if (schema.required) {
+      errors.push(`${fieldPath} is required.`);
+    }
+    return errors;
+  }
+
+  const allowedTypes = normalizeSchemaTypes(schema.type);
+  if (allowedTypes.length > 0 && !allowedTypes.some((typeName) => checkType(value, typeName))) {
+    errors.push(`${fieldPath} must be of type ${Array.isArray(schema.type) ? schema.type.join('|') : schema.type}.`);
+    return errors;
+  }
+
+  if (Array.isArray(value) && schema.items && typeof schema.items === 'object') {
+    value.forEach((item, index) => {
+      errors.push(...validateValueAgainstSchema(item, schema.items, `${fieldPath}[${index}]`));
+    });
+  }
+
+  if (!isPlainObject(value)) {
+    return errors;
+  }
+
+  const properties = isPlainObject(schema.properties) ? schema.properties : null;
+  const additionalProperties = schema.additionalProperties;
+
+  if (properties) {
+    for (const [propertyName, propertySchema] of Object.entries(properties)) {
+      errors.push(...validateValueAgainstSchema(value[propertyName], propertySchema, `${fieldPath}.${propertyName}`));
+    }
+
+    for (const propertyName of Object.keys(value)) {
+      if (Object.prototype.hasOwnProperty.call(properties, propertyName)) {
+        continue;
+      }
+
+      if (additionalProperties && typeof additionalProperties === 'object') {
+        errors.push(...validateValueAgainstSchema(value[propertyName], additionalProperties, `${fieldPath}.${propertyName}`));
+        continue;
+      }
+
+      errors.push(`${fieldPath}.${propertyName} is not supported by this source kind.`);
+    }
+
+    return errors;
+  }
+
+  if (additionalProperties && typeof additionalProperties === 'object') {
+    for (const [propertyName, propertyValue] of Object.entries(value)) {
+      errors.push(...validateValueAgainstSchema(propertyValue, additionalProperties, `${fieldPath}.${propertyName}`));
+    }
+  }
+
+  return errors;
+}
+
+function buildSupportedSourceDefSchema(registry, kindSpec) {
+  const commonFields = isPlainObject(registry?.commonSourceDefFields) ? registry.commonSourceDefFields : {};
+  const kindInputSchema = isPlainObject(kindSpec?.manifest?.inputSchema) ? kindSpec.manifest.inputSchema : {};
+
+  return {
+    type: 'object',
+    required: true,
+    properties: {
+      ...commonFields,
+      ...kindInputSchema,
+      _projections: {
+        type: 'object',
+        required: false,
+      },
+    },
+    additionalProperties: false,
+  };
 }
 
 function matchesValidateRule(sourceDef, rule) {
@@ -369,6 +534,43 @@ function matchesValidateRule(sourceDef, rule) {
   }
 
   return true;
+}
+
+function validateSourceDefContract(sourceDef, registry) {
+  const errors = [];
+  let kind = '';
+
+  if (!isPlainObject(sourceDef)) {
+    return {
+      kind,
+      kindSpec: undefined,
+      errors: ['source definition must be an object.'],
+    };
+  }
+
+  try {
+    kind = resolveSourceKind(sourceDef, registry);
+  } catch (err) {
+    errors.push(String(err && err.message || err));
+  }
+
+  const kindSpec = registry?.kinds?.[kind];
+  if (kindSpec) {
+    errors.push(...validateValueAgainstSchema(sourceDef, buildSupportedSourceDefSchema(registry, kindSpec), 'sourceDef'));
+  }
+  const validateRules = Array.isArray(kindSpec?.validate) ? kindSpec.validate : [];
+  for (const rule of validateRules) {
+    if (!rule || typeof rule !== 'object') continue;
+    if (!matchesValidateRule(sourceDef, rule)) {
+      if (typeof rule.field === 'string' && typeof rule.type === 'string') {
+        errors.push(rule.message || `${rule.field} must be of type ${rule.type}.`);
+      } else {
+        errors.push(rule.message || 'Validation rule failed.');
+      }
+    }
+  }
+
+  return { kind, kindSpec, errors };
 }
 
 // ---------------------------------------------------------------------------
@@ -396,29 +598,8 @@ function validateSourceDefSubcommand() {
     process.exit(1);
   }
 
-  const errors = [];
   const registry = loadSourceDefFlowsConfig();
-
-  let kind = '';
-  try {
-    kind = resolveSourceKind(sourceDef, registry);
-  } catch (err) {
-    errors.push(String(err && err.message || err));
-  }
-
-  const kindSpec = registry?.kinds?.[kind];
-  const validateRules = Array.isArray(kindSpec?.validate) ? kindSpec.validate : [];
-  for (const rule of validateRules) {
-    if (!rule || typeof rule !== 'object') continue;
-    if (!matchesValidateRule(sourceDef, rule)) {
-      if (typeof rule.field === 'string' && typeof rule.type === 'string') {
-        errors.push(rule.message || `${rule.field} must be of type ${rule.type}.`);
-      } else {
-        errors.push(rule.message || 'Validation rule failed.');
-      }
-    }
-  }
-
+  const { errors } = validateSourceDefContract(sourceDef, registry);
   const result = { ok: errors.length === 0, errors };
   console.log(JSON.stringify(result));
   process.exit(errors.length === 0 ? 0 : 1);
@@ -431,6 +612,7 @@ function describeCapabilities() {
       kind,
       {
         ...(spec?.manifest && typeof spec.manifest === 'object' ? spec.manifest : {}),
+        ...(spec?.supports && typeof spec.supports === 'object' ? { supports: spec.supports } : {}),
         ...(spec?.probe && typeof spec.probe === 'object' ? { probe: spec.probe } : {}),
       },
     ]),
@@ -440,8 +622,11 @@ function describeCapabilities() {
     executor: registry?.executor || EXECUTOR_NAME,
     subcommands: Array.isArray(registry?.subcommands)
       ? registry.subcommands
-      : ['run-source-fetch', 'probe-source-preflight', 'describe-capabilities', 'validate-source-def'],
+      : ['run-source-fetch', 'probe-source-preflight', 'run-source-preflight', 'describe-capabilities', 'validate-source-def'],
     sourceKinds,
+    ...(registry?.commonSourceDefFields && typeof registry.commonSourceDefFields === 'object'
+      ? { commonSourceDefFields: registry.commonSourceDefFields }
+      : {}),
     ...(registry?.extraSchema ? { extraSchema: registry.extraSchema } : {}),
   };
   console.log(JSON.stringify(payload, null, 2));
@@ -455,6 +640,10 @@ async function main() {
   }
   if (sub === 'probe-source-preflight') {
     await probeSourcePreflightSubcommand(process.argv.slice(3));
+    return;
+  }
+  if (sub === 'run-source-preflight') {
+    await runSourcePreflightSubcommand(process.argv.slice(3));
     return;
   }
   if (sub === 'describe' || sub === 'describe-capabilities') {

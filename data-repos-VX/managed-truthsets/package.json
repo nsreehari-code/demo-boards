@@ -1,0 +1,14 @@
+{
+  "name": "managed-truthsets",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "node scripts/generate-mcp-manifests.cjs",
+    "test:report": "node scripts/test-finbook-report.js",
+    "test:validate": "node scripts/test-validate-finbook.js",
+    "validate:sample": "node scripts/validate-finbook.js DB/finbook.sample.json",
+    "check": "npm run build && npm run test:report && npm run test:validate && npm run validate:sample",
+    "report": "node scripts/finbook-report.js",
+    "validate": "node scripts/validate-finbook.js"
+  }
+}
