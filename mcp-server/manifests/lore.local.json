@@ -15,7 +15,7 @@
       "title": "Lore Get",
       "description": "Fetch one lore entry by key within a scope. Returns the entry or null.",
       "handler": "lore",
-      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "config": { "rootPath": "../../mcp-server-managed-truthsets/lore" },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -31,7 +31,7 @@
       "title": "Lore Get All",
       "description": "List lore entries in a scope, optionally filtered by key prefix and including deprecated entries.",
       "handler": "lore",
-      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "config": { "rootPath": "../../mcp-server-managed-truthsets/lore" },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -48,7 +48,7 @@
       "title": "Lore List Scopes",
       "description": "Discover scopes that have any stored lore. Optionally filter by prefix (e.g. 'board/').",
       "handler": "lore",
-      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "config": { "rootPath": "../../mcp-server-managed-truthsets/lore" },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -62,7 +62,7 @@
       "title": "Lore Set",
       "description": "Create or replace one lore entry within a scope. Clears any prior deprecation.",
       "handler": "lore",
-      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "config": { "rootPath": "../../mcp-server-managed-truthsets/lore" },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -79,7 +79,7 @@
       "title": "Lore Append",
       "description": "Append to an existing lore entry, creating it if missing. Strings concatenate with newline; arrays merge; otherwise the value becomes an array.",
       "handler": "lore",
-      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "config": { "rootPath": "../../mcp-server-managed-truthsets/lore" },
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -96,7 +96,7 @@
       "title": "Lore Deprecate",
       "description": "Mark one lore entry as deprecated. Default reads hide it; get_all with includeDeprecated=true still returns it.",
       "handler": "lore",
-      "config": { "rootPath": "../../cross-managed-truthsets/lore" },
+      "config": { "rootPath": "../../mcp-server-managed-truthsets/lore" },
       "inputSchema": {
         "type": "object",
         "properties": {
