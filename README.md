@@ -2,6 +2,8 @@
 
 Local demo runner for yaml-flow board examples.
 
+The published frontend artifacts remain in this repo under `docs/`, but the Vite frontend source now lives in the separate `demo-boards-frontend` repo.
+
 ## Prerequisites
 
 - Node.js 18+
@@ -15,22 +17,27 @@ Local demo runner for yaml-flow board examples.
 npm install
 ```
 
-2. Start backend + frontend together:
+2. Serve the published frontend artifacts locally:
 
 ```bash
-npm start
+npm run frontend
 ```
 
 3. Open in browser:
 
 - http://127.0.0.1:8000/
 
+## Frontend Source
+
+- Published frontend artifacts are kept in `docs/` in this repo.
+- Frontend source, build, and Pages deployment now live in the separate `demo-boards-frontend` repo.
+- The root `npm start` flow in this repo still needs rewiring after the frontend split, so use `npm run frontend` for the checked-in site artifacts.
+
 ## Scripts
 
 | Script | What it does |
 |---|---|
-| `npm start` | Start backend (port 7799) + frontend (port 8000) together |
-| `npm run frontend` | Serve `demo-board/` as static files at `http://127.0.0.1:8000` |
+| `npm run frontend` | Serve `docs/` as static files at `http://127.0.0.1:8000` |
 | `npm run mcp:install` | Install dependencies for `mcp-server/` |
 | `npm run mcp:dry-run` | Validate the WorkIQ MCP manifest without starting transport |
 | `npm run mcp:start` | Start the hosted MCP server for the demo-boards WorkIQ manifest at `http://127.0.0.1:7801/mcp` |
@@ -49,12 +56,9 @@ demo-boards/
         board-default/    <- runtime state (gitignored)
     server/
       board-server.js
-    demo-server-config.json
-    demo-task-executor.js
-    demo-chat-handler.js
-    index.html
+  docs/                   <- published frontend artifacts
   scripts/
-    start-server.cjs      <- foreground runner for backend, MCP, and frontend
+    start-server.cjs      <- legacy combined runner pending frontend-split rewiring
   mcp-server/             <- manifest-driven MCP server scaffold
 ```
 
@@ -68,6 +72,7 @@ demo-boards/
 - Cards live in `demo-board/boards/live/cards/` and are the single source of truth — no tmp-copy step.
 - `demo-board/boards/live/board-default/` is gitignored (runtime state).
 - `npm run clean` preserves `live/cards/` and `live/gandalf-cards/`.
+- `docs/` in this repo is the checked-in published frontend output; it is intentionally retained here.
 - `mcp-server/` is intended to be the shared MCP runtime for `demo-boards` tools and future repo-backed tool manifests.
 - `demo-board/boards/live/cards/card-my-identity.json` now uses the generic `mcp` source kind against `demo-boards.workiq.json`.
 - See `demo-board/projection-taxonomy.md` for the concrete board-as-case / live-cards-as-projections taxonomy, including Gandalf ingest and truth-alignment guidance.
