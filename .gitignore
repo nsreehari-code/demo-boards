@@ -2,7 +2,8 @@ node_modules/
 **/.demo-setup/
 logs/
 .tmp/
-data-repos-VX/case-workspace/
+/data-repos-VX/
+/workspaces/
 
 **/.board-ws
 **/.board-ws/

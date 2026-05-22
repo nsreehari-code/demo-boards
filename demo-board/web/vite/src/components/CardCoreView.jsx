@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -270,30 +270,29 @@ function SelectionView({ data, renderDef, onSave }) {
   }
 
   const { fieldKey, prop, currentValue, options, isRequired, viewData } = singleField;
+  const handleSubmit = useCallback((event) => {
+    event.preventDefault();
+    onSave?.(
+      buildEditorSaveValue(viewData.writeTo, fieldKey, currentValue ?? ''),
+      { kind: 'selection', renderDef, writeTo: viewData.writeTo },
+    );
+  }, [currentValue, fieldKey, onSave, renderDef, viewData.writeTo]);
+  const handleChange = useCallback((event) => {
+    const nextValue = event.target.value;
+    onSave?.(
+      buildEditorSaveValue(viewData.writeTo, fieldKey, nextValue),
+      { kind: 'selection', renderDef, writeTo: viewData.writeTo },
+    );
+  }, [fieldKey, onSave, renderDef, viewData.writeTo]);
 
   return (
-    <form
-      className="input-group input-group-sm"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSave?.(
-          buildEditorSaveValue(viewData.writeTo, fieldKey, currentValue ?? ''),
-          { kind: 'selection', renderDef, writeTo: viewData.writeTo },
-        );
-      }}
-    >
+    <form className="input-group input-group-sm" onSubmit={handleSubmit}>
       <select
         className="form-select board-select"
         value={currentValue ?? ''}
         required={isRequired}
         aria-label={prop.title ?? fieldKey}
-        onChange={(event) => {
-          const nextValue = event.target.value;
-          onSave?.(
-            buildEditorSaveValue(viewData.writeTo, fieldKey, nextValue),
-            { kind: 'selection', renderDef, writeTo: viewData.writeTo },
-          );
-        }}
+        onChange={handleChange}
       >
         {!isRequired ? <option value="">All</option> : null}
         {options.map((option) => {
@@ -544,7 +543,7 @@ function FormView({ data, renderDef, onSave }) {
   const effectiveValues = useMemo(() => ({ ...baseValues, ...journal }), [baseValues, journal]);
   const dirty = Object.keys(journal).length > 0;
 
-  function setFieldValue(key, prop, rawValue) {
+  const setFieldValue = useCallback((key, prop, rawValue) => {
     let nextValue = rawValue;
     if (prop.type === 'boolean') nextValue = !!rawValue;
     if (prop.type === 'number' || prop.type === 'integer') nextValue = rawValue === '' ? 0 : Number.parseFloat(rawValue);
@@ -555,13 +554,19 @@ function FormView({ data, renderDef, onSave }) {
       else next[key] = nextValue;
       return next;
     });
-  }
+  }, [baseValues]);
+
+  const handleSubmit = useCallback((event) => {
+    event.preventDefault();
+    onSave?.(effectiveValues, { kind: 'form', renderDef, writeTo: viewData.writeTo });
+  }, [effectiveValues, onSave, renderDef, viewData.writeTo]);
+
+  const handleDiscard = useCallback(() => {
+    setJournal({});
+  }, []);
 
   return (
-    <form className="row g-2 h-100 align-content-start" onSubmit={(event) => {
-      event.preventDefault();
-      onSave?.(effectiveValues, { kind: 'form', renderDef, writeTo: viewData.writeTo });
-    }}>
+    <form className="row g-2 h-100 align-content-start" onSubmit={handleSubmit}>
       {Object.entries(props).map(([key, prop]) => {
         const isRequired = required.includes(key);
         const compact = ['number', 'integer', 'boolean'].includes(prop.type) || prop.enum || prop.format === 'date';
@@ -617,7 +622,7 @@ function FormView({ data, renderDef, onSave }) {
         <button
           type="button"
           className={`btn btn-sm btn-outline-secondary board-button me-2${dirty ? '' : ' d-none'}`}
-          onClick={() => setJournal({})}
+          onClick={handleDiscard}
         >
           {discardLabel}
         </button>
@@ -643,21 +648,24 @@ function QueryView({ data, renderDef, onSave }) {
     setJournalValue(currentValue ?? '');
   }, [currentValue]);
 
+  const handleSubmit = useCallback((event) => {
+    event.preventDefault();
+    let nextValue = journalValue;
+    if (prop.type === 'number' || prop.type === 'integer') {
+      nextValue = journalValue === '' ? '' : Number.parseFloat(journalValue);
+    }
+    onSave?.(
+      buildEditorSaveValue(viewData.writeTo, fieldKey, nextValue),
+      { kind: 'searchbox', renderDef, writeTo: viewData.writeTo },
+    );
+  }, [fieldKey, journalValue, onSave, prop.type, renderDef, viewData.writeTo]);
+
+  const handleChange = useCallback((event) => {
+    setJournalValue(event.target.value);
+  }, []);
+
   return (
-    <form
-      className="input-group input-group-sm"
-      onSubmit={(event) => {
-        event.preventDefault();
-        let nextValue = journalValue;
-        if (prop.type === 'number' || prop.type === 'integer') {
-          nextValue = journalValue === '' ? '' : Number.parseFloat(journalValue);
-        }
-        onSave?.(
-          buildEditorSaveValue(viewData.writeTo, fieldKey, nextValue),
-          { kind: 'searchbox', renderDef, writeTo: viewData.writeTo },
-        );
-      }}
-    >
+    <form className="input-group input-group-sm" onSubmit={handleSubmit}>
       <input
         type={prop.format === 'date' ? 'date' : (prop.type === 'number' || prop.type === 'integer' ? 'number' : 'search')}
         className="form-control board-input"
@@ -668,7 +676,7 @@ function QueryView({ data, renderDef, onSave }) {
         placeholder={prop.placeholder ?? prop.title ?? fieldKey}
         aria-label={prop.title ?? fieldKey}
         required={isRequired}
-        onChange={(event) => setJournalValue(event.target.value)}
+        onChange={handleChange}
       />
       <button
         type="submit"
@@ -692,6 +700,16 @@ function NotesView({ data, renderDef, onSave }) {
 
   const dirty = journal != null;
   const effectiveContent = journal != null ? journal : baseContent;
+  const handleChange = useCallback((event) => {
+    const nextValue = event.target.value;
+    setJournal(nextValue === baseContent ? null : nextValue);
+  }, [baseContent]);
+  const handleDiscard = useCallback(() => {
+    setJournal(null);
+  }, []);
+  const handleSave = useCallback(() => {
+    onSave?.(effectiveContent, { kind: 'notes', renderDef, writeTo: renderDef?.data?.writeTo });
+  }, [effectiveContent, onSave, renderDef]);
 
   return (
     <div className="h-100 d-flex flex-column min-h-0">
@@ -700,23 +718,20 @@ function NotesView({ data, renderDef, onSave }) {
         rows={8}
         placeholder="Write markdown..."
         value={effectiveContent}
-        onChange={(event) => {
-          const nextValue = event.target.value;
-          setJournal(nextValue === baseContent ? null : nextValue);
-        }}
+        onChange={handleChange}
       />
       <div className="mt-2">
         <button
           type="button"
           className={`btn btn-sm btn-outline-secondary board-button me-2${dirty ? '' : ' d-none'}`}
-          onClick={() => setJournal(null)}
+          onClick={handleDiscard}
         >
           Discard
         </button>
         <button
           type="button"
           className={`btn btn-sm btn-primary board-button${dirty ? '' : ' d-none'}`}
-          onClick={() => onSave?.(effectiveContent, { kind: 'notes', renderDef, writeTo: renderDef?.data?.writeTo })}
+          onClick={handleSave}
         >
           Save
         </button>
@@ -741,9 +756,25 @@ function EditableTableView({ data, renderDef, onSave }) {
   const effectiveRows = dirty ? mergeRows(journalRows) : mergeRows(baseRows);
   const columns = getObjectColumns(effectiveRows, viewData.columns);
 
-  function updateRows(nextRows) {
+  const updateRows = useCallback((nextRows) => {
     setJournalRows(deepEqual(nextRows, baseRows) ? null : mergeRows(nextRows));
-  }
+  }, [baseRows]);
+
+  const handleAddRow = useCallback(() => {
+    const nextRow = {};
+    columns.forEach((column) => {
+      nextRow[column] = '';
+    });
+    updateRows([...effectiveRows, nextRow]);
+  }, [columns, effectiveRows, updateRows]);
+
+  const handleDiscard = useCallback(() => {
+    setJournalRows(null);
+  }, []);
+
+  const handleSave = useCallback(() => {
+    onSave?.(effectiveRows, { kind: 'editable-table', renderDef, writeTo: viewData.writeTo });
+  }, [effectiveRows, onSave, renderDef, viewData.writeTo]);
 
   return (
     <div className="h-100 d-flex flex-column min-h-0">
@@ -812,13 +843,7 @@ function EditableTableView({ data, renderDef, onSave }) {
           <button
             type="button"
             className="btn btn-sm btn-outline-secondary board-button me-1"
-            onClick={() => {
-              const nextRow = {};
-              columns.forEach((column) => {
-                nextRow[column] = '';
-              });
-              updateRows([...effectiveRows, nextRow]);
-            }}
+            onClick={handleAddRow}
           >
             + Add row
           </button>
@@ -826,14 +851,14 @@ function EditableTableView({ data, renderDef, onSave }) {
         <button
           type="button"
           className={`btn btn-sm btn-outline-secondary board-button me-1${dirty ? '' : ' d-none'}`}
-          onClick={() => setJournalRows(null)}
+          onClick={handleDiscard}
         >
           Discard
         </button>
         <button
           type="button"
           className={`btn btn-sm btn-primary board-button${dirty ? '' : ' d-none'}`}
-          onClick={() => onSave?.(effectiveRows, { kind: 'editable-table', renderDef, writeTo: viewData.writeTo })}
+          onClick={handleSave}
         >
           Save
         </button>
@@ -856,10 +881,10 @@ function TodoView({ data, renderDef, onSave }) {
     });
   }, [baseItems]);
 
-  function save(nextPending) {
+  const save = useCallback((nextPending) => {
     setState({ currentState: mergeRows(nextPending), pending: mergeRows(nextPending) });
     onSave?.(nextPending, { kind: 'todo', renderDef, writeTo: renderDef?.data?.writeTo });
-  }
+  }, [onSave, renderDef]);
 
   return (
     <div className="h-100 d-flex flex-column min-h-0">

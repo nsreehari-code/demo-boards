@@ -61,29 +61,76 @@ function resolveFromConfig(configValue) {
   return path.resolve(BOARD_ROOT, configValue);
 }
 
-function normalizeSetupPath(configValue, fallbackValue) {
-  if (typeof configValue !== 'string') return fallbackValue;
+function requireConfiguredPathText(configValue, configKey) {
+  if (typeof configValue !== 'string') {
+    throw new Error(`[board-server] Missing required config: ${configKey}`);
+  }
   const normalized = configValue.trim();
-  return normalized || fallbackValue;
+  if (!normalized) {
+    throw new Error(`[board-server] Missing required config: ${configKey}`);
+  }
+  return normalized;
+}
+
+function resolveRequiredPathFromConfig(configValue, configKey) {
+  return path.resolve(BOARD_ROOT, requireConfiguredPathText(configValue, configKey));
+}
+
+function ensureDirectoryExists(dirPath, label) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+    const stat = fs.statSync(dirPath);
+    if (!stat.isDirectory()) {
+      throw new Error('path is not a directory');
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`[board-server] Required directory unavailable for ${label}: ${dirPath}\n${detail}`);
+  }
+}
+
+const DEFAULT_SETUP_LEAVES = {
+  boardRuntime: 'runtime',
+  boardOutputsStore: 'board-outputs',
+  cardStore: 'cards-store',
+  artifactsStore: 'cards-files',
+  chatStore: 'cards-chats',
+  scratchStore: 'scratch',
+  archivalStore: 'runtime-archive',
+};
+
+function resolveConfiguredBoardSetupRoot(cfg, boardId, boardSetupRootOverride) {
+  if (boardSetupRootOverride) {
+    return path.resolve(boardSetupRootOverride, `board-${boardId}`);
+  }
+
+  const explicitSetupRoot = cfg?.setup && typeof cfg.setup === 'object'
+    ? cfg.setup.setupRoot
+    : cfg?.setupRoot;
+
+  if (explicitSetupRoot) {
+    return resolveRequiredPathFromConfig(explicitSetupRoot, `boards.${boardId}.setupRoot`);
+  }
+
+  if (cfg?.setupDir) {
+    throw new Error(`[board-server] boards.${boardId}.setupDir is no longer supported. Configure boards.${boardId}.setupRoot or boards.${boardId}.setup.setupRoot explicitly.`);
+  }
+
+  throw new Error(`[board-server] Missing required config: boards.${boardId}.setupRoot`);
 }
 
 function resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride) {
-  const legacySetupRoot = cfg?.setupDir
-    ? path.resolve(BOARD_ROOT, cfg.setupDir)
-    : path.join(setupDir, `board-${boardId}`);
   const setupCfg = cfg?.setup && typeof cfg.setup === 'object' ? cfg.setup : {};
-  const setupRoot = boardSetupRootOverride
-    ? path.resolve(boardSetupRootOverride, `board-${boardId}`)
-    : (resolveFromConfig(setupCfg.setupRoot) || legacySetupRoot);
+  const setupRoot = resolveConfiguredBoardSetupRoot(cfg, boardId, boardSetupRootOverride);
 
   const leaves = {
-    boardRuntime:      normalizeSetupPath(setupCfg.boardRuntime,      'runtime'),
-    boardOutputsStore: normalizeSetupPath(setupCfg.boardOutputsStore, 'board-outputs'),
-    cardStore:         normalizeSetupPath(setupCfg.cardStore,         'cards-store'),
-    artifactsStore:    normalizeSetupPath(setupCfg.artifactsStore,    'cards-files'),
-    chatStore:         normalizeSetupPath(setupCfg.chatStore,         'cards-chats'),
-    scratchStore:      normalizeSetupPath(setupCfg.scratchStore,      'scratch'),
-    archivalStore:     normalizeSetupPath(setupCfg.archivalStore,     'runtime-archive'),
+    boardRuntime:      requireConfiguredPathText(setupCfg.boardRuntime ?? DEFAULT_SETUP_LEAVES.boardRuntime, `boards.${boardId}.setup.boardRuntime`),
+    boardOutputsStore: requireConfiguredPathText(setupCfg.boardOutputsStore ?? DEFAULT_SETUP_LEAVES.boardOutputsStore, `boards.${boardId}.setup.boardOutputsStore`),
+    cardStore:         requireConfiguredPathText(setupCfg.cardStore ?? DEFAULT_SETUP_LEAVES.cardStore, `boards.${boardId}.setup.cardStore`),
+    artifactsStore:    requireConfiguredPathText(setupCfg.artifactsStore ?? DEFAULT_SETUP_LEAVES.artifactsStore, `boards.${boardId}.setup.artifactsStore`),
+    chatStore:         requireConfiguredPathText(setupCfg.chatStore ?? DEFAULT_SETUP_LEAVES.chatStore, `boards.${boardId}.setup.chatStore`),
+    scratchStore:      requireConfiguredPathText(setupCfg.scratchStore ?? DEFAULT_SETUP_LEAVES.scratchStore, `boards.${boardId}.setup.scratchStore`),
+    archivalStore:     requireConfiguredPathText(setupCfg.archivalStore ?? DEFAULT_SETUP_LEAVES.archivalStore, `boards.${boardId}.setup.archivalStore`),
   };
   const toAbs = (leaf) => (path.isAbsolute(leaf) ? leaf : path.resolve(setupRoot, leaf));
 
@@ -98,6 +145,24 @@ function resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride) {
     scratchStorePath:      toAbs(leaves.scratchStore),
     archivalStorePath:     toAbs(leaves.archivalStore),
   };
+}
+
+function ensureBoardSetupPaths(boardId, boardSetupPaths) {
+  ensureDirectoryExists(boardSetupPaths.setupRoot, `boards.${boardId}.setup.setupRoot`);
+  ensureDirectoryExists(boardSetupPaths.boardRuntimePath, `boards.${boardId}.setup.boardRuntime`);
+  ensureDirectoryExists(boardSetupPaths.boardOutputsStorePath, `boards.${boardId}.setup.boardOutputsStore`);
+  ensureDirectoryExists(boardSetupPaths.cardStorePath, `boards.${boardId}.setup.cardStore`);
+  ensureDirectoryExists(boardSetupPaths.artifactsStorePath, `boards.${boardId}.setup.artifactsStore`);
+  ensureDirectoryExists(boardSetupPaths.chatStorePath, `boards.${boardId}.setup.chatStore`);
+  ensureDirectoryExists(boardSetupPaths.scratchStorePath, `boards.${boardId}.setup.scratchStore`);
+  ensureDirectoryExists(boardSetupPaths.archivalStorePath, `boards.${boardId}.setup.archivalStore`);
+}
+
+function validateConfiguredBoardSetupPaths(entries, boardSetupRootOverride) {
+  for (const [boardId, cfg] of entries) {
+    const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
+    ensureBoardSetupPaths(boardId, boardSetupPaths);
+  }
 }
 
 function loadJsonFromConfig(configValue) {
@@ -331,7 +396,7 @@ const configuredChatFlowTimeoutMs = normalizeTimeoutMs(serverConfig.chatFlowTime
 const configuredInvokeRefTimeoutMs = normalizeNonNegativeTimeoutMs(serverConfig.chatInvokeRefTimeoutMs, 300000);
 const configuredCopilotTimeoutMs = normalizeTimeoutMs(serverConfig.chatCopilotTimeoutMs, 300000);
 
-// Resolve top-level config defaults (used as fallbacks for per-board config)
+// Resolve top-level config defaults
 const configuredTaskExecutorPath = resolveFromConfig(serverConfig.taskExecutorPath);
 const configuredChatHandlerPath = resolveFromConfig(serverConfig.chatHandlerPath);
 const configuredFlowFromPath = loadJsonFromConfig(serverConfig.chatHandlerFlowPath);
@@ -354,6 +419,8 @@ if (!process.env.DEMO_INFERENCE_ADAPTER_PATH && configuredInferenceAdapterPath) 
 }
 
 const PORT = Number(process.env.DEMO_SERVER_PORT || serverConfig.port || 7799);
+const SERVER_STARTED_AT = Date.now();
+const SERVER_INSTANCE_ID = `${process.pid}-${SERVER_STARTED_AT}`;
 const cardsPatternArgIndex = cliArgs.indexOf('--cards-pattern');
 const cliCardsPattern = cardsPatternArgIndex !== -1 ? cliArgs[cardsPatternArgIndex + 1] : null;
 const selectedCardsPattern = (process.env.DEMO_CARDS_PATTERN || cliCardsPattern || '').trim() || null;
@@ -364,15 +431,6 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'content-type,x-file-name',
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS',
 };
-
-// ---------------------------------------------------------------------------
-// Setup directory
-// ---------------------------------------------------------------------------
-
-const setupDir = path.resolve(
-  process.env.DEMO_SETUP_DIR || path.join(BOARD_ROOT, '.demo-setup'),
-);
-fs.mkdirSync(setupDir, { recursive: true });
 
 // ---------------------------------------------------------------------------
 // Host adapter factories — Node-specific implementations injected into the
@@ -493,15 +551,12 @@ const logger = { info: console.log, warn: console.warn, error: console.error };
 // Map config keys to board entries for the factory
 const boardConfigEntries = serverConfig.boards ? Object.entries(serverConfig.boards) : [];
 const boardConfigMap = new Map(boardConfigEntries);
+const boardSetupRootOverride = (process.env.DEMO_BOARD_SETUP_ROOT || '').trim();
+
+validateConfiguredBoardSetupPaths(boardConfigEntries, boardSetupRootOverride);
 
 function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, executionExtra = {}) {
-  fs.mkdirSync(boardSetupPaths.boardRuntimePath, { recursive: true });
-  fs.mkdirSync(boardSetupPaths.cardStorePath, { recursive: true });
-  fs.mkdirSync(boardSetupPaths.artifactsStorePath, { recursive: true });
-  fs.mkdirSync(boardSetupPaths.boardOutputsStorePath, { recursive: true });
-  fs.mkdirSync(boardSetupPaths.chatStorePath, { recursive: true });
-  fs.mkdirSync(boardSetupPaths.scratchStorePath, { recursive: true });
-  fs.mkdirSync(boardSetupPaths.archivalStorePath, { recursive: true });
+  ensureBoardSetupPaths(boardId, boardSetupPaths);
 
   const notifyChannel = `yaml-flow-server-${label}-${boardId}-${process.pid}`;
   const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath }));
@@ -577,7 +632,6 @@ const runtime = createMultiBoardServerRuntime({
       process.env.DEMO_INFERENCE_ADAPTER_PATH = infAdapterPath;
     }
 
-    const boardSetupRootOverride = (process.env.DEMO_BOARD_SETUP_ROOT || '').trim();
     const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
     const baseRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.setupRoot });
     const artifactsStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath });
@@ -585,7 +639,7 @@ const runtime = createMultiBoardServerRuntime({
     const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
     const scratchStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath });
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
-    fs.mkdirSync(boardSetupPaths.setupRoot, { recursive: true });
+    ensureBoardSetupPaths(boardId, boardSetupPaths);
     const chatStorage = createFsBoardChatStorage(boardSetupPaths.chatStorePath);
     const flowRunner = createUserTextAwareChatFlowRunner(
       chatStorage,
@@ -666,7 +720,7 @@ const runtime = createMultiBoardServerRuntime({
 // ---------------------------------------------------------------------------
 
 function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
-  fs.mkdirSync(boardSetupRoot, { recursive: true });
+  ensureDirectoryExists(boardSetupRoot, `boards.${boardId}.setup.setupRoot`);
 
   const workspaceSetup = Array.isArray(cfg?.['copilot-workdirs-setup'])
     ? cfg['copilot-workdirs-setup'].filter((entry) => entry && typeof entry === 'object')
@@ -940,6 +994,18 @@ const server = http.createServer((req, res) => {
 
   console.log(`[board-server] ${method} ${pathname}${url.search} <- ${remoteAddress}`);
 
+  if (method === 'GET' && pathname === '/healthz') {
+    jsonReply(res, 200, {
+      ok: true,
+      status: 'ok',
+      startedAt: new Date(SERVER_STARTED_AT).toISOString(),
+      uptimeMs: Date.now() - SERVER_STARTED_AT,
+      instanceId: SERVER_INSTANCE_ID,
+      pid: process.pid,
+    });
+    return;
+  }
+
   if (method === 'OPTIONS') {
     res.writeHead(204, CORS_HEADERS);
     res.end();
@@ -979,8 +1045,8 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[board-server] listening on http://127.0.0.1:${PORT}`);
-  console.log(`[board-server] setup dir: ${setupDir}`);
   console.log('[board-server] endpoints:');
+  console.log('  GET  /healthz                               <- process liveness probe');
   console.log(`  GET  ${apiBasePath}                          <- list boards`);
   console.log(`  POST ${apiBasePath}  {id, label?}            <- register board`);
   console.log(`  GET  ${apiBasePath}/:boardId/init-board`);
@@ -988,7 +1054,8 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`  GET  ${apiBasePath}/:boardId/board-status`);
   console.log(`  POST ${apiBasePath}/:boardId/resync-seedcards`);
   console.log(`  GET  ${apiBasePath}/:boardId/cards/:id`);
-  console.log(`  PATCH ${apiBasePath}/:boardId/cards/:id`);
+  console.log(`  PATCH ${apiBasePath}/:boardId/cards/:id       <- update card content/data`);
+  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/retrigger <- refresh/restart card`);
   console.log(`  POST ${apiBasePath}/:boardId/cards/:id/actions   <- card actions, including chat-send`);
   console.log(`  POST ${apiBasePath}/:boardId/cards/:id/files`);
   console.log(`  GET  ${apiBasePath}/:boardId/cards/:id/files/:idx`);

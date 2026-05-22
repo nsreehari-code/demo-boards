@@ -87,6 +87,16 @@ function loadSourceDefFlowsConfig() {
   }
 }
 
+function sanitizeRuntimeSourceDef(sourceDef) {
+  if (!sourceDef || typeof sourceDef !== 'object' || Array.isArray(sourceDef)) {
+    return sourceDef;
+  }
+
+  const sanitized = { ...sourceDef };
+  delete sanitized.boardDir;
+  return sanitized;
+}
+
 function matchesDetectRule(sourceDef, detect) {
   if (!detect || typeof detect !== 'object') return false;
   if (typeof detect.field === 'string') {
@@ -252,7 +262,7 @@ async function runSourceFetchSubcommand(argv) {
   const callback = envelope.source_def ? envelope.callback : undefined;
   let sourceDef;
   try {
-    sourceDef = envelope.source_def ?? envelope;
+    sourceDef = sanitizeRuntimeSourceDef(envelope.source_def ?? envelope);
   } catch (err) {
     failRef(`Cannot resolve source_def: ${String(err && err.message || err)}`, callback);
   }

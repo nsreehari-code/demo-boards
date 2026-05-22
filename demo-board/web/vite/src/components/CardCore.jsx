@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SERVER } from '../lib/client.js';
 import { useCardState } from '../hooks/useCardState.js';
 import { CardCoreView } from './CardCoreView.jsx';
@@ -33,6 +33,10 @@ function deepSet(target, path, value) {
   return next;
 }
 
+function deepEqual(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function buildNamespaces(boardId, cardState) {
   return {
     boardId,
@@ -42,6 +46,14 @@ function buildNamespaces(boardId, cardState) {
     computed_values: cardState.cardRuntime?.computed_values ?? {},
     runtime_state: cardState.cardRuntime?.runtime ?? {},
   };
+}
+
+function buildUpstreamSignature(cardState) {
+  return JSON.stringify({
+    boardSseClientId: cardState.boardSseClientId ?? null,
+    cardContent: cardState.cardContent ?? null,
+    cardRuntime: cardState.cardRuntime ?? null,
+  });
 }
 
 function resolveBind(namespaces, bind) {
@@ -123,53 +135,30 @@ function buildFileUrl(boardId, cardId, index, file) {
   return `${SERVER}/api/boards/${boardId}/cards/${cardId}/files/${index}?sn=${encodeURIComponent(file.stored_name)}`;
 }
 
-async function patchCardDataValue(cardState, writeTo, value) {
-  if (!cardState.cardActions?.patch) return;
+async function patchCardDataValue(cardActions, cardData, writeTo, value) {
+  if (!cardActions?.patch) return;
 
   if (writeTo === 'card_data') {
     const nextCardData = value && typeof value === 'object' && !Array.isArray(value)
-      ? { ...(cardState.cardData ?? {}), ...value }
+      ? { ...(cardData ?? {}), ...value }
       : value;
-    await cardState.cardActions.patch({ card_data: nextCardData });
+    if (deepEqual(cardData ?? {}, nextCardData)) return;
+    await cardActions.patch({ card_data: nextCardData });
     return;
   }
 
   if (writeTo && writeTo.startsWith('card_data.')) {
     const fieldPath = writeTo.slice('card_data.'.length);
-    const nextCardData = deepSet(cardState.cardData ?? {}, fieldPath, value);
-    await cardState.cardActions.patch({ card_data: nextCardData });
+    const nextCardData = deepSet(cardData ?? {}, fieldPath, value);
+    if (deepEqual(cardData ?? {}, nextCardData)) return;
+    await cardActions.patch({ card_data: nextCardData });
   }
-}
-
-function buildSaveHandler(cardState) {
-  return async function handleSave(value, meta = {}) {
-    if (!cardState.cardActions) return;
-
-    if (meta.kind === 'actions' && meta.buttonId) {
-      await cardState.cardActions.dispatchAction?.('action', {
-        buttonId: meta.buttonId,
-        elemId: meta.elemId,
-      });
-      return;
-    }
-
-    const writeTo = meta.writeTo;
-    if (writeTo === 'card_data' || (writeTo && writeTo.startsWith('card_data.'))) {
-      await patchCardDataValue(cardState, writeTo, value);
-      return;
-    }
-
-    if (meta.kind === 'notes') {
-      await cardState.cardActions.patch({ card_data: { ...(cardState.cardData ?? {}), notes: value } });
-      return;
-    }
-
-    await cardState.cardActions.patch({ fieldValues: value });
-  };
 }
 
 export function CardCore({ boardId, cardId }) {
   const cardState = useCardState(boardId, cardId);
+  const [saving, setSaving] = useState(false);
+  const pendingUpstreamSignatureRef = useRef(null);
 
   if (!cardState?.cardContent) return null;
 
@@ -177,41 +166,128 @@ export function CardCore({ boardId, cardId }) {
   const view = card.view;
   if (!view?.elements?.length) return null;
 
-  const namespaces = buildNamespaces(boardId, cardState);
+  const cardActions = cardState.cardActions;
+  const cardData = cardState.cardData;
+  const cardFieldValues = cardState.cardContent?.fieldValues;
+  const upstreamSignature = useMemo(() => buildUpstreamSignature(cardState), [
+    cardState.boardSseClientId,
+    cardState.cardContent,
+    cardState.cardRuntime,
+  ]);
 
-  const layoutElements = view.elements
+  const namespaces = useMemo(() => buildNamespaces(boardId, cardState), [
+    boardId,
+    cardState.cardContent,
+    cardState.cardData,
+    cardState.requiresDataObjects,
+    cardState.cardRuntime,
+  ]);
+
+  const layoutElements = useMemo(() => view.elements
     .filter((element) => {
       if (!element.visible) return true;
       return !!resolveBind(namespaces, element.visible);
     })
-    .map((element, index) => normalizeLayoutElement(namespaces, element, index));
+    .map((element, index) => normalizeLayoutElement(namespaces, element, index)), [namespaces, view.elements]);
 
-  const handleSave = buildSaveHandler(cardState);
+  const fileUrlForIndex = useCallback((index, file) => buildFileUrl(boardId, cardId, index, file), [boardId, cardId]);
+
+  useEffect(() => {
+    if (!saving) return;
+    if (!pendingUpstreamSignatureRef.current) return;
+    if (upstreamSignature === pendingUpstreamSignatureRef.current) return;
+    pendingUpstreamSignatureRef.current = null;
+    setSaving(false);
+  }, [saving, upstreamSignature]);
+
+  const beginSaving = useCallback(() => {
+    pendingUpstreamSignatureRef.current = upstreamSignature;
+    setSaving(true);
+  }, [upstreamSignature]);
+
+  const handleSave = useCallback(async (value, meta = {}) => {
+    if (!cardActions || saving) return;
+
+    try {
+      if (meta.kind === 'actions' && meta.buttonId) {
+        beginSaving();
+        await cardActions.dispatchAction?.('action', {
+          buttonId: meta.buttonId,
+          elemId: meta.elemId,
+        });
+        return;
+      }
+
+      const writeTo = meta.writeTo;
+      if (writeTo === 'card_data' || (writeTo && writeTo.startsWith('card_data.'))) {
+        const nextCardData = writeTo === 'card_data'
+          ? (value && typeof value === 'object' && !Array.isArray(value)
+            ? { ...(cardData ?? {}), ...value }
+            : value)
+          : deepSet(cardData ?? {}, writeTo.slice('card_data.'.length), value);
+        if (deepEqual(cardData ?? {}, nextCardData)) return;
+        beginSaving();
+        await patchCardDataValue(cardActions, cardData, writeTo, value);
+        return;
+      }
+
+      if (meta.kind === 'notes') {
+        if (deepEqual(cardData?.notes ?? '', value ?? '')) return;
+        beginSaving();
+        await cardActions.patch({ card_data: { ...(cardData ?? {}), notes: value } });
+        return;
+      }
+
+      const currentValue = meta.renderDef?.resolvedWriteValue ?? cardFieldValues;
+      if (deepEqual(currentValue, value)) return;
+
+      beginSaving();
+      await cardActions.patch({ fieldValues: value });
+    } catch (error) {
+      pendingUpstreamSignatureRef.current = null;
+      setSaving(false);
+      throw error;
+    }
+  }, [beginSaving, cardActions, cardData, cardFieldValues, saving]);
+
+  const decoratedLayoutElements = useMemo(() => layoutElements.map(({ renderDef, ...layoutElement }) => ({
+    ...layoutElement,
+    renderDef: {
+      ...renderDef,
+      resolvedWriteValue: renderDef.data?.writeTo ? resolveBind(namespaces, renderDef.data.writeTo) : undefined,
+      fileUrlForIndex,
+    },
+  })), [fileUrlForIndex, layoutElements, namespaces]);
 
   return (
-    <div className="row g-2 align-content-start">
-      {layoutElements.map(({ reactKey, containerClassName, containerStyle, kind, renderDef, data }) => {
-        return (
-          <div
-            key={reactKey}
-            className={containerClassName}
-            style={containerStyle ?? undefined}
-          >
-            <div className="w-100">
-              <CardCoreView
-                kind={kind}
-                renderDef={{
-                  ...renderDef,
-                  resolvedWriteValue: renderDef.data?.writeTo ? resolveBind(namespaces, renderDef.data.writeTo) : undefined,
-                  fileUrlForIndex: (index, file) => buildFileUrl(boardId, cardId, index, file),
-                }}
-                data={data}
-                onSave={handleSave}
-              />
+    <div className="board-card-core position-relative" aria-busy={saving}>
+      <div className="row g-2 align-content-start">
+        {decoratedLayoutElements.map(({ reactKey, containerClassName, containerStyle, kind, renderDef, data }) => {
+          return (
+            <div
+              key={reactKey}
+              className={containerClassName}
+              style={containerStyle ?? undefined}
+            >
+              <div className="w-100">
+                <CardCoreView
+                  kind={kind}
+                  renderDef={renderDef}
+                  data={data}
+                  onSave={handleSave}
+                />
+              </div>
             </div>
+          );
+        })}
+      </div>
+      {saving ? (
+        <div className="board-card-core__overlay" aria-hidden="true">
+          <div className="board-card-core__overlay-spinner">
+            <span className="spinner-border" role="status" aria-hidden="true" />
           </div>
-        );
-      })}
+        </div>
+      ) : null}
     </div>
   );
 }

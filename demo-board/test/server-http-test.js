@@ -56,6 +56,7 @@ const ASSISTANT_DEBUG_LOG_FILE = typeof process.env.ENABLE_DEBUG_LOGGING === 'st
 
 const BOARD_ID = 'live';
 const BOARD_DIR = path.resolve(__dirname, '..');
+const REPO_ROOT = path.resolve(BOARD_DIR, '..');
 const SERVER_SCRIPT = path.resolve(BOARD_DIR, 'server', 'board-server.js');
 const DEFAULT_SERVER_CONFIG = path.resolve(BOARD_DIR, 'test', 'server-test-config.json');
 const SERVER_CONFIG = cliServerConfig
@@ -95,8 +96,58 @@ async function resolveServerPort() {
   return findFreePort();
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function probeMcpServer(serverUrl, timeoutMs = 2_000) {
+  return new Promise((resolve) => {
+    const req = http.request(serverUrl, { method: 'OPTIONS', timeout: timeoutMs }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 204);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.end();
+  });
+}
+
+async function ensureMcpServerRunning(serverUrl) {
+  if (await probeMcpServer(serverUrl)) {
+    console.log(`[setup] MCP server already available at ${serverUrl}`);
+    return;
+  }
+
+  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const proc = spawn(npmCommand, ['run', 'mcp:start'], {
+    cwd: REPO_ROOT,
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    env: {
+      ...process.env,
+    },
+  });
+  proc.unref();
+
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (await probeMcpServer(serverUrl)) {
+      console.log(`[setup] started MCP server via npm run mcp:start at ${serverUrl}`);
+      return;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(`MCP server did not become ready at ${serverUrl} after npm run mcp:start`);
+}
+
 const PORT = await resolveServerPort();
 const BASE = `http://127.0.0.1:${PORT}/api/boards/${BOARD_ID}`;
+const MCP_SERVER_URL = (process.env.DEMO_BOARDS_MCP_SERVER_URL || '').trim() || 'http://127.0.0.1:7801/mcp';
 
 function resolveSetupMode(serverConfig, boardId) {
   if (useConfiguredSetupRoot) {
@@ -544,6 +595,7 @@ function startServer(port) {
         ENABLE_DEBUG_LOGGING: ASSISTANT_DEBUG_LOG_FILE,
         DEMO_SERVER_PORT: String(port),
         DEMO_CARDS_PATTERN: CARD_PATTERN,
+        DEMO_BOARDS_MCP_SERVER_URL: MCP_SERVER_URL,
         ...(useConfiguredSetupRoot
           ? {}
           : {
@@ -581,9 +633,10 @@ function startServer(port) {
 console.log('\n=== live board HTTP+SSE smoke test ===');
 console.log(`target: ${BASE}`);
 console.log(`card pattern: ${CARD_PATTERN}`);
+console.log(`[setup] MCP server URL: ${MCP_SERVER_URL}`);
 console.log(`[demo-http-test] assistant debug log: ${ASSISTANT_DEBUG_LOG_FILE}`);
 
-const serverProc = await startServer(PORT);
+let serverProc = null;
 let sseWorker = null;
 let chatSseClient = null;
 let chatSseClientId = '';
@@ -604,6 +657,9 @@ async function ensureChatSseSubscription() {
   assert(subRes.status === 200, `chat subscribe returned ${subRes.status}`);
 }
 try {
+  await ensureMcpServerRunning(MCP_SERVER_URL);
+  serverProc = await startServer(PORT);
+
   // ── T0: init-board, SSE connect, wait for initial completion ──
 
   // Register the 'live' board via POST (v8 runtime requires explicit registration)
@@ -1016,8 +1072,10 @@ try {
     } catch { /* ignore */ }
   }
   if (chatSseClient) chatSseClient.close();
-  serverProc.kill();
-  await new Promise((r) => serverProc.on('exit', r));
+  if (serverProc) {
+    serverProc.kill();
+    await new Promise((r) => serverProc.on('exit', r));
+  }
   if (sseWorker) await sseWorker.terminate();
 
   if (PRESERVE_SETUP_DIR) {

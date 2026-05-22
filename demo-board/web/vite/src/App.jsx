@@ -1,11 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useBoardState } from './hooks/useBoardState.js';
+import { AppConfigModal } from './components/AppConfigModal.jsx';
 import { MainBoard }  from './components/MainBoard.jsx';
 import { DEFAULT_BOARD_ID, PAGE_SUBTITLE, PAGE_TITLE, REFRESH_ALL_INTERVAL_SECONDS } from './lib/appConfig.js';
+import { healthz } from './lib/client.js';
 
 const BOARD_ID = DEFAULT_BOARD_ID;
 const DEFAULT_THEME = 'mist-ops';
 const REFRESH_ALL_INTERVAL_MS = REFRESH_ALL_INTERVAL_SECONDS * 1000;
+const HEALTHZ_POLL_INTERVAL_MS = 60_000;
+const HEALTHZ_RETRY_INTERVAL_MS = 10_000;
+
+function getReachabilityMessage(error) {
+  if (error instanceof Error && error.message) {
+    return `Configured server origin is unreachable: ${error.message}`;
+  }
+
+  return 'Configured server origin is unreachable.';
+}
 
 function formatCountdown(remainingMs) {
   const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
@@ -101,11 +113,64 @@ function RefreshAllButton({ canRefreshAll, refreshAll }) {
 
 export default function App() {
   const board = useBoardState(BOARD_ID);
-  console.log('[App] useBoardState', board);
   const canRefreshAll = board?.hasRefreshableCards === true;
+  const [serverReachability, setServerReachability] = useState({
+    checking: true,
+    unreachable: false,
+    message: '',
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    let timeoutId = null;
+    let hasResolvedOnce = false;
+
+    const checkServerReachability = async () => {
+      if (!hasResolvedOnce) {
+        setServerReachability({ checking: true, unreachable: false, message: '' });
+      }
+
+      try {
+        const response = await healthz();
+        if (!response.ok) {
+          throw new Error(`healthz returned ${response.status}`);
+        }
+        if (!cancelled) {
+          hasResolvedOnce = true;
+          setServerReachability({ checking: false, unreachable: false, message: '' });
+          timeoutId = window.setTimeout(checkServerReachability, HEALTHZ_POLL_INTERVAL_MS);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          hasResolvedOnce = true;
+          setServerReachability({
+            checking: false,
+            unreachable: true,
+            message: getReachabilityMessage(error),
+          });
+          timeoutId = window.setTimeout(checkServerReachability, HEALTHZ_RETRY_INTERVAL_MS);
+        }
+      }
+    };
+
+    checkServerReachability();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
 
   return (
     <div className="board-app-shell" data-theme={DEFAULT_THEME}>
+      <AppConfigModal
+        autoOpen={serverReachability.unreachable}
+        serverUnreachable={serverReachability.unreachable}
+        serverUnreachableMessage={serverReachability.message}
+      />
+
       <nav className="board-topbar px-3 px-lg-4 py-1">
         <div className="board-topbar__layout d-flex align-items-center justify-content-between gap-2 flex-nowrap">
           <div className="board-topbar__title-group min-w-0 flex-grow-1 pe-2">
@@ -122,11 +187,15 @@ export default function App() {
       </nav>
 
       <main className="board-main">
-        {!board
+        {serverReachability.unreachable
+          ? null
+          : !board
           ? (
             <div className="board-loading">
               <span className="spinner-border spinner-border-sm" role="status" />
-              <p className="mb-0">Connecting to live board state…</p>
+              <p className="mb-0">
+                {serverReachability.checking ? 'Checking configured server origin…' : 'Connecting to live board state…'}
+              </p>
             </div>
           )
           : <MainBoard boardId={BOARD_ID} />}

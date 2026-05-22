@@ -28,10 +28,25 @@ function normalizeFormState(formState) {
   };
 }
 
-export function AppConfigModal() {
+export function AppConfigModal({ autoOpen = false, serverUnreachable = false, serverUnreachableMessage = '' }) {
   const [open, setOpen] = useState(false);
+  const [openedByAuto, setOpenedByAuto] = useState(false);
   const [formState, setFormState] = useState(() => toFormState(getAppConfig()));
   const overrideActive = hasStoredAppConfigOverride();
+
+  useEffect(() => {
+    if (autoOpen) {
+      setOpen(true);
+      setOpenedByAuto(true);
+    }
+  }, [autoOpen]);
+
+  useEffect(() => {
+    if (!serverUnreachable && openedByAuto) {
+      setOpen(false);
+      setOpenedByAuto(false);
+    }
+  }, [openedByAuto, serverUnreachable]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -72,7 +87,10 @@ export function AppConfigModal() {
       <button
         type="button"
         className="board-settings-toggle d-inline-flex align-items-center justify-content-center"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setOpenedByAuto(false);
+          setOpen(true);
+        }}
         title="Board settings"
         aria-label="Open board settings"
       >
@@ -85,7 +103,10 @@ export function AppConfigModal() {
             type="button"
             className="board-settings-backdrop"
             aria-label="Close board settings"
-            onClick={() => setOpen(false)}
+            onClick={() => {
+              setOpenedByAuto(false);
+              setOpen(false);
+            }}
           />
 
           <section
@@ -103,7 +124,10 @@ export function AppConfigModal() {
                 type="button"
                 className="board-settings-modal__close board-ingest-pane__count board-ingest-pane__count-button d-inline-flex align-items-center justify-content-center"
                 aria-label="Close board settings"
-                onClick={() => setOpen(false)}
+                onClick={() => {
+                  setOpenedByAuto(false);
+                  setOpen(false);
+                }}
               >
                 <i className="bi bi-x-lg" />
               </button>
@@ -112,7 +136,25 @@ export function AppConfigModal() {
             <form className="board-settings-form" onSubmit={handleSubmit}>
               <label className="board-settings-field">
                 <span>Server origin</span>
-                <input className="board-input" type="url" value={formState.serverOrigin} onChange={updateField('serverOrigin')} placeholder="http://localhost:7799" />
+                <input
+                  className={`board-input${serverUnreachable ? ' board-input--error' : ''}`}
+                  type="url"
+                  value={formState.serverOrigin}
+                  onChange={updateField('serverOrigin')}
+                  placeholder="http://localhost:7799"
+                  aria-invalid={serverUnreachable ? 'true' : 'false'}
+                />
+                {serverUnreachable ? (
+                  <div className="board-settings-alert" role="alert" aria-live="assertive">
+                    <span className="board-settings-alert__badge">
+                      <i className="bi bi-exclamation-triangle-fill" aria-hidden="true" />
+                      Server unreachable
+                    </span>
+                    <span className="board-settings-alert__message">
+                      {serverUnreachableMessage || 'Configured server origin is unreachable.'}
+                    </span>
+                  </div>
+                ) : null}
               </label>
 
               <label className="board-settings-field">

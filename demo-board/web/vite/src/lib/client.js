@@ -6,14 +6,15 @@ export { SERVER } from './appConfig.js';
 import { SERVER } from './appConfig.js';
 const base = (boardId) => `${SERVER}/api/boards/${boardId}`;
 
+export const healthz = () =>
+  fetch(`${SERVER}/healthz`);
+
 export const initBoard = (boardId) =>
   fetch(`${base(boardId)}/init-board`);
 
 export const refreshCard = (boardId, cardId) =>
-  fetch(`${base(boardId)}/cards/${cardId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: '{}',
+  fetch(`${base(boardId)}/cards/${cardId}/retrigger`, {
+    method: 'POST',
   });
 
 export const resyncSeedCards = (boardId) =>

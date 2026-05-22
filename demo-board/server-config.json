@@ -12,7 +12,7 @@
       "label": "Finbook",
       "subtitle": "Live operational intelligence for agent workflows",
       "setup": {
-        "setupRoot": "../data-repos-VX/case-workspace",
+        "setupRoot": "../workspaces/finbook/case-workspace",
         "cardStore": "ingest/cards-store",
         "artifactsStore": "ingest/cards-files",
         "boardRuntime": "runtime",
@@ -46,7 +46,7 @@
     "live": {
       "label": "Live",
       "subtitle": "Live operational intelligence for agent workflows",
-      "setupDir": "./boards/live/.board-ws",
+      "setupRoot": "../workspaces/live/case-workspace",
       "regular": {
         "seedCardsDir": "./boards/live/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
@@ -72,7 +72,7 @@
     "sentinel": {
       "label": "Sentinel Demo",
       "subtitle": "Live operational intelligence for agent workflows",
-      "setupDir": "./boards/sentinel/.board-ws",
+      "setupRoot": "../workspaces/sentinel/case-workspace",
       "regular": {
         "seedCardsDir": "./boards/sentinel/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
