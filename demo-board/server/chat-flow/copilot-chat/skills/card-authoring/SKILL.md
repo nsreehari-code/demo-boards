@@ -97,7 +97,7 @@ Start from this shape and add only the fields the new card actually needs:
 ## View Selection Heuristics
 
 - Default to `table` when the best rendering is not obvious.
-- Use `editable-table`, `form`, `filter`, or `todo` only when the user needs to edit state.
+- Use `editable-table`, `form`, `searchbox`, `selection`, or `todo` only when the user needs to edit state.
 - Use `chart` only when there is a clear category/value mapping.
 - Use `ref` only when the rendered kind should be chosen dynamically by user state, upstream data, or an LLM-provided `_view` hint.
 - For `ref`-driven LLM views, keep `_view.kind` inside the supported renderer set and keep `_view.data` minimal.
@@ -106,7 +106,7 @@ Start from this shape and add only the fields the new card actually needs:
 
 - Root source card: source -> `fetched_sources.raw` -> `provides[]` -> simple table view.
 - Compute chain card: `requires[]` -> `compute[]` -> `computed_values.*` -> `provides[]` or view.
-- Filter pattern: filter/form writes to `card_data`, then downstream cards consume the published token through `requires[]`.
+- Input propagation pattern: form/searchbox/selection writes to `card_data`, then downstream cards consume the published token through `requires[]`.
 - LLM verdict pattern: source fetches structured verdict JSON, then compute/view/provides consume that result.
 
 ## Recommended Workflow

@@ -8,7 +8,7 @@
 - **Single responsibility** — each card answers one question. If the title needs "and", split it.
 - **No redundancy across cards** — each column on a board should appear on exactly one card. If a value is already visible elsewhere, omit it; the user's eye can join cards mentally.
 - **Aggregations are distinct** — a metric that summarises data from another card (total, count, average) is not redundant — it is new information. Keep it.
-- **Separate input from output** — cards with editable elements (`editable-table`, `form`, `filter`) should stay lean; put heavy compute and display in a separate downstream card that `requires` the published token.
+- **Separate input from output** — cards with editable elements (`editable-table`, `form`, `searchbox`, `selection`) should stay lean; put heavy compute and display in a separate downstream card that `requires` the published token.
 - **Propagate data, not display** — use `provides` to pass data between cards; never duplicate a `source_defs[]` fetch for data another card already provides.
 - **KISS** — if you are unsure whether a field adds value, leave it out. A sparse card that is immediately readable is better than a dense card that requires study.
 
@@ -48,7 +48,8 @@ expects is summarised below. When authoring or repairing a card, make sure the
 | `table`          | Array of row objects: `[{ colA, colB, ... }, ...]`                                     | `columns`, `maxRows`, `sortable`, `placeholder`     |
 | `editable-table` | Same as `table` (array of row objects)                                                 | `columns`, `schema.properties`, `addRow`, `deleteRow`, `writeTo` |
 | `chart`          | Array of row objects, OR `{ labels: [...], datasets: [{ label, data: [...] }] }`       | `chartType`, `columns`, `series`, `stacked`, `legend`, `grid`, `height` (see Charts section) |
-| `filter`         | Object of option arrays: `{ field1: ["a","b"], field2: [1,2] }`                        | `fields.properties`, `writeTo`                      |
+| `searchbox`      | Single text/number/date field value, usually persisted through `card_data`                | `fields.properties` (single field), `writeTo`, `actionLabel` |
+| `selection`      | Single selected value, with options from enum or bound row-source data                     | `fields.properties` (single field), `writeTo`      |
 | `form`           | Object of current field values: `{ fieldA: ..., fieldB: ... }`                         | `fields` (JSON-schema-ish: `properties`, `required`), `writeTo` |
 | `notes`          | String (the current notes content)                                                     | `writeTo`                                           |
 | `todo`           | Array of items: `[{ text: string, done: boolean }, ...]`                               | `writeTo`                                           |
@@ -56,7 +57,7 @@ expects is summarised below. When authoring or repairing a card, make sure the
 
 Notes:
 
-- Editable kinds (`editable-table`, `form`, `notes`, `todo`, `filter`) must set
+- Editable kinds (`editable-table`, `form`, `searchbox`, `selection`, `notes`, `todo`) must set
   `data.writeTo` to the data-object path their saves should publish to. Without
   `writeTo`, edits are dropped silently.
 - `actions` buttons emit save events keyed by `button.id`; the card's action

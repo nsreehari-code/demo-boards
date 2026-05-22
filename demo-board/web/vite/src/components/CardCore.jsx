@@ -123,6 +123,24 @@ function buildFileUrl(boardId, cardId, index, file) {
   return `${SERVER}/api/boards/${boardId}/cards/${cardId}/files/${index}?sn=${encodeURIComponent(file.stored_name)}`;
 }
 
+async function patchCardDataValue(cardState, writeTo, value) {
+  if (!cardState.cardActions?.patch) return;
+
+  if (writeTo === 'card_data') {
+    const nextCardData = value && typeof value === 'object' && !Array.isArray(value)
+      ? { ...(cardState.cardData ?? {}), ...value }
+      : value;
+    await cardState.cardActions.patch({ card_data: nextCardData });
+    return;
+  }
+
+  if (writeTo && writeTo.startsWith('card_data.')) {
+    const fieldPath = writeTo.slice('card_data.'.length);
+    const nextCardData = deepSet(cardState.cardData ?? {}, fieldPath, value);
+    await cardState.cardActions.patch({ card_data: nextCardData });
+  }
+}
+
 function buildSaveHandler(cardState) {
   return async function handleSave(value, meta = {}) {
     if (!cardState.cardActions) return;
@@ -136,10 +154,8 @@ function buildSaveHandler(cardState) {
     }
 
     const writeTo = meta.writeTo;
-    if (writeTo && writeTo.startsWith('card_data.')) {
-      const fieldPath = writeTo.slice('card_data.'.length);
-      const nextCardData = deepSet(cardState.cardData ?? {}, fieldPath, value);
-      await cardState.cardActions.patch({ card_data: nextCardData });
+    if (writeTo === 'card_data' || (writeTo && writeTo.startsWith('card_data.'))) {
+      await patchCardDataValue(cardState, writeTo, value);
       return;
     }
 

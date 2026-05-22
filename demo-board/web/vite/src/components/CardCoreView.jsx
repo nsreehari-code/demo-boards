@@ -18,7 +18,8 @@ const CHART_PALETTE = [
 
 export const CARD_CORE_VIEW_KINDS = {
   table: { Component: TableView, isEditable: false },
-  filter: { Component: FilterView, isEditable: true },
+  searchbox: { Component: QueryView, isEditable: true },
+  selection: { Component: SelectionView, isEditable: true },
   metric: { Component: MetricView, isEditable: false },
   list: { Component: ListView, isEditable: false },
   chart: { Component: ChartView, isEditable: false },
@@ -87,6 +88,53 @@ function getObjectColumns(rows, configuredColumns) {
 
 function mergeRows(rows) {
   return (Array.isArray(rows) ? rows : []).map((row) => ({ ...(row ?? {}) }));
+}
+
+function getSingleFieldConfig(renderDef, data) {
+  const viewData = renderDef?.data ?? {};
+  const schema = viewData.fields ?? {};
+  const props = schema.properties ?? {};
+  const entries = Object.entries(props);
+  if (entries.length !== 1) return null;
+
+  const [fieldKey, prop] = entries[0];
+  const resolvedWriteValue = renderDef?.resolvedWriteValue;
+  const currentValue = viewData.writeTo === 'card_data'
+    ? (resolvedWriteValue && typeof resolvedWriteValue === 'object' && !Array.isArray(resolvedWriteValue)
+      ? resolvedWriteValue[fieldKey]
+      : undefined)
+    : resolvedWriteValue;
+
+  let options = [];
+  if (Array.isArray(prop?.enum)) {
+    options = prop.enum;
+  } else if (Array.isArray(data)) {
+    options = data;
+  } else if (data && typeof data === 'object' && !Array.isArray(data)) {
+    if (Array.isArray(data[fieldKey])) {
+      options = data[fieldKey];
+    } else if (Array.isArray(data.options)) {
+      options = data.options;
+    }
+  }
+
+  return {
+    viewData,
+    schema,
+    fieldKey,
+    prop: prop ?? {},
+    currentValue,
+    options,
+    isRequired: Array.isArray(schema.required) && schema.required.includes(fieldKey),
+  };
+}
+
+function buildEditorSaveValue(writeTo, fieldKey, nextValue) {
+  if (writeTo === 'card_data') {
+    return { [fieldKey]: nextValue };
+  }
+
+  return nextValue;
 }
 
 function CardFrame({ label, kind, children }) {
@@ -183,44 +231,82 @@ function TableView({ data, renderDef }) {
 }
 
 function FilterView({ data, renderDef, onSave }) {
-  const viewData = renderDef?.data ?? {};
-  const fields = viewData.fields?.properties ?? {};
-  const writeValues = renderDef?.resolvedWriteValue ?? {};
-  const keys = data && typeof data === 'object' && !Array.isArray(data) ? Object.keys(data) : [];
+  const singleField = getSingleFieldConfig(renderDef, data);
+  if (singleField) {
+    if (singleField.options.length || Array.isArray(singleField.prop.enum)) {
+      return <SelectionView data={data} renderDef={renderDef} onSave={onSave} />;
+    }
 
-  if (!keys.length) {
-    return <p className="board-text-muted small mb-0">No filter options</p>;
+    if ((singleField.prop.type ?? 'string') === 'string') {
+      return <QueryView data={data} renderDef={renderDef} onSave={onSave} />;
+    }
   }
 
+  return <FormView data={data} renderDef={renderDef} onSave={onSave} />;
+}
+
+function normalizeLegacyKind(kind, renderDef, data) {
+  if (kind === 'query') return 'searchbox';
+  if (kind !== 'filter') return kind;
+
+  const singleField = getSingleFieldConfig(renderDef, data);
+  if (!singleField) return 'form';
+
+  if (singleField.options.length || Array.isArray(singleField.prop.enum)) {
+    return 'selection';
+  }
+
+  if ((singleField.prop.type ?? 'string') === 'string') {
+    return 'searchbox';
+  }
+
+  return 'form';
+}
+
+function SelectionView({ data, renderDef, onSave }) {
+  const singleField = getSingleFieldConfig(renderDef, data);
+  if (!singleField) {
+    return <p className="board-text-muted small mb-0">No selection configured</p>;
+  }
+
+  const { fieldKey, prop, currentValue, options, isRequired, viewData } = singleField;
+
   return (
-    <div className="row g-2">
-      {keys.map((key) => {
-        const options = Array.isArray(data[key]) ? data[key] : [];
-        const label = fields[key]?.title ?? key;
-        return (
-          <div key={key} className="col-12 col-sm-6 col-md-4">
-            <label className="form-label small mb-1 board-text-muted">{label}</label>
-            <select
-              className="form-select form-select-sm board-select"
-              value={String(writeValues?.[key] ?? '')}
-              onChange={(event) => {
-                const next = {};
-                for (const currentKey of keys) {
-                  const select = currentKey === key ? event.target.value : String(writeValues?.[currentKey] ?? '');
-                  if (select) next[currentKey] = select;
-                }
-                onSave?.(next, { kind: 'filter', renderDef, writeTo: viewData.writeTo });
-              }}
-            >
-              <option value="">All</option>
-              {options.map((option) => (
-                <option key={String(option)} value={String(option)}>{String(option)}</option>
-              ))}
-            </select>
-          </div>
+    <form
+      className="input-group input-group-sm"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave?.(
+          buildEditorSaveValue(viewData.writeTo, fieldKey, currentValue ?? ''),
+          { kind: 'selection', renderDef, writeTo: viewData.writeTo },
         );
-      })}
-    </div>
+      }}
+    >
+      <select
+        className="form-select board-select"
+        value={currentValue ?? ''}
+        required={isRequired}
+        aria-label={prop.title ?? fieldKey}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          onSave?.(
+            buildEditorSaveValue(viewData.writeTo, fieldKey, nextValue),
+            { kind: 'selection', renderDef, writeTo: viewData.writeTo },
+          );
+        }}
+      >
+        {!isRequired ? <option value="">All</option> : null}
+        {options.map((option) => {
+          const optionValue = option != null && typeof option === 'object'
+            ? String(option.value ?? option.id ?? option.label ?? '')
+            : String(option ?? '');
+          const optionLabel = option != null && typeof option === 'object'
+            ? String(option.label ?? option.title ?? option.value ?? option.id ?? '')
+            : String(option ?? '');
+          return <option key={optionValue} value={optionValue}>{optionLabel}</option>;
+        })}
+      </select>
+    </form>
   );
 }
 
@@ -432,9 +518,16 @@ function FormView({ data, renderDef, onSave }) {
   const schema = viewData.fields ?? {};
   const props = schema.properties ?? {};
   const required = schema.required ?? [];
+  const resolvedWriteValue = renderDef?.resolvedWriteValue;
+  const discardLabel = viewData.discardLabel ?? 'Discard';
+  const saveLabel = viewData.saveLabel ?? 'Save';
   const baseValues = useMemo(() => (
-    data && typeof data === 'object' && !Array.isArray(data) ? { ...data } : {}
-  ), [data]);
+    data && typeof data === 'object' && !Array.isArray(data)
+      ? { ...data }
+      : (resolvedWriteValue && typeof resolvedWriteValue === 'object' && !Array.isArray(resolvedWriteValue)
+        ? { ...resolvedWriteValue }
+        : {})
+  ), [data, resolvedWriteValue]);
 
   const [journal, setJournal] = useState({});
 
@@ -526,12 +619,65 @@ function FormView({ data, renderDef, onSave }) {
           className={`btn btn-sm btn-outline-secondary board-button me-2${dirty ? '' : ' d-none'}`}
           onClick={() => setJournal({})}
         >
-          Discard
+          {discardLabel}
         </button>
         <button type="submit" className={`btn btn-sm btn-primary board-button${dirty ? '' : ' d-none'}`}>
-          Save
+          {saveLabel}
         </button>
       </div>
+    </form>
+  );
+}
+
+function QueryView({ data, renderDef, onSave }) {
+  const singleField = getSingleFieldConfig(renderDef, data);
+  if (!singleField) {
+    return <p className="board-text-muted small mb-0">No query field configured</p>;
+  }
+
+  const { fieldKey, prop, currentValue, isRequired, viewData } = singleField;
+  const [journalValue, setJournalValue] = useState(currentValue ?? '');
+  const buttonLabel = viewData.actionLabel ?? 'Search';
+
+  useEffect(() => {
+    setJournalValue(currentValue ?? '');
+  }, [currentValue]);
+
+  return (
+    <form
+      className="input-group input-group-sm"
+      onSubmit={(event) => {
+        event.preventDefault();
+        let nextValue = journalValue;
+        if (prop.type === 'number' || prop.type === 'integer') {
+          nextValue = journalValue === '' ? '' : Number.parseFloat(journalValue);
+        }
+        onSave?.(
+          buildEditorSaveValue(viewData.writeTo, fieldKey, nextValue),
+          { kind: 'searchbox', renderDef, writeTo: viewData.writeTo },
+        );
+      }}
+    >
+      <input
+        type={prop.format === 'date' ? 'date' : (prop.type === 'number' || prop.type === 'integer' ? 'number' : 'search')}
+        className="form-control board-input"
+        value={prop.format === 'date' ? (journalValue != null ? String(journalValue).slice(0, 10) : '') : journalValue}
+        min={prop.minimum}
+        max={prop.maximum}
+        step={prop.type === 'integer' ? '1' : (prop.type === 'number' ? 'any' : undefined)}
+        placeholder={prop.placeholder ?? prop.title ?? fieldKey}
+        aria-label={prop.title ?? fieldKey}
+        required={isRequired}
+        onChange={(event) => setJournalValue(event.target.value)}
+      />
+      <button
+        type="submit"
+        className="btn btn-outline-secondary board-button"
+        aria-label={buttonLabel}
+        title={buttonLabel}
+      >
+        <i className="bi bi-search" aria-hidden="true" />
+      </button>
     </form>
   );
 }
@@ -969,16 +1115,17 @@ function ActionsView({ data, renderDef, onSave }) {
 }
 
 export function CardCoreView({ kind, renderDef, data, onSave }) {
-  const viewEntry = CARD_CORE_VIEW_KINDS[kind] ?? CARD_CORE_VIEW_KINDS.text;
+  const effectiveKind = normalizeLegacyKind(kind, renderDef, data);
+  const viewEntry = CARD_CORE_VIEW_KINDS[effectiveKind] ?? CARD_CORE_VIEW_KINDS.text;
   const ViewComponent = viewEntry.Component;
-  const viewData = CARD_CORE_VIEW_KINDS[kind]
+  const viewData = CARD_CORE_VIEW_KINDS[effectiveKind]
     ? data
     : (typeof data === 'string' ? data : (data != null ? JSON.stringify(data, null, 2) : ''));
   const body = <ViewComponent data={viewData} renderDef={renderDef} onSave={onSave} />;
 
   return (
     <div className="w-100 d-flex flex-column">
-      <CardFrame label={renderDef?.label} kind={kind}>
+      <CardFrame label={renderDef?.label} kind={effectiveKind}>
         {body}
       </CardFrame>
     </div>

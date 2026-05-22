@@ -302,7 +302,8 @@ The current known dynamic kinds are:
 - `narrative`
 - `markdown`
 - `form`
-- `filter`
+- `searchbox`
+- `selection`
 - `todo`
 - `alert`
 
@@ -326,7 +327,7 @@ Use that skill for:
 - root source cards
 - compute-chain cards
 - multi-level token chains
-- form and filter propagation patterns
+- form, searchbox, and selection propagation patterns
 - LLM-backed cards
 - user-selectable views
 - LLM-suggested `_view` patterns

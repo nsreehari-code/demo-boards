@@ -52,6 +52,8 @@
         "label": "Channel",
         "data": {
           "writeTo": "card_data",
+          "discardLabel": "Reset",
+          "saveLabel": "Apply",
           "fields": {
             "type": "object",
             "properties": {
