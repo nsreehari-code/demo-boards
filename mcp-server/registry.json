@@ -1,7 +1,7 @@
 {
   "servers": {
     "finbook": {
-      "manifest": "../data-repos-VX/managed-truthsets/mcp-executable-manifest.json"
+      "manifest": "../mcp-server-managed-truthsets/finbook/mcp-executable-manifest.json"
     },
     "sentinel-data-exploration": {
       "manifest": "sentinel-data-exploration.json",

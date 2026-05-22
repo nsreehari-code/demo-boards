@@ -2,7 +2,7 @@
 // validate-finbook.js — Deterministic structural validator for finbook.json
 //
 // Usage:
-//   node managed-truthsets/scripts/validate-finbook.js managed-truthsets/DB/finbook.json [--base <ref>]
+//   node mcp-server-managed-truthsets/finbook/scripts/validate-finbook.js mcp-server-managed-truthsets/finbook/DB/finbook.json [--base <ref>]
 
 const path = require('path');
 const fs = require('fs');

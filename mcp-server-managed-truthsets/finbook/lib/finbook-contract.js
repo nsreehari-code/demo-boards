@@ -412,7 +412,7 @@ function failure(operation, params, message, meta = {}, code = 'finbook_error') 
   };
 }
 
-function getManagedTruthsetsManifest(filename, legacyFilename) {
+function getFinbookManifest(filename, legacyFilename) {
   const candidates = [
     path.join(__dirname, '..', 'managed-truthsets', filename),
     path.join(__dirname, '..', filename)
@@ -428,13 +428,13 @@ function getManagedTruthsetsManifest(filename, legacyFilename) {
 }
 
 function getSemanticManifest() {
-  const manifest = getManagedTruthsetsManifest('mcp-manifest.json');
+  const manifest = getFinbookManifest('mcp-manifest.json');
   if (manifest) return manifest;
   throw new Error('Finbook semantic manifest not found');
 }
 
 function getExecutableManifest() {
-  const manifest = getManagedTruthsetsManifest('mcp-executable-manifest.json');
+  const manifest = getFinbookManifest('mcp-executable-manifest.json');
   if (manifest) return manifest;
   throw new Error('Finbook executable manifest not found');
 }

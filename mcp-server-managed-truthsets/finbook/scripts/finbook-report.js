@@ -2,7 +2,7 @@
 // finbook-report.js — CLI report tool for agents
 //
 // Usage:
-//   node managed-truthsets/scripts/finbook-report.js managed-truthsets/DB/finbook.json --account <code> --report <type> [--fy <FY>] [--as-on <date>]
+//   node mcp-server-managed-truthsets/finbook/scripts/finbook-report.js mcp-server-managed-truthsets/finbook/DB/finbook.json --account <code> --report <type> [--fy <FY>] [--as-on <date>]
 //
 // Report types:
 //   income-summary       Income across all categories for a FY
@@ -14,9 +14,9 @@
 //   accounts              List all accounts in the DB
 //
 // Examples:
-//   node managed-truthsets/scripts/finbook-report.js managed-truthsets/DB/finbook.json --account Sarala --report income-summary --fy 2024-25
-//   node managed-truthsets/scripts/finbook-report.js managed-truthsets/DB/finbook.json --account Sarala --report holdings --as-on 2025-03-31
-//   node managed-truthsets/scripts/finbook-report.js managed-truthsets/DB/finbook.json --report accounts
+//   node mcp-server-managed-truthsets/finbook/scripts/finbook-report.js mcp-server-managed-truthsets/finbook/DB/finbook.json --account Sarala --report income-summary --fy 2024-25
+//   node mcp-server-managed-truthsets/finbook/scripts/finbook-report.js mcp-server-managed-truthsets/finbook/DB/finbook.json --account Sarala --report holdings --as-on 2025-03-31
+//   node mcp-server-managed-truthsets/finbook/scripts/finbook-report.js mcp-server-managed-truthsets/finbook/DB/finbook.json --report accounts
 //
 // Exit codes: 0 = success, 1 = bad args, 2 = runtime error
 

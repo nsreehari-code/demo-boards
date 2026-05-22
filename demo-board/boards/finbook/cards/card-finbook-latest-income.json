@@ -7,7 +7,7 @@
       "mcp",
       "income"
     ],
-    "desc": "Shows the latest fiscal total income for each account from the local finbook managed-truthsets repo through MCP."
+    "desc": "Shows the latest fiscal total income for each account from the local Finbook repo through MCP."
   },
   "requires": [],
   "source_defs": [

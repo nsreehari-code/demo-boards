@@ -4,17 +4,16 @@ This repository is a git-backed data store managed by AI steward agents.
 
 ## Structure
 
-- `managed-truthsets/` — Authoritative Finbook state, schema, validation, reports, generated MCP manifests, and shared truth-management logic
-- `managed-truthsets/DB/finbook.json` — Financial database (accounts, income, stocks, taxes)
-- `managed-truthsets/lib/` — Canonical Finbook domain libraries
-- `managed-truthsets/scripts/` — Maintained validator, report, test, and manifest-generation scripts
 - `case-workspace/` — Generated steward workspace artifacts, instructions, and domain-agent material
+
+The authoritative Finbook truth-management package now lives at
+`../mcp-server-managed-truthsets/finbook/`.
 
 ## How It Works
 
-1. Agents operate on the Finbook MCP/tool surface backed by `managed-truthsets/`.
+1. Agents operate on the Finbook MCP/tool surface backed by `../mcp-server-managed-truthsets/finbook/`.
 2. Transactional writes flow through journal-backed Finbook tools instead of direct JSON edits.
-3. Validation, reporting, and manifest generation run from `managed-truthsets/scripts/`.
+3. Validation, reporting, and manifest generation run from `../mcp-server-managed-truthsets/finbook/scripts/`.
 4. `case-workspace/` holds generated working copies and steward-facing workflow material rather than the canonical truthsets.
 
 ## Evidence-Based Principle
@@ -26,9 +25,9 @@ All data extraction is evidence-based. If information is not explicitly stated i
 This is a **Finbook** data repository — Indian personal tax tracking.
 
 ### Additional Structure
-- `managed-truthsets/scripts/validate-finbook.js` — Deterministic validator
-- `managed-truthsets/scripts/finbook-report.js` — Computed report tool
-- `managed-truthsets/lib/finbook-core.js` — Shared schema/computation library
+- `../mcp-server-managed-truthsets/finbook/scripts/validate-finbook.js` — Deterministic validator
+- `../mcp-server-managed-truthsets/finbook/scripts/finbook-report.js` — Computed report tool
+- `../mcp-server-managed-truthsets/finbook/lib/finbook-core.js` — Shared schema/computation library
 - `case-workspace/` — Generated steward instructions, domain agents, and case-workspace artifacts
 
 ### Domain Agents
@@ -45,4 +44,4 @@ This is a **Finbook** data repository — Indian personal tax tracking.
 ### MCP Discovery Hints
 - `finbook.describe_semantic_structure` explains the meaning of the top-level model, tables, computed views, and preferred mutation patterns.
 - `finbook.validate_working_state` validates the current working state without requiring direct file access.
-- Agents should use the Finbook MCP/tool surface instead of editing `managed-truthsets/DB/finbook.json` directly.
+- Agents should use the Finbook MCP/tool surface instead of editing `../mcp-server-managed-truthsets/finbook/DB/finbook.json` directly.

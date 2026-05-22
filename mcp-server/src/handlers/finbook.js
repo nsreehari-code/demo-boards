@@ -57,15 +57,19 @@ function loadModule(modulePath) {
 }
 
 function loadFinbookModules(repoDir) {
-  const managedTruthsetsBase = path.join(repoDir, 'managed-truthsets', 'lib');
-  const repoApiPath = path.join(managedTruthsetsBase, 'finbook-api.js');
-  const repoContractPath = path.join(managedTruthsetsBase, 'finbook-contract.js');
+  const repoLibCandidates = [
+    path.join(repoDir, 'lib'),
+    path.join(repoDir, 'managed-truthsets', 'lib'),
+  ];
+  const repoLibBase = repoLibCandidates.find((candidate) => fs.existsSync(candidate));
+  const repoApiPath = repoLibBase ? path.join(repoLibBase, 'finbook-api.js') : null;
+  const repoContractPath = repoLibBase ? path.join(repoLibBase, 'finbook-contract.js') : null;
   const overlayBase = path.resolve(repoDir, '..', '..', 'finbook-domain', 'finbook-data-overlay', 'lib');
   const overlayApiPath = path.join(overlayBase, 'finbook-api.js');
   const overlayContractPath = path.join(overlayBase, 'finbook-contract.js');
 
-  const apiPath = fs.existsSync(repoApiPath) ? repoApiPath : overlayApiPath;
-  const contractPath = fs.existsSync(repoContractPath) ? repoContractPath : overlayContractPath;
+  const apiPath = repoApiPath && fs.existsSync(repoApiPath) ? repoApiPath : overlayApiPath;
+  const contractPath = repoContractPath && fs.existsSync(repoContractPath) ? repoContractPath : overlayContractPath;
 
   return {
     api: loadModule(apiPath),

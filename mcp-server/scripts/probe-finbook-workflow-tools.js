@@ -16,7 +16,7 @@ function readJson(filePath) {
 
 function parseArgs(argv) {
   const options = {
-    manifest: '../../data-repos-V2/finbook-data/managed-truthsets/mcp-executable-manifest.json',
+    manifest: '../../mcp-server-managed-truthsets/finbook/mcp-executable-manifest.json',
   };
 
   for (let index = 0; index < argv.length; index += 1) {

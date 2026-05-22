@@ -10,12 +10,12 @@ const api = require('../lib/finbook-api.js');
 const contract = require('../lib/finbook-contract.js');
 const manifestBuilders = require('../lib/finbook-mcp-manifests.js');
 
-function resolveManagedTruthsetsFile(filename) {
+function resolveFinbookFile(filename) {
   const candidate = path.join(__dirname, '..', filename);
   if (fs.existsSync(candidate)) {
     return candidate;
   }
-  throw new Error(`Unable to resolve managed-truthsets file: ${filename}`);
+  throw new Error(`Unable to resolve Finbook package file: ${filename}`);
 }
 
 let passed = 0, failed = 0;
@@ -78,7 +78,7 @@ test('manifest builders stay aligned with the live contract', () => {
   assert(JSON.stringify(executableToolNames) === JSON.stringify(contractToolNames), 'executable manifest tool names must match contract');
 });
 
-test('manifest generator writes the managed-truthsets files', () => {
+test('manifest generator writes the Finbook package files', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'finbook-manifests-'));
   try {
     const result = manifestBuilders.writeManagedTruthsetsManifests(tmpDir);
