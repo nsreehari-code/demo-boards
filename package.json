@@ -10,7 +10,8 @@
     "finbook:check": "npm --prefix mcp-server-managed-truthsets/finbook run check",
     "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt",
     "install:vite": "npm --prefix demo-board/web/vite install",
-    "postinstall": "npm run install:foundry && npm run install:vite",
+    "sync:yaml-flow-cli": "node scripts/sync-yaml-flow-cli.cjs",
+    "postinstall": "npm run install:foundry && npm run install:vite && npm run sync:yaml-flow-cli",
     "start": "node scripts/start-server.cjs demo-board --all",
     "dev": "npm run vite",
     "frontend": "node ./node_modules/http-server/bin/http-server docs -p 8000 -c-1",
@@ -31,7 +32,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "latest",
     "better-sqlite3": "^12.9.0",
-    "yaml-flow": "^8.4.10"
+    "yaml-flow": "^8.4.13"
   },
   "devDependencies": {
     "http-server": "^14.1.1"

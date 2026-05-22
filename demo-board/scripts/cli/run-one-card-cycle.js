@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const cliPath = path.join(__dirname, 'board-live-cards-cli.js');
+const cliPath = path.join(__dirname, 'board-live-cards-cli.mjs');
 
 function usage() {
   console.error(

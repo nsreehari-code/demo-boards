@@ -100,13 +100,13 @@ Board-level meaning:
 Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js <subcommand>
+node ./.github/scripts/board-live-cards-cli.mjs <subcommand>
 ```
 
 ### Add or sync one card into the board runtime
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js upsert-card --base-ref <board-ref> --card-id <card-id>
+node ./.github/scripts/board-live-cards-cli.mjs upsert-card --base-ref <board-ref> --card-id <card-id>
 ```
 
 Use this when the card already exists in the card store and should be made
@@ -119,7 +119,7 @@ and view definition.
 ### Restart one card after syncing it
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js upsert-card --base-ref <board-ref> --card-id <card-id> --restart
+node ./.github/scripts/board-live-cards-cli.mjs upsert-card --base-ref <board-ref> --card-id <card-id> --restart
 ```
 
 Use `--restart` when the card is already present but should be retriggered after
@@ -135,7 +135,7 @@ Typical reasons:
 ### Add or resync all stored cards
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js upsert-card --base-ref <board-ref> --all
+node ./.github/scripts/board-live-cards-cli.mjs upsert-card --base-ref <board-ref> --all
 ```
 
 Use this only when the task explicitly calls for board-wide resync.
@@ -143,7 +143,7 @@ Use this only when the task explicitly calls for board-wide resync.
 ### Remove one card from the board runtime
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js remove-card --base-ref <board-ref> --id <card-id>
+node ./.github/scripts/board-live-cards-cli.mjs remove-card --base-ref <board-ref> --id <card-id>
 ```
 
 Use this when the card should stop existing on the live board but should remain

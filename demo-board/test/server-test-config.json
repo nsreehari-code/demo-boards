@@ -8,6 +8,7 @@
       "label": "Live",
       "setup": {
         "setupRoot": "./test/live.test.board-ws",
+        "aiWorkspaceRoot": "./test/live.test.board-ws/copilot-workspaces",
         "cardStore": "cards/store",
         "artifactsStore": "cards/files",
         "boardRuntime": "runtime",
@@ -28,7 +29,7 @@
           "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/live/copilot/default/agents"],
           "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/live/copilot/default/skills"],
           "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/live/copilot/default/hooks"],
-          "copyScripts": ["../node_modules/yaml-flow/cli/node", "./scripts/cli"]
+          "copyScripts": ["./scripts/yaml-flow", "./scripts/cli"]
         },
         {
           "copilot-root": "gandalf",
@@ -36,7 +37,7 @@
           "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/live/copilot/gandalf/agents"],
           "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/live/copilot/gandalf/skills"],
           "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/live/copilot/gandalf/hooks"],
-          "copyScripts": ["../node_modules/yaml-flow/cli/node", "./scripts/cli"]
+          "copyScripts": ["./scripts/yaml-flow", "./scripts/cli"]
         }
       ]
     }

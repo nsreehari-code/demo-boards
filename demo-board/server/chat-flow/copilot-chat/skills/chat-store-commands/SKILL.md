@@ -28,13 +28,13 @@ use it for internal notes, status updates, or orchestration state changes.
 Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
-node ./.github/scripts/chat-store-cli.js <subcommand>
+node ./.github/scripts/chat-store-cli.mjs <subcommand>
 ```
 
 ### Read the full chat history for one card
 
 ```bash
-node ./.github/scripts/chat-store-cli.js read-all --store-ref <store-ref> --card-id <card-id>
+node ./.github/scripts/chat-store-cli.mjs read-all --store-ref <store-ref> --card-id <card-id>
 ```
 
 Use this as the default way to inspect the complete stored chat session for one
@@ -43,7 +43,7 @@ card.
 ### Append the final assistant reply for one card
 
 ```bash
-node ./.github/scripts/chat-store-cli.js append --store-ref <store-ref> --card-id <card-id> --role assistant --text "<final-user-reply>" --files-json "[]"
+node ./.github/scripts/chat-store-cli.mjs append --store-ref <store-ref> --card-id <card-id> --role assistant --text "<final-user-reply>" --files-json "[]"
 ```
 
 Use this only once per completed assistant turn, after the final user-visible

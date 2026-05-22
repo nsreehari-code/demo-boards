@@ -34,13 +34,13 @@ These commands inspect live runtime artifacts, not the source card definition.
 Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js <subcommand>
+node ./.github/scripts/board-live-cards-cli.mjs <subcommand>
 ```
 
 ### Read overall board runtime status
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js status --base-ref <board-ref>
+node ./.github/scripts/board-live-cards-cli.mjs status --base-ref <board-ref>
 ```
 
 Use this as the default entrypoint when you need to know whether cards are:
@@ -57,7 +57,7 @@ This is the fastest way to understand the current live board state before drilli
 ### Read one published runtime output object
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js get-outputs --base-ref <board-ref> --type data-object --key <output-key>
+node ./.github/scripts/board-live-cards-cli.mjs get-outputs --base-ref <board-ref> --type data-object --key <output-key>
 ```
 
 Use this when a card or runtime process publishes a named output object and you know the key.
@@ -65,7 +65,7 @@ Use this when a card or runtime process publishes a named output object and you 
 ### Read all published runtime output objects
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js get-outputs --base-ref <board-ref> --type data-object --all
+node ./.github/scripts/board-live-cards-cli.mjs get-outputs --base-ref <board-ref> --type data-object --all
 ```
 
 Use this only when you need a board-wide output scan.
@@ -73,7 +73,7 @@ Use this only when you need a board-wide output scan.
 ### Read computed values for one card
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js get-outputs --base-ref <board-ref> --type computed-values --key <card-id>
+node ./.github/scripts/board-live-cards-cli.mjs get-outputs --base-ref <board-ref> --type computed-values --key <card-id>
 ```
 
 Use this when you need the live computed values for one specific card.
@@ -83,7 +83,7 @@ This is the direct way to inspect what `compute[]` has produced for that card in
 ### Read computed values for all cards
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js get-outputs --base-ref <board-ref> --type computed-values --all
+node ./.github/scripts/board-live-cards-cli.mjs get-outputs --base-ref <board-ref> --type computed-values --all
 ```
 
 Use this only when you need a board-wide computed-values inspection.

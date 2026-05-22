@@ -69,7 +69,7 @@ source kinds, valid source fields, or which source probe to run.
 Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js validate-card-preflight
+node ./.github/scripts/board-live-cards-cli.mjs validate-card-preflight
 ```
 
 The commands below are payload-driven and read JSON from stdin.
@@ -77,7 +77,7 @@ The commands below are payload-driven and read JSON from stdin.
 ### 1. Validate card structure and semantics
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js validate-card-preflight
+node ./.github/scripts/board-live-cards-cli.mjs validate-card-preflight
 ```
 
 Accepted stdin shapes:
@@ -107,7 +107,7 @@ Expected result shape:
 ### 2. Run one source actual fetch preflight
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js run-source-preflight --source-idx 0
+node ./.github/scripts/board-live-cards-cli.mjs run-source-preflight --source-idx 0
 ```
 
 The stdin payload should contain either the raw card object or:
@@ -153,7 +153,7 @@ Expected result includes fields like:
 ### 2a. Run one source lightweight probe
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.js probe-source-preflight --source-idx 0
+node ./.github/scripts/board-live-cards-cli.mjs probe-source-preflight --source-idx 0
 ```
 
 Use this only when you need a lightweight readiness probe rather than proof that the full source flow works.
@@ -171,7 +171,7 @@ Use the staged helper when you need the authored card's `provided_outputs` and
 resolved `view_model`, not just raw `computed_values`.
 
 Run this helper from the directory that contains both scripts. The helper makes
-one assumption only: `./board-live-cards-cli.js` is available in the current
+one assumption only: `./board-live-cards-cli.mjs` is available in the current
 directory.
 
 ```bash

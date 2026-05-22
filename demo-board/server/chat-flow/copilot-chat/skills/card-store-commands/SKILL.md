@@ -27,13 +27,13 @@ card has been added to the card store, do not delete it from storage.
 Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
-node ./.github/scripts/card-store-cli.js <subcommand>
+node ./.github/scripts/card-store-cli.mjs <subcommand>
 ```
 
 ### Read one card
 
 ```bash
-node ./.github/scripts/card-store-cli.js get --store-ref <store-ref> --id <card-id>
+node ./.github/scripts/card-store-cli.mjs get --store-ref <store-ref> --id <card-id>
 ```
 
 Use this as the default way to materialize a stored card for editing or validation.
@@ -41,7 +41,7 @@ Use this as the default way to materialize a stored card for editing or validati
 ### Read all cards in a store
 
 ```bash
-node ./.github/scripts/card-store-cli.js get --store-ref <store-ref>
+node ./.github/scripts/card-store-cli.mjs get --store-ref <store-ref>
 ```
 
 Use this only when you need one or two nearby examples or need to inspect store contents.
@@ -49,7 +49,7 @@ Use this only when you need one or two nearby examples or need to inspect store 
 ### Write one card or a batch of cards
 
 ```bash
-node ./.github/scripts/card-store-cli.js set --store-ref <store-ref>
+node ./.github/scripts/card-store-cli.mjs set --store-ref <store-ref>
 ```
 
 `set` accepts a single card object or an array of cards on stdin. Each card must contain a string `id` field.
@@ -59,7 +59,7 @@ Use this as the default persistence path after editing a full card object or aut
 ### Patch one object-style field
 
 ```bash
-node ./.github/scripts/card-store-cli.js patch --store-ref <store-ref> --id <card-id> --path <dot.path> --value-json '<json-value>'
+node ./.github/scripts/card-store-cli.mjs patch --store-ref <store-ref> --id <card-id> --path <dot.path> --value-json '<json-value>'
 ```
 
 Use this only for narrow object-field updates such as:
@@ -69,7 +69,7 @@ Use this only for narrow object-field updates such as:
 - other small scalar or object-valued fields
 
 Do not use `card-store-cli del` from this workflow. If a card should disappear
-for users, remove it from the live board with `node ./.github/scripts/board-live-cards-cli.js remove-card`.
+for users, remove it from the live board with `node ./.github/scripts/board-live-cards-cli.mjs remove-card`.
 That is sufficient for the graph and for user-visible board behavior.
 
 ## Command Rules

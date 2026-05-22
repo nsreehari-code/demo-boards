@@ -30,13 +30,13 @@ artifacts store CLI in this workflow.
 Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
-node ./.github/scripts/artifacts-store-cli.js <subcommand>
+node ./.github/scripts/artifacts-store-cli.mjs <subcommand>
 ```
 
 ### Read one artifact as text
 
 ```bash
-node ./.github/scripts/artifacts-store-cli.js get --store-ref <store-ref> --key <key> --as text
+node ./.github/scripts/artifacts-store-cli.mjs get --store-ref <store-ref> --key <key> --as text
 ```
 
 Use this for text-like artifacts such as JSON, Markdown, logs, YAML, or source files.
@@ -44,7 +44,7 @@ Use this for text-like artifacts such as JSON, Markdown, logs, YAML, or source f
 ### Read one artifact as bytes metadata
 
 ```bash
-node ./.github/scripts/artifacts-store-cli.js get --store-ref <store-ref> --key <key>
+node ./.github/scripts/artifacts-store-cli.mjs get --store-ref <store-ref> --key <key>
 ```
 
 This returns artifact metadata plus byte length when printed to stdout.
@@ -52,7 +52,7 @@ This returns artifact metadata plus byte length when printed to stdout.
 ### Read artifact metadata only
 
 ```bash
-node ./.github/scripts/artifacts-store-cli.js head --store-ref <store-ref> --key <key>
+node ./.github/scripts/artifacts-store-cli.mjs head --store-ref <store-ref> --key <key>
 ```
 
 Use this when you need to confirm existence, size, content type, or update time before fetching content.
@@ -60,13 +60,13 @@ Use this when you need to confirm existence, size, content type, or update time 
 ### List artifact keys
 
 ```bash
-node ./.github/scripts/artifacts-store-cli.js list --store-ref <store-ref>
+node ./.github/scripts/artifacts-store-cli.mjs list --store-ref <store-ref>
 ```
 
 Limit the scan when you know a prefix:
 
 ```bash
-node ./.github/scripts/artifacts-store-cli.js list --store-ref <store-ref> --prefix <prefix>
+node ./.github/scripts/artifacts-store-cli.mjs list --store-ref <store-ref> --prefix <prefix>
 ```
 
 Use this only when the needed file is not already discoverable from the stored

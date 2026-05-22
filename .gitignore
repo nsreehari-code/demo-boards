@@ -10,3 +10,8 @@ logs/
 **/.board-ws/**
 tmp/**
 demo-board/test/live.test.board-ws/
+demo-board/scripts/yaml-flow/**
+.tmp-*.txt
+exit.txt
+stdout.txt
+stderr.txt

@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 
-import { appendAssistantReply, appendSystemMessage, readJsonStdin, readLastChatMessage, requireRequiredStrings } from './shared.js';
+import {
+  appendAssistantReply,
+  appendSystemMessage,
+  configureWorkspaceCliScripts,
+  readJsonStdin,
+  requireRequiredStrings,
+  resolveCopilotWorkspaceDir,
+} from './shared.js';
 
 const PROBE_MARKER = '__probe__echo__probe__';
 
@@ -19,22 +26,26 @@ function normalizeProbeMessageText(text) {
 
 const extra = readJsonStdin();
 const {
+  aiWorkspaceRoot = '',
+  cardStoreRef = '',
   chatStoreRef = '',
   cardId = '',
+  userText = '',
 } = extra;
 
 requireRequiredStrings({
+  aiWorkspaceRoot,
+  cardStoreRef,
   chatStoreRef,
   cardId,
+  userText,
 }, 'probe');
 
 try {
-  const lastMessage = readLastChatMessage(chatStoreRef, cardId);
-  if (!lastMessage || typeof lastMessage.text !== 'string' || lastMessage.text.trim().length === 0) {
-    throw new Error('Probe handler did not find a chat message to echo');
-  }
+  const workingDir = resolveCopilotWorkspaceDir(aiWorkspaceRoot, cardStoreRef, cardId, 'probe');
+  configureWorkspaceCliScripts(workingDir, 'probe');
   appendSystemMessage(chatStoreRef, cardId, 'in-progress');
-  const replyText = `Echo: ${normalizeProbeMessageText(lastMessage.text)}`;
+  const replyText = `Echo: ${normalizeProbeMessageText(userText)}`;
   // User-visible probe text must be written through chat store only.
   appendAssistantReply(chatStoreRef, cardId, replyText);
   // The flow only consumes success or error from this process. Reply text must not be returned here.

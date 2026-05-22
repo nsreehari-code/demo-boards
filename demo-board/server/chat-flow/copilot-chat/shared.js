@@ -1,14 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { parseRef } from 'yaml-flow/board-worker-adapter';
 
-const require = createRequire(import.meta.url);
-const YAML_FLOW_PACKAGE_JSON = require.resolve('yaml-flow/package.json');
-const CHAT_STORE_CLI = path.join(path.dirname(YAML_FLOW_PACKAGE_JSON), 'cli', 'node', 'chat-store-cli.js');
-const CARD_STORE_CLI = path.join(path.dirname(YAML_FLOW_PACKAGE_JSON), 'cli', 'node', 'card-store-cli.js');
-const BOARD_LIVE_CARDS_CLI = path.join(path.dirname(YAML_FLOW_PACKAGE_JSON), 'cli', 'node', 'board-live-cards-cli.js');
+let CHAT_STORE_CLI = '';
+let CARD_STORE_CLI = '';
+let BOARD_LIVE_CARDS_CLI = '';
 
 function resolveFsPathRef(ref, fieldName) {
   requireNonEmptyString(ref, fieldName);
@@ -43,8 +40,71 @@ export function requireRequiredStrings(fields, contextLabel = 'handler') {
   }
 }
 
+function requireConfiguredCliPath(cliPath, cliLabel) {
+  if (typeof cliPath !== 'string' || cliPath.trim().length === 0) {
+    throw new Error(`${cliLabel} is not configured`);
+  }
+
+  return cliPath;
+}
+
+export function configureWorkspaceCliScripts(copilotWorkingDir, contextLabel = 'handler') {
+  requireNonEmptyString(copilotWorkingDir, 'copilotWorkingDir', contextLabel);
+
+  const scriptsDir = path.join(copilotWorkingDir, '.github', 'scripts');
+  if (!fs.existsSync(scriptsDir)) {
+    throw new Error(`Missing required ${contextLabel} input: ${scriptsDir}`);
+  }
+
+  const chatStoreCliPath = path.join(scriptsDir, 'chat-store-cli.mjs');
+  const cardStoreCliPath = path.join(scriptsDir, 'card-store-cli.mjs');
+  const boardLiveCardsCliPath = path.join(scriptsDir, 'board-live-cards-cli.mjs');
+
+  for (const [cliLabel, cliPath] of [
+    ['chat-store-cli.mjs', chatStoreCliPath],
+    ['card-store-cli.mjs', cardStoreCliPath],
+    ['board-live-cards-cli.mjs', boardLiveCardsCliPath],
+  ]) {
+    if (!fs.existsSync(cliPath)) {
+      throw new Error(`Missing required ${contextLabel} input: ${cliLabel} in ${scriptsDir}`);
+    }
+  }
+
+  CHAT_STORE_CLI = chatStoreCliPath;
+  CARD_STORE_CLI = cardStoreCliPath;
+  BOARD_LIVE_CARDS_CLI = boardLiveCardsCliPath;
+}
+
+export function resolveCopilotWorkspaceDir(aiWorkspaceRoot, storeRef, cardId, contextLabel = 'handler') {
+  requireRequiredStrings({
+    aiWorkspaceRoot,
+    storeRef,
+    cardId,
+  }, contextLabel);
+
+  if (!fs.existsSync(aiWorkspaceRoot)) {
+    throw new Error(`Missing required ${contextLabel} input: aiWorkspaceRoot directory`);
+  }
+
+  const storeDir = resolveStoreDir(storeRef, 'cardStoreRef');
+  const cardFilePath = path.join(storeDir, `${cardId}.json`);
+  if (!fs.existsSync(cardFilePath)) {
+    throw new Error(`Missing required ${contextLabel} input: card file for ${cardId}`);
+  }
+
+  const rawCard = fs.readFileSync(cardFilePath, 'utf-8').trim();
+  const storedCard = rawCard ? JSON.parse(rawCard) : {};
+  const copilotRoot = storedCard?.meta?.ingest === true ? 'gandalf' : 'default';
+  const copilotWorkingDir = path.join(aiWorkspaceRoot, copilotRoot);
+  if (!fs.existsSync(copilotWorkingDir)) {
+    throw new Error(`Missing required ${contextLabel} input: copilot workspace ${copilotRoot}`);
+  }
+
+  return copilotWorkingDir;
+}
+
 function runChatStoreCommands(chatStoreRef, cardId, commands, timeoutMs = 30000) {
-  const raw = execFileSync(process.execPath, [CHAT_STORE_CLI, '--stdin'], {
+  const raw = execFileSync(process.execPath, [requireConfiguredCliPath(CHAT_STORE_CLI, 'chat-store-cli.mjs'), '--stdin'], {
     input: JSON.stringify({
       storeRef: chatStoreRef,
       cardId,
@@ -66,7 +126,7 @@ function runChatStoreCommands(chatStoreRef, cardId, commands, timeoutMs = 30000)
 
 function runBoardLiveCardsCommand(baseRef, command, extraArgs = [], options = {}) {
   const raw = execFileSync(process.execPath, [
-    BOARD_LIVE_CARDS_CLI,
+    requireConfiguredCliPath(BOARD_LIVE_CARDS_CLI, 'board-live-cards-cli.mjs'),
     command,
     '--base-ref',
     baseRef,
@@ -86,7 +146,7 @@ function runBoardLiveCardsCommand(baseRef, command, extraArgs = [], options = {}
 function writeStoredCards(storeRef, cards, timeoutMs = 30000) {
   const payload = Array.isArray(cards) ? cards : [cards];
   execFileSync(process.execPath, [
-    CARD_STORE_CLI,
+    requireConfiguredCliPath(CARD_STORE_CLI, 'card-store-cli.mjs'),
     'set',
     '--store-ref',
     storeRef,
@@ -109,24 +169,7 @@ function normalizeCardFileEntry(cardId, fileEntry) {
     return fileEntry;
   }
 
-  const normalized = {};
-  if (typeof fileEntry.name === 'string' && fileEntry.name.length > 0) {
-    normalized.name = fileEntry.name;
-  }
-  if (typeof fileEntry.stored_name === 'string' && fileEntry.stored_name.length > 0) {
-    normalized.stored_name = fileEntry.stored_name;
-  }
-
-  const normalizedPath = typeof fileEntry.path === 'string' && fileEntry.path.length > 0
-    ? fileEntry.path
-    : (typeof fileEntry.stored_name === 'string' && fileEntry.stored_name.length > 0 && typeof cardId === 'string' && cardId.length > 0
-      ? `${cardId}/files/${fileEntry.stored_name}`
-      : '');
-  if (normalizedPath) {
-    normalized.path = normalizedPath;
-  }
-
-  return normalized;
+  return fileEntry;
 }
 
 function normalizeStoredCard(card) {
@@ -260,7 +303,7 @@ export function readStoredCard(storeRef, cardId, timeoutMs = 30000) {
   if (!storeRef || !cardId) return null;
   try {
     const raw = execFileSync(process.execPath, [
-      CARD_STORE_CLI,
+      requireConfiguredCliPath(CARD_STORE_CLI, 'card-store-cli.mjs'),
       'get',
       '--store-ref',
       storeRef,
@@ -285,7 +328,7 @@ export function readAllStoredCards(storeRef, timeoutMs = 30000) {
   if (!storeRef) return [];
   try {
     const raw = execFileSync(process.execPath, [
-      CARD_STORE_CLI,
+      requireConfiguredCliPath(CARD_STORE_CLI, 'card-store-cli.mjs'),
       'get',
       '--store-ref',
       storeRef,

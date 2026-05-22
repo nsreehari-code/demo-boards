@@ -7,12 +7,13 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   appendAssistantReply,
+  configureWorkspaceCliScripts,
   createCardStoreSnapshot,
   hasValidationIssues,
   readChatMessages,
   readJsonStdin,
-  readStoredCard,
   requireRequiredStrings,
+  resolveCopilotWorkspaceDir,
   resolveStoreDir,
   syncChangedCardsToBoard,
   validateAllCards,
@@ -27,7 +28,7 @@ const {
   boardId = '',
   cardId = '',
   baseRef = '',
-  boardSetupRoot = '',
+  aiWorkspaceRoot = '',
   cardStoreRef = '',
   chatStoreRef = '',
   artifactsStoreRef = '',
@@ -186,14 +187,13 @@ function appendDebug(stage, details = {}) {
 
 function runCopilot(prompt, workingDir) {
   const ts = Date.now();
-  const tempRoot = scratchDir || process.cwd();
+  const tempRoot = scratchDir;
   const promptFile = path.join(tempRoot, `asst-prompt-${ts}.txt`);
   const outFile = path.join(tempRoot, `asst-out-${ts}.txt`);
   const errFile = path.join(tempRoot, `asst-err-${ts}.txt`);
-  const effectiveWorkingDir = workingDir || process.cwd();
   const execArgs = [
     '/d', '/c', WRAPPER_BAT,
-    effectiveWorkingDir,
+    workingDir,
     promptFile,
     outFile,
     errFile,
@@ -209,7 +209,7 @@ function runCopilot(prompt, workingDir) {
       errFile,
       wrapperBat: WRAPPER_BAT,
       model: COPILOT_MODEL,
-      copilotWorkingDir: effectiveWorkingDir,
+      copilotWorkingDir: workingDir,
       execCommand: 'cmd.exe',
       execArgs,
       copilotCmd: formatCommandForLog('cmd.exe', execArgs),
@@ -222,7 +222,7 @@ function runCopilot(prompt, workingDir) {
       outFile,
       errFile,
       model: COPILOT_MODEL,
-      copilotWorkingDir: effectiveWorkingDir,
+      copilotWorkingDir: workingDir,
       copilotCmd: formatCommandForLog('cmd.exe', execArgs),
       promptLength: prompt.length,
     });
@@ -374,32 +374,10 @@ function runCopilotWithValidationRetries(prompt, workingDir, baseRef, storeRef, 
   };
 }
 
-function resolveCopilotRoot(storeRef, cId) {
-  const storedCard = readStoredCard(storeRef, cId, Math.min(chatCopilotTimeoutMs, 30000));
-  return storedCard?.meta?.ingest === true ? 'gandalf' : 'default';
-}
-
-function resolveCopilotWorkingDir(setupRoot, storeRef, cId) {
-  const copilotRoot = resolveCopilotRoot(storeRef, cId);
-  const workspaceDir = setupRoot
-    ? path.join(setupRoot, 'copilot-workspaces', copilotRoot)
-    : '';
-  if (workspaceDir && fs.existsSync(workspaceDir)) {
-    return workspaceDir;
-  }
-  const workspaceDefaultDir = setupRoot
-    ? path.join(setupRoot, 'copilot-workspaces', 'default')
-    : '';
-  if (workspaceDefaultDir && fs.existsSync(workspaceDefaultDir)) {
-    return workspaceDefaultDir;
-  }
-  return setupRoot || process.cwd();
-}
-
 requireRequiredStrings({
   baseRef,
   cardId,
-  boardSetupRoot,
+  aiWorkspaceRoot,
   cardStoreRef,
   chatStoreRef,
   scratchStoreRef,
@@ -409,7 +387,7 @@ appendDebug('assistant:start', {
   boardId,
   cardId,
   baseRef,
-  boardSetupRoot,
+  aiWorkspaceRoot,
   cardStoreRef,
   chatStoreRef,
   artifactsStoreRef,
@@ -422,9 +400,12 @@ DBG_LOG('assistant:start', {
   cardId,
   chatStoreRef,
   scratchStoreRef,
+  aiWorkspaceRoot,
   enableDebugLogging: ENABLE_DEBUG_LOGGING,
 });
 
+const workingDir = resolveCopilotWorkspaceDir(aiWorkspaceRoot, cardStoreRef, cardId, 'assistant');
+configureWorkspaceCliScripts(workingDir, 'assistant');
 const chatMessages = readChatMessages(chatStoreRef, cardId, Math.min(chatCopilotTimeoutMs, 30000));
 appendDebug('assistant:initialChatMessages', {
   chatMessageCount: Array.isArray(chatMessages) ? chatMessages.length : -1,
@@ -433,7 +414,6 @@ DBG_LOG('assistant:initialChatMessages', {
   chatMessageCount: Array.isArray(chatMessages) ? chatMessages.length : -1,
 });
 const historyDump = JSON.stringify(chatMessages, null, 2);
-const workingDir = resolveCopilotWorkingDir(boardSetupRoot, cardStoreRef, cardId);
 appendDebug('assistant:workingDirResolved', {
   workingDir,
 });
@@ -469,7 +449,7 @@ try {
   const runResult = runCopilotWithValidationRetries(
     prompt,
     workingDir,
-    boardSetupRoot,
+    baseRef,
     cardStoreRef,
     cardId,
     chatMessages.length

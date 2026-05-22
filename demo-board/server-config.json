@@ -13,6 +13,7 @@
       "subtitle": "Live operational intelligence for agent workflows",
       "setup": {
         "setupRoot": "../workspaces/finbook/case-workspace",
+        "aiWorkspaceRoot": "../workspaces/finbook/case-workspace/copilot-workspaces",
         "cardStore": "ingest/cards-store",
         "artifactsStore": "ingest/cards-files",
         "boardRuntime": "runtime",
@@ -32,21 +33,31 @@
           "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/finbook/copilot/default/agents"],
           "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/finbook/copilot/default/skills"],
           "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/finbook/copilot/default/hooks"],
-          "copyScripts": ["../node_modules/yaml-flow/cli/node", "./scripts/cli"]
+          "copyScripts": ["./scripts/yaml-flow", "./scripts/cli"]
         },
         { "copilot-root": "gandalf", 
           "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./boards/finbook/copilot/gandalf/instructions"],
           "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/finbook/copilot/gandalf/agents"],
           "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/finbook/copilot/gandalf/skills"],
           "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/finbook/copilot/gandalf/hooks"],
-          "copyScripts": ["../node_modules/yaml-flow/cli/node", "./scripts/cli"]
+          "copyScripts": ["./scripts/yaml-flow", "./scripts/cli"]
         }
       ]
     },
     "live": {
       "label": "Live",
       "subtitle": "Live operational intelligence for agent workflows",
-      "setupRoot": "../workspaces/live/case-workspace",
+      "setup": {
+        "setupRoot": "../workspaces/live/case-workspace",
+        "aiWorkspaceRoot": "../workspaces/live/case-workspace/copilot-workspaces",
+        "cardStore": "cards-store",
+        "artifactsStore": "cards-files",
+        "boardRuntime": "runtime",
+        "boardOutputsStore": "board-outputs",
+        "chatStore": "cards-chats",
+        "scratchStore": "scratch",
+        "archivalStore": "runtime-archive"
+      },
       "regular": {
         "seedCardsDir": "./boards/live/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
@@ -58,21 +69,31 @@
           "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/live/copilot/default/agents"],
           "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/live/copilot/default/skills"],
           "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/live/copilot/default/hooks"],
-          "copyScripts": ["../node_modules/yaml-flow/cli/node", "./scripts/cli"]
+          "copyScripts": ["./scripts/yaml-flow", "./scripts/cli"]
         },
         { "copilot-root": "gandalf", 
           "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./boards/live/copilot/gandalf/instructions"],
           "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/live/copilot/gandalf/agents"],
           "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/live/copilot/gandalf/skills"],
           "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/live/copilot/gandalf/hooks"],
-          "copyScripts": ["../node_modules/yaml-flow/cli/node", "./scripts/cli"]
+          "copyScripts": ["./scripts/yaml-flow", "./scripts/cli"]
         }
       ]
     },
     "sentinel": {
       "label": "Sentinel Demo",
       "subtitle": "Live operational intelligence for agent workflows",
-      "setupRoot": "../workspaces/sentinel/case-workspace",
+      "setup": {
+        "setupRoot": "../workspaces/sentinel/case-workspace",
+        "aiWorkspaceRoot": "../workspaces/sentinel/case-workspace/copilot-workspaces",
+        "cardStore": "cards-store",
+        "artifactsStore": "cards-files",
+        "boardRuntime": "runtime",
+        "boardOutputsStore": "board-outputs",
+        "chatStore": "cards-chats",
+        "scratchStore": "scratch",
+        "archivalStore": "runtime-archive"
+      },
       "regular": {
         "seedCardsDir": "./boards/sentinel/cards",
         "taskExecutorPath": "./server/board-worker/task-executor.js",
@@ -84,14 +105,14 @@
           "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/sentinel/copilot/default/agents"],
           "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/sentinel/copilot/default/skills"],
           "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/sentinel/copilot/default/hooks"],
-          "copyScripts": ["../node_modules/yaml-flow/cli/node", "./scripts/cli"]
+          "copyScripts": ["./scripts/yaml-flow", "./scripts/cli"]
         },
         { "copilot-root": "gandalf", 
           "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./boards/sentinel/copilot/gandalf/instructions"],
           "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/sentinel/copilot/gandalf/agents"],
           "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/sentinel/copilot/gandalf/skills"],
           "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/sentinel/copilot/gandalf/hooks"],
-          "copyScripts": ["../node_modules/yaml-flow/cli/node", "./scripts/cli"]
+          "copyScripts": ["./scripts/yaml-flow", "./scripts/cli"]
         }
       ]
     }

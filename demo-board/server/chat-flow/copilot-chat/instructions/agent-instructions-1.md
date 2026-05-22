@@ -386,7 +386,7 @@ repair rules around projections.
 Rather than guessing which source kinds or source fields the registered executor supports, query it directly:
 
 ```bash
-node board-live-cards-cli.js describe-task-executor-capabilities --rg <boardDir>
+node board-live-cards-cli.mjs describe-task-executor-capabilities --rg <boardDir>
 ```
 
 Use this before authoring or repairing a source. If the kind is missing from the

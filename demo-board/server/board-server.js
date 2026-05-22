@@ -34,8 +34,7 @@ const __filename = fileURLToPath(import.meta.url);
 const SERVER_DIR = path.dirname(__filename);
 const BOARD_ROOT = path.resolve(SERVER_DIR, '..');
 const require = createRequire(import.meta.url);
-const YAML_FLOW_PACKAGE_JSON = require.resolve('yaml-flow/package.json');
-const YAML_FLOW_CLI_NODE_DIR = path.join(path.dirname(YAML_FLOW_PACKAGE_JSON), 'cli', 'node');
+const YAML_FLOW_CLI_DIR = path.join(BOARD_ROOT, 'scripts', 'yaml-flow');
 const cliArgs = process.argv.slice(2);
 const SERVER_CONFIG = path.join(BOARD_ROOT, 'server-config.json');
 
@@ -124,6 +123,7 @@ function resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride) {
   const setupRoot = resolveConfiguredBoardSetupRoot(cfg, boardId, boardSetupRootOverride);
 
   const leaves = {
+    aiWorkspaceRoot:   requireConfiguredPathText(setupCfg.aiWorkspaceRoot, `boards.${boardId}.setup.aiWorkspaceRoot`),
     boardRuntime:      requireConfiguredPathText(setupCfg.boardRuntime ?? DEFAULT_SETUP_LEAVES.boardRuntime, `boards.${boardId}.setup.boardRuntime`),
     boardOutputsStore: requireConfiguredPathText(setupCfg.boardOutputsStore ?? DEFAULT_SETUP_LEAVES.boardOutputsStore, `boards.${boardId}.setup.boardOutputsStore`),
     cardStore:         requireConfiguredPathText(setupCfg.cardStore ?? DEFAULT_SETUP_LEAVES.cardStore, `boards.${boardId}.setup.cardStore`),
@@ -137,6 +137,7 @@ function resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride) {
   return {
     setupRoot,
     ...leaves,
+    aiWorkspaceRootPath:   toAbs(leaves.aiWorkspaceRoot),
     boardRuntimePath:      toAbs(leaves.boardRuntime),
     boardOutputsStorePath: toAbs(leaves.boardOutputsStore),
     cardStorePath:         toAbs(leaves.cardStore),
@@ -149,6 +150,7 @@ function resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride) {
 
 function ensureBoardSetupPaths(boardId, boardSetupPaths) {
   ensureDirectoryExists(boardSetupPaths.setupRoot, `boards.${boardId}.setup.setupRoot`);
+  ensureDirectoryExists(boardSetupPaths.aiWorkspaceRootPath, `boards.${boardId}.setup.aiWorkspaceRoot`);
   ensureDirectoryExists(boardSetupPaths.boardRuntimePath, `boards.${boardId}.setup.boardRuntime`);
   ensureDirectoryExists(boardSetupPaths.boardOutputsStorePath, `boards.${boardId}.setup.boardOutputsStore`);
   ensureDirectoryExists(boardSetupPaths.cardStorePath, `boards.${boardId}.setup.cardStore`);
@@ -560,11 +562,11 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
 
   const notifyChannel = `yaml-flow-server-${label}-${boardId}-${process.pid}`;
   const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath }));
-  const boardAdapter = createFsBoardPlatformAdapter(baseRef, { notifyChannel });
+  const boardAdapter = createFsBoardPlatformAdapter(baseRef, YAML_FLOW_CLI_DIR, { notifyChannel });
   boardAdapter.requestProcessAccumulated = () => {};
 
   const artifactsRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath }));
-  const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, { suppressSpawn: true });
+  const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, YAML_FLOW_CLI_DIR, { suppressSpawn: true });
   const artifactsStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath });
   const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
   const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
@@ -633,7 +635,8 @@ const runtime = createMultiBoardServerRuntime({
     }
 
     const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
-    const baseRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.setupRoot });
+    const baseRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath });
+    const aiWorkspaceRoot = boardSetupPaths.aiWorkspaceRootPath;
     const artifactsStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath });
     const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
     const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
@@ -652,6 +655,7 @@ const runtime = createMultiBoardServerRuntime({
     const baseExecutionExtra = {
       boardId,
       baseRef,
+      aiWorkspaceRoot,
       boardSetupRoot: boardSetupPaths.setupRoot,
       boardRuntimeDir: boardSetupPaths.boardRuntime,
       cardStoreRef,
@@ -672,7 +676,7 @@ const runtime = createMultiBoardServerRuntime({
     const baseCfg = buildBoardContextConfig('base', boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, baseExecutionExtra);
     const boards = [baseCfg];
 
-    demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot: boardSetupPaths.setupRoot });
+    demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot: boardSetupPaths.setupRoot, aiWorkspaceRoot });
 
     const singleBoardRuntime = createSingleBoardServerRuntime({
       apiBasePath: `${apiBasePath}/${boardId}`,
@@ -686,6 +690,7 @@ const runtime = createMultiBoardServerRuntime({
       serverUrl: `http://127.0.0.1:${PORT}`,
       executionExtra: {
         baseRef,
+        aiWorkspaceRoot,
         boardSetupRoot: boardSetupPaths.setupRoot,
         boardRuntimeDir: boardSetupPaths.boardRuntime,
         cardStoreRef,
@@ -719,7 +724,7 @@ const runtime = createMultiBoardServerRuntime({
 // Host setup — prepares Copilot workspaces under the board setup root.
 // ---------------------------------------------------------------------------
 
-function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
+function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot }) {
   ensureDirectoryExists(boardSetupRoot, `boards.${boardId}.setup.setupRoot`);
 
   const workspaceSetup = Array.isArray(cfg?.['copilot-workdirs-setup'])
@@ -727,7 +732,7 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot }) {
     : [];
 
   if (workspaceSetup.length > 0) {
-    const copilotWorkspaceRoot = path.join(boardSetupRoot, 'copilot-workspaces');
+    const copilotWorkspaceRoot = aiWorkspaceRoot;
     fs.mkdirSync(copilotWorkspaceRoot, { recursive: true });
 
     for (const entry of workspaceSetup) {
