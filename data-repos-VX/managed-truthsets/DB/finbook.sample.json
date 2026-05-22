@@ -4,30 +4,55 @@
       {
         "Broker": "Interactive Brokers",
         "Key": "sample-default-broker",
-        "Note": "Checked-in sample default"
+        "Note": "Default foreign broker used in the checked-in starter dataset"
+      },
+      {
+        "Broker": "Zerodha",
+        "Key": "sample-india-broker",
+        "Note": "Default domestic broker used in the checked-in starter dataset"
       }
     ]
   },
   "accounts": [
     {
-      "account": "Sample",
-      "name": "Sample Account",
+      "account": "Asha",
+      "name": "Asha Raman",
       "SalaryIncome": [
         {
-          "EffectiveDate": "2024-06-15",
-          "Employer": "Acme Corp",
-          "GrossTaxable": 500000,
-          "TDSDeducted": 50000
+          "EffectiveDate": "2025-04-30",
+          "Employer": "Northwind Labs Pvt Ltd",
+          "GrossTaxable": 185000,
+          "TDSDeducted": 22000,
+          "Remarks": "Monthly payroll for April"
+        },
+        {
+          "EffectiveDate": "2025-05-31",
+          "Employer": "Northwind Labs Pvt Ltd",
+          "GrossTaxable": 185000,
+          "TDSDeducted": 22000,
+          "Remarks": "Monthly payroll for May"
         }
       ],
-      "ForeignIncome": [],
+      "ForeignIncome": [
+        {
+          "IncomeDate": "2025-03-15",
+          "IncomeSource": "US dividend payout",
+          "IncomeType": "Dividend",
+          "Currency": "USD",
+          "IncomeAmount": 42.5,
+          "TaxesWithheld": 10,
+          "ExchangeRateToINR": 82.9,
+          "Remarks": "Dividend from ETF holdings"
+        }
+      ],
       "PropertyIncome": [],
       "CapitalGainsConsolidated": [],
       "OtherIncome": [
         {
-          "IncomeDate": "2024-07-01",
-          "IncomeDescription": "Savings interest",
-          "IncomeAmount": 1200
+          "IncomeDate": "2025-04-05",
+          "IncomeDescription": "Savings account interest",
+          "IncomeAmount": 1650,
+          "TDSDeducted": 0
         }
       ],
       "StockPurchasesOrTransferIns": [
@@ -39,9 +64,87 @@
           "PurchaseDate": "2024-05-30",
           "PurchaseQuantity": 10,
           "PurchasePricePerUnit": 429.17,
-          "PurchaseExpenses": 0,
+          "PurchaseExpenses": 1.25,
           "ExchangeRateToINR": 83.5,
           "PurchaseLotID": "MSFT - 429.17 - 30-May-2024",
+          "LotTag": 0
+        },
+        {
+          "BrokerageName": "Zerodha",
+          "SecurityName": "INFY.NS",
+          "CurrencyCode": "INR",
+          "IsSTTPaid": true,
+          "PurchaseDate": "2025-04-03",
+          "PurchaseQuantity": 13,
+          "PurchasePricePerUnit": 1487.15,
+          "PurchaseExpenses": 12.5,
+          "ExchangeRateToINR": 1,
+          "PurchaseLotID": "INFY.NS - 1487.15 - 3-Apr-2025",
+          "LotTag": 0
+        }
+      ],
+      "StockSalesOrTransferOuts": [
+        {
+          "SaleDate": "2025-05-20",
+          "SecurityName": "MSFT",
+          "BrokerageName": "Interactive Brokers",
+          "SaleQuantity": 4,
+          "SaleAmount": 1825,
+          "SaleExpenses": 4.5,
+          "DomesticExpensesINR": 0,
+          "ExchangeRateToINR": 84.1,
+          "PurchaseLots": [
+            {
+              "PurchaseLotID": "MSFT - 429.17 - 30-May-2024",
+              "SaleQuantity": 4
+            }
+          ]
+        }
+      ],
+      "AdvanceTax": [
+        {
+          "EffectiveDate": "2025-06-15",
+          "TaxAmountPaid": 25000,
+          "PaymentDescription": "Q1 advance tax"
+        }
+      ],
+      "ForeignAccounts": [
+        {
+          "ForeignAccount": "sample-ibkr-asha",
+          "Entity": "Interactive Brokers LLC",
+          "AccountNumber": "U1234"
+        }
+      ],
+      "Properties": []
+    },
+    {
+      "account": "Ravi",
+      "name": "Ravi Menon",
+      "SalaryIncome": [],
+      "ForeignIncome": [],
+      "PropertyIncome": [],
+      "CapitalGainsConsolidated": [],
+      "OtherIncome": [
+        {
+          "IncomeDate": "2025-04-12",
+          "IncomeDescription": "Consulting payment",
+          "IncomeAmount": 45000,
+          "TDSDeducted": 4500,
+          "TDSDeductor": "Contoso India Pvt Ltd"
+        }
+      ],
+      "StockPurchasesOrTransferIns": [
+        {
+          "BrokerageName": "Zerodha",
+          "SecurityName": "NIFTYBEES",
+          "CurrencyCode": "INR",
+          "IsSTTPaid": true,
+          "PurchaseDate": "2025-04-10",
+          "PurchaseQuantity": 25,
+          "PurchasePricePerUnit": 241.8,
+          "PurchaseExpenses": 8.4,
+          "ExchangeRateToINR": 1,
+          "PurchaseLotID": "NIFTYBEES - 241.8 - 10-Apr-2025",
           "LotTag": 0
         }
       ],

@@ -90,5 +90,43 @@ test('manifest generator writes the managed-truthsets files', () => {
   }
 });
 
+test('runtime DB and journal bootstrap from samples only when missing', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'finbook-bootstrap-'));
+  try {
+    const dbDir = path.join(tmpDir, 'DB');
+    fs.mkdirSync(dbDir, { recursive: true });
+
+    const liveDbPath = path.join(dbDir, 'finbook.json');
+    const liveJournalPath = path.join(dbDir, 'finbook.journal.jsonl');
+    const sampleDbPath = api.getSampleDbFilePath(liveDbPath);
+    const sampleJournalPath = api.getSampleJournalFilePath(liveDbPath);
+
+    const sampleDb = makeDb();
+    sampleDb.config.Defaults = [{ Key: 'sample-default', Broker: 'Interactive Brokers', Note: 'Bootstrap sample' }];
+    api.saveDb(sampleDbPath, sampleDb);
+    fs.writeFileSync(sampleJournalPath, `${JSON.stringify(api.createJournalEntry('finbook.patch_config', { patch: { bootstrapSeed: true } }, { surface: 'sample' }))}\n`, 'utf-8');
+
+    const first = api.ensureRuntimeFilesFromSamples(liveDbPath);
+    assert(first.dbCreated === true, 'expected live DB to be created from sample');
+    assert(first.journalCreated === true, 'expected live journal to be created from sample');
+    assert(fs.existsSync(liveDbPath), 'expected live DB file to exist');
+    assert(fs.existsSync(liveJournalPath), 'expected live journal file to exist');
+
+    const originalLiveDbText = fs.readFileSync(liveDbPath, 'utf-8');
+    const originalLiveJournalText = fs.readFileSync(liveJournalPath, 'utf-8');
+
+    api.saveDb(liveDbPath, { config: { preserved: true }, accounts: [] });
+    fs.writeFileSync(liveJournalPath, '{"entryId":"live","version":1,"operation":"finbook.patch_config","payload":{"patch":{"preserved":true}},"createdAt":"2026-01-01T00:00:00.000Z"}\n', 'utf-8');
+
+    const second = api.ensureRuntimeFilesFromSamples(liveDbPath);
+    assert(second.dbCreated === false, 'expected existing live DB to remain untouched');
+    assert(second.journalCreated === false, 'expected existing live journal to remain untouched');
+    assert(fs.readFileSync(liveDbPath, 'utf-8') !== originalLiveDbText, 'expected modified live DB to remain preserved');
+    assert(fs.readFileSync(liveJournalPath, 'utf-8') !== originalLiveJournalText, 'expected modified live journal to remain preserved');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 console.log(`\nPassed: ${passed}, Failed: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

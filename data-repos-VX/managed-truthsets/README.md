@@ -25,8 +25,15 @@ at `managed-truthsets/mcp-executable-manifest.json`, so these generated files
 must exist in the repo unless every consumer is changed to build them first.
 
 `DB/finbook.json` and `DB/finbook.journal.jsonl` are live runtime state and are
-gitignored. Keep checked-in sample data in `DB/finbook.sample.json` for schema,
-tooling, and validation examples.
+gitignored. Keep checked-in sample data in `DB/finbook.sample.json` and
+`DB/finbook.sample.journal.jsonl` for schema, tooling, validation examples, and
+first-run starter data.
+
+At build/setup time, `scripts/generate-mcp-manifests.cjs` now performs a
+one-time bootstrap of the live runtime files from those checked-in samples. It
+copies `DB/finbook.sample.json` to `DB/finbook.json` and
+`DB/finbook.sample.journal.jsonl` to `DB/finbook.journal.jsonl` only when the
+live target file does not already exist. Existing live data is never replaced.
 
 Recommended commands:
 

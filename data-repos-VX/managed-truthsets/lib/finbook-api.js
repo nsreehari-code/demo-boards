@@ -18,6 +18,7 @@ function loadDb(filePath) {
 
 function saveDb(filePath, db) {
   const resolved = path.resolve(filePath);
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
   fs.writeFileSync(resolved, JSON.stringify(db, null, 2), 'utf-8');
   return resolved;
 }
@@ -26,6 +27,48 @@ function getJournalFilePath(dbFilePath) {
   const resolved = path.resolve(dbFilePath);
   const parsed = path.parse(resolved);
   return path.join(parsed.dir, `${parsed.name}.journal.jsonl`);
+}
+
+function getSampleDbFilePath(dbFilePath) {
+  const resolved = path.resolve(dbFilePath);
+  const parsed = path.parse(resolved);
+  return path.join(parsed.dir, `${parsed.name}.sample${parsed.ext || '.json'}`);
+}
+
+function getSampleJournalFilePath(dbFilePath) {
+  const resolved = path.resolve(dbFilePath);
+  const parsed = path.parse(resolved);
+  return path.join(parsed.dir, `${parsed.name}.sample.journal.jsonl`);
+}
+
+function ensureRuntimeFilesFromSamples(dbFilePath, options = {}) {
+  const resolvedDbPath = path.resolve(dbFilePath);
+  const resolvedJournalPath = getJournalFilePath(resolvedDbPath);
+  const sampleDbPath = path.resolve(options.sampleDbPath || getSampleDbFilePath(resolvedDbPath));
+  const sampleJournalPath = path.resolve(options.sampleJournalPath || getSampleJournalFilePath(resolvedDbPath));
+
+  fs.mkdirSync(path.dirname(resolvedDbPath), { recursive: true });
+
+  const result = {
+    dbPath: resolvedDbPath,
+    journalPath: resolvedJournalPath,
+    sampleDbPath,
+    sampleJournalPath,
+    dbCreated: false,
+    journalCreated: false
+  };
+
+  if (!fs.existsSync(resolvedDbPath) && fs.existsSync(sampleDbPath)) {
+    fs.copyFileSync(sampleDbPath, resolvedDbPath);
+    result.dbCreated = true;
+  }
+
+  if (!fs.existsSync(resolvedJournalPath) && fs.existsSync(sampleJournalPath)) {
+    fs.copyFileSync(sampleJournalPath, resolvedJournalPath);
+    result.journalCreated = true;
+  }
+
+  return result;
 }
 
 function normalizeJournalEntry(entry) {
@@ -1066,7 +1109,11 @@ function exportAccount(db, accountCode, fy, opts = {}) {
 module.exports = {
   core,
   loadDb,
+  saveDb,
   getJournalFilePath,
+  getSampleDbFilePath,
+  getSampleJournalFilePath,
+  ensureRuntimeFilesFromSamples,
   loadJournal,
   saveJournal,
   appendJournalEntries,
