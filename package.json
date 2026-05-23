@@ -25,7 +25,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "latest",
     "better-sqlite3": "^12.9.0",
-    "yaml-flow": "^8.4.13"
+    "yaml-flow": "^8.4.14"
   },
   "devDependencies": {
     "http-server": "^14.1.1"

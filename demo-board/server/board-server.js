@@ -462,6 +462,12 @@ function createFsCardSource(cardsDir, cardPattern = null) {
         })
         .filter(Boolean);
     },
+    writeCard(cardId, card) {
+      ensureDirectoryExists(cardsDir, 'seedCardsDir');
+      const filePath = path.join(cardsDir, `${cardId}.json`);
+      fs.writeFileSync(filePath, `${JSON.stringify(card, null, 2)}\n`, 'utf-8');
+      return filePath;
+    },
   };
 }
 
@@ -894,6 +900,30 @@ function getSeedCardsForBoard(boardId) {
   return { cardsDir, cards };
 }
 
+function getRuntimeCardsForBoard(boardId) {
+  const { service } = runtime.requireBoardService(boardId);
+  const existing = service.cardStore.get({});
+  if (existing.status !== 'success') {
+    return {
+      cards: [],
+      error: existing.error || 'Unable to read runtime cards',
+      statusCode: 500,
+    };
+  }
+
+  let cards = Array.isArray(existing.data?.cards) ? existing.data.cards : [];
+  if (selectedCardsPattern) {
+    const cardRegex = wildcardToRegExp(selectedCardsPattern);
+    cards = cards.filter((card) => cardRegex.test(typeof card?.id === 'string' ? card.id.trim() : ''));
+  }
+
+  return {
+    cards,
+    error: null,
+    statusCode: null,
+  };
+}
+
 function upsertCardInRuntimeStore(cardStore, card) {
   const existing = cardStore.get({});
   const existingCards = Array.isArray(existing.data?.cards) ? existing.data.cards : [];
@@ -937,7 +967,7 @@ async function patchCardViaApi(boardId, cardId, card) {
   };
 }
 
-async function resyncSeedCards(boardId) {
+async function resetRuntimeFromSeedCards(boardId) {
   const { service } = runtime.requireBoardService(boardId);
   const { cardsDir, cards } = getSeedCardsForBoard(boardId);
 
@@ -945,6 +975,7 @@ async function resyncSeedCards(boardId) {
     return {
       boardId,
       cardsDir: null,
+      statusCode: 400,
       synced: 0,
       skipped: 0,
       results: [],
@@ -991,6 +1022,66 @@ async function resyncSeedCards(boardId) {
   };
 }
 
+async function reverseSaveRuntimeToSeedCards(boardId) {
+  const { cardsDir } = getSeedCardsForBoard(boardId);
+
+  if (!cardsDir) {
+    return {
+      boardId,
+      cardsDir: null,
+      statusCode: 400,
+      saved: 0,
+      skipped: 0,
+      results: [],
+      error: 'Board has no seedCardsDir configured',
+    };
+  }
+
+  const runtimeCards = getRuntimeCardsForBoard(boardId);
+  if (runtimeCards.error) {
+    return {
+      boardId,
+      cardsDir,
+      statusCode: runtimeCards.statusCode || 500,
+      saved: 0,
+      skipped: 0,
+      results: [],
+      error: runtimeCards.error,
+    };
+  }
+
+  const cardSource = createFsCardSource(cardsDir, selectedCardsPattern);
+  const results = [];
+
+  for (const card of runtimeCards.cards) {
+    const cardId = typeof card?.id === 'string' ? card.id.trim() : '';
+    if (!cardId) {
+      results.push({ ok: false, cardId: null, error: 'Runtime card is missing id' });
+      continue;
+    }
+
+    try {
+      const filePath = cardSource.writeCard(cardId, card);
+      results.push({ ok: true, cardId, step: 'write', filePath });
+    } catch (error) {
+      results.push({
+        ok: false,
+        cardId,
+        step: 'write',
+        error: String(error?.message || error),
+      });
+    }
+  }
+
+  return {
+    boardId,
+    cardsDir,
+    saved: results.filter((result) => result.ok).length,
+    skipped: results.filter((result) => !result.ok).length,
+    results,
+  };
+}
+
 const server = http.createServer((req, res) => {
   const method = req.method || 'GET';
   const url = new URL(req.url || '/', 'http://localhost');
@@ -1017,14 +1108,37 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  const resyncMatch = pathname.match(/^\/api\/boards\/([^/]+)\/resync-seedcards$/);
-  if (method === 'POST' && resyncMatch) {
-    const boardId = decodeURIComponent(resyncMatch[1] || '').trim();
+  const resetRuntimeFromSeedCardsMatch = pathname.match(/^\/api\/boards\/([^/]+)\/reset-runtime-from-seed-cards$/);
+  if (method === 'POST' && resetRuntimeFromSeedCardsMatch) {
+    const boardId = decodeURIComponent(resetRuntimeFromSeedCardsMatch[1] || '').trim();
     (async () => {
       try {
-        const result = await resyncSeedCards(boardId);
+        const result = await resetRuntimeFromSeedCards(boardId);
         if (result.error) {
-          jsonReply(res, 400, result);
+          jsonReply(res, Number(result.statusCode) || 400, result);
+          return;
+        }
+        const hasErrors = result.results.some((entry) => !entry.ok);
+        jsonReply(res, hasErrors ? 207 : 200, result);
+      } catch (error) {
+        const statusCode = Number(error?.statusCode) || 500;
+        jsonReply(res, statusCode, {
+          error: String(error?.message || error),
+          boardId,
+        });
+      }
+    })();
+    return;
+  }
+
+  const reverseSaveRuntimeToSeedCardsMatch = pathname.match(/^\/api\/boards\/([^/]+)\/reverse-save-runtime-to-seed-cards$/);
+  if (method === 'POST' && reverseSaveRuntimeToSeedCardsMatch) {
+    const boardId = decodeURIComponent(reverseSaveRuntimeToSeedCardsMatch[1] || '').trim();
+    (async () => {
+      try {
+        const result = await reverseSaveRuntimeToSeedCards(boardId);
+        if (result.error) {
+          jsonReply(res, Number(result.statusCode) || 400, result);
           return;
         }
         const hasErrors = result.results.some((entry) => !entry.ok);
@@ -1057,7 +1171,8 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`  GET  ${apiBasePath}/:boardId/init-board`);
   console.log(`  GET  ${apiBasePath}/:boardId/sse`);
   console.log(`  GET  ${apiBasePath}/:boardId/board-status`);
-  console.log(`  POST ${apiBasePath}/:boardId/resync-seedcards`);
+  console.log(`  POST ${apiBasePath}/:boardId/reset-runtime-from-seed-cards`);
+  console.log(`  POST ${apiBasePath}/:boardId/reverse-save-runtime-to-seed-cards`);
   console.log(`  GET  ${apiBasePath}/:boardId/cards/:id`);
   console.log(`  PATCH ${apiBasePath}/:boardId/cards/:id       <- update card content/data`);
   console.log(`  POST ${apiBasePath}/:boardId/cards/:id/retrigger <- refresh/restart card`);

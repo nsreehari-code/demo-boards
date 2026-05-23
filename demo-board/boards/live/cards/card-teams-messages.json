@@ -2,6 +2,7 @@
   "id": "card-teams-messages",
   "meta": {
     "title": "Teams Channel Messages",
+    "truthset": true,
     "tags": [
       "teams",
       "graph"
