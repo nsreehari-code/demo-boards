@@ -19,21 +19,49 @@ It helps answer three concrete questions:
 
 1. Which source kinds does this card support?
 2. Which fields are valid for the chosen kind?
-3. How do you probe a source without running the full card workflow?
+3. How do you preflight one source without running the full card workflow?
 
 Do not guess source fields from examples or prose. Query the runtime
 capabilities and use the declared schema they expose.
 
-## Primary Command
+This skill uses the modern board CLI model:
+
+- capability discovery uses `--base-ref <board-ref>`
+- source preflight uses stdin payloads
+- targeted source selection uses `--source-idx <n>`
+
+Do not use the retired runtime-dir, card-file, or bind-name probing workflow in this skill.
+
+## Command Surface
+
+Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`.
+
+### Discover supported source kinds and fields
 
 ```bash
-npx board-live-cards-cli describe-task-executor-capabilities --rg <board-runtime-dir>
+node ./.github/scripts/board-live-cards-cli.mjs describe-task-executor-capabilities --base-ref <board-ref>
 ```
 
-- `--rg` points at the board runtime directory.
+- `--base-ref` identifies the board whose configured task executor should be queried.
 
 The command prints the supported source kinds and field shapes
 as JSON.
+
+### Lightweight source readiness preflight
+
+```bash
+cat payload.json | node ./.github/scripts/board-live-cards-cli.mjs probe-source-preflight --source-idx 0
+```
+
+Use this when you want a lightweight configuration or reachability check for one source.
+
+### Actual source run preflight
+
+```bash
+cat payload.json | node ./.github/scripts/board-live-cards-cli.mjs run-source-preflight --source-idx 0
+```
+
+Use this as the authoritative preflight for a real authored source. It exercises the source's actual fetch path.
 
 ## How To Read The Output
 
@@ -73,6 +101,7 @@ The important parts of the response are:
 - Do not add `supports` to card `source_defs[]`; it is discovery metadata only.
 - Do not assume fields from another kind also work here.
 - If validation rejects a field, remove or rename it instead of trying to force it through.
+- Use `describe-task-executor-capabilities` before guessing source kinds or source-specific fields.
 
 ## Common Source Kinds
 
@@ -86,47 +115,69 @@ the current board/runtime:
 - `foundry` for Azure AI Foundry agent or prompt execution.
 - `sqlite` for local SQLite queries.
 
-## Probe A Source
+## Source Preflight Payload
 
-After authoring a `source_def`, probe it directly before relying on it in
-the full card flow.
+Source preflight commands in this skill are stdin-driven. Supply a payload with the candidate card and the smallest projections needed to exercise the target source.
 
-### Probe the first source on a card
-
-```bash
-npx board-live-cards-cli probe-source --card <path-to-card.json> --rg <board-runtime-dir>
+```json
+{
+  "card-content": {
+    "id": "card-example",
+    "card_data": {},
+    "source_defs": [
+      {
+        "bindTo": "quotes",
+        "kind": "urls",
+        "outputFile": "quotes.json",
+        "projections": {
+          "holdings": "requires.holdings"
+        }
+      }
+    ]
+  },
+  "mock-projections": {
+    "holdings": [
+      { "ticker": "AAPL", "quantity": 10 }
+    ]
+  }
+}
 ```
 
-### Probe a specific source by bind name
+Payload rules:
+
+- `card-content` must be a JSON object.
+- `mock-projections` should be an object and may be empty.
+- `--source-idx <n>` selects the zero-based source index from `source_defs[]`.
+- If you know the source by `bindTo` name, inspect the card and resolve it to its zero-based index before running preflight.
+
+## How To Preflight A Source
+
+After authoring a `source_def`, preflight it directly before relying on it in the full card flow.
+
+### Lightweight readiness check
 
 ```bash
-npx board-live-cards-cli probe-source --card <path-to-card.json> --source-bind <bindTo-name> --rg <board-runtime-dir>
+cat payload.json | node ./.github/scripts/board-live-cards-cli.mjs probe-source-preflight --source-idx 0
 ```
 
-### Probe with mock projections
-
-If the source depends on upstream projections, supply a minimal mock
-payload so the source can run in isolation:
+### Actual fetch-path check
 
 ```bash
-npx board-live-cards-cli probe-source --card <path-to-card.json> \
-  --mock-projections '{"holdings":[{"ticker":"AAPL","quantity":10}]}' \
-  --rg <board-runtime-dir>
+cat payload.json | node ./.github/scripts/board-live-cards-cli.mjs run-source-preflight --source-idx 0
 ```
 
-- `--mock-projections` supplies the `_projections` values the source would normally receive from upstream card data.
-- `--source-idx` selects a source by zero-based index.
-- `--source-bind` selects a source by `bindTo` name.
-- `--out <result.json>` writes the raw fetch result for inspection.
+Use `run-source-preflight` as the default when deciding whether the authored source is actually correct.
 
 ## Typical Workflow
 
-1. Run the capabilities command above.
+1. Run `describe-task-executor-capabilities --base-ref <board-ref>`.
 2. Choose the source kind that matches the data you need.
 3. Build the `source_def` using `commonSourceDefFields` plus that kind's `inputSchema`.
 4. Validate the card and fix unsupported fields.
-5. Probe the source with minimal projections.
-6. Only then wire downstream compute or view logic against the fetched result.
+5. Build the smallest stdin payload with `card-content` and `mock-projections` for the touched source.
+6. Run `run-source-preflight --source-idx <n>` for the target source.
+7. Use `probe-source-preflight --source-idx <n>` only when a lighter readiness or configuration check is sufficient.
+8. Only then wire downstream compute or view logic against the fetched result.
 
 ## Relationship To Other Skills
 
