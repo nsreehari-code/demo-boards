@@ -8,7 +8,7 @@
       "label": "Live",
       "setup": {
         "setupRoot": "./test/live.test.board-ws",
-        "aiWorkspaceRoot": "./test/live.test.board-ws/copilot-workspaces",
+        "aiWorkspaceRoot": "copilot-workspaces",
         "cardStore": "cards/store",
         "artifactsStore": "cards/files",
         "boardRuntime": "runtime",

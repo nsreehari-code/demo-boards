@@ -60,7 +60,7 @@
     "copilot_assistant": {
       "description": "Run the Copilot-backed assistant logic, which persists its own assistant reply into chat storage",
       "server_reply_contract_comment": "No reply text is expected back from assistant.js. The assistant must write user-visible replies through chat store only and exit success or error.",
-      "expects_data": ["boardId", "cardId", "baseRef", "aiWorkspaceRoot", "boardSetupRoot", "cardStoreRef", "chatStoreRef", "artifactsStoreRef", "scratchStoreRef", "chatFlowRoot", "chatCopilotTimeoutMs"],
+      "expects_data": ["boardId", "cardId", "baseRef", "aiWorkspaceRoot", "boardSetupRoot", "cardStoreRef", "chatStoreRef", "artifactsStoreRef", "scratchStoreRef", "chatFlowRoot", "watchPartyFilesForChatDir", "chatCopilotTimeoutMs"],
       "produces_data": ["assistantHandled"],
       "input_validations": [
         "$type(aiWorkspaceRoot) = \"string\" and $length(aiWorkspaceRoot) > 0",
@@ -68,7 +68,8 @@
         "$type(cardStoreRef) = \"string\" and $length(cardStoreRef) > 0",
         "$type(chatStoreRef) = \"string\" and $length(chatStoreRef) > 0",
         "$type(scratchStoreRef) = \"string\" and $length(scratchStoreRef) > 0",
-        "$type(chatFlowRoot) = \"string\" and $length(chatFlowRoot) > 0"
+        "$type(chatFlowRoot) = \"string\" and $length(chatFlowRoot) > 0",
+        "$type(watchPartyFilesForChatDir) = \"string\" and $length(watchPartyFilesForChatDir) > 0"
       ],
       "handler": {
         "type": "ref",
@@ -79,7 +80,7 @@
         },
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/copilot-chat/assistant.js'"],
-          "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'baseRef': baseRef, 'aiWorkspaceRoot': aiWorkspaceRoot, 'boardSetupRoot': boardSetupRoot, 'cardStoreRef': cardStoreRef, 'chatStoreRef': chatStoreRef, 'artifactsStoreRef': artifactsStoreRef, 'scratchStoreRef': scratchStoreRef, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs }"
+          "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'baseRef': baseRef, 'aiWorkspaceRoot': aiWorkspaceRoot, 'boardSetupRoot': boardSetupRoot, 'cardStoreRef': cardStoreRef, 'chatStoreRef': chatStoreRef, 'artifactsStoreRef': artifactsStoreRef, 'scratchStoreRef': scratchStoreRef, 'chatFlowRoot': chatFlowRoot, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs }"
         },
         "meta": "chat-handler"
       },
@@ -92,7 +93,7 @@
     "probe_assistant": {
       "description": "Run the deterministic probe assistant logic, which persists its own assistant reply into chat storage",
       "server_reply_contract_comment": "No reply text is expected back from probe.js. The probe must write user-visible replies through chat store only and exit success or error.",
-      "expects_data": ["aiWorkspaceRoot", "cardStoreRef", "chatStoreRef", "cardId", "chatFlowRoot", "userText"],
+      "expects_data": ["aiWorkspaceRoot", "cardStoreRef", "chatStoreRef", "cardId", "chatFlowRoot", "userText", "watchPartyFilesForChatDir"],
       "produces_data": ["assistantHandled"],
       "input_validations": [
         "$type(aiWorkspaceRoot) = \"string\" and $length(aiWorkspaceRoot) > 0",
@@ -100,7 +101,8 @@
         "$type(chatStoreRef) = \"string\" and $length(chatStoreRef) > 0",
         "$type(cardId) = \"string\" and $length(cardId) > 0",
         "$type(chatFlowRoot) = \"string\" and $length(chatFlowRoot) > 0",
-        "$type(userText) = \"string\" and $length($trim(userText)) > 0"
+        "$type(userText) = \"string\" and $length($trim(userText)) > 0",
+        "$type(watchPartyFilesForChatDir) = \"string\" and $length(watchPartyFilesForChatDir) > 0"
       ],
       "handler": {
         "type": "ref",
@@ -111,7 +113,7 @@
         },
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/copilot-chat/probe.js'"],
-          "stdinTemplate": "{ 'aiWorkspaceRoot': aiWorkspaceRoot, 'cardStoreRef': cardStoreRef, 'chatStoreRef': chatStoreRef, 'cardId': cardId, 'userText': userText }"
+          "stdinTemplate": "{ 'aiWorkspaceRoot': aiWorkspaceRoot, 'cardStoreRef': cardStoreRef, 'chatStoreRef': chatStoreRef, 'cardId': cardId, 'userText': userText, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir }"
         },
         "meta": "chat-handler"
       },

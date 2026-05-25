@@ -8,6 +8,10 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import {
+  COPILOT_OUTPUT_CHANNEL,
+  parseCopilotOutputFileName,
+} from '../../../watchparty-constants.mjs';
 
 import {
   createMultiBoardServerRuntime,
@@ -19,8 +23,10 @@ import {
   createFsBoardChatStorage,
   createNodeSpawnInvocationAdapter,
   createArtifactsStore,
+  evaluateArgsMassaging,
   invokeExecutionRef,
   parseRef,
+  resolveWhatToRunValue,
   serializeRef,
 } from 'yaml-flow/board-live-cards-node';
 import {
@@ -97,6 +103,8 @@ const DEFAULT_SETUP_LEAVES = {
   scratchStore: 'scratch',
   archivalStore: 'runtime-archive',
 };
+
+const WATCHPARTY_FILES_FOR_CHAT_DIRNAME = 'watchparty-files-for-chat';
 
 function resolveConfiguredBoardSetupRoot(cfg, boardId, boardSetupRootOverride) {
   if (boardSetupRootOverride) {
@@ -522,6 +530,238 @@ function createNamedPipeNotificationTransport() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Watchparty broker — per-board registry of SSE writers and channel
+// subscriptions, wired via onSse*/onChannel* hooks in v8.4.15+.
+// ---------------------------------------------------------------------------
+function createWatchpartyBroker() {
+  const writers = new Map();       // clientId → writer fn
+  const subscriptions = new Map(); // `${channelName}::${cardId}` → Set<clientId>
+
+  function subKey(channelName, cardId) {
+    return cardId ? `${channelName}::${cardId}` : channelName;
+  }
+
+  return {
+    onConnect(clientId, writer) {
+      writers.set(clientId, writer);
+    },
+    onDisconnect(clientId) {
+      writers.delete(clientId);
+      for (const [key, clients] of subscriptions) {
+        clients.delete(clientId);
+        if (clients.size === 0) subscriptions.delete(key);
+      }
+    },
+    hasClient(clientId) {
+      return writers.has(clientId);
+    },
+    onSubscribe(clientId, channelName, params) {
+      const key = subKey(channelName, params?.cardId);
+      if (!subscriptions.has(key)) subscriptions.set(key, new Set());
+      subscriptions.get(key).add(clientId);
+      return true;
+    },
+    onUnsubscribe(clientId, channelName, params) {
+      const key = subKey(channelName, params?.cardId);
+      const clients = subscriptions.get(key);
+      if (!clients) return false;
+      clients.delete(clientId);
+      if (clients.size === 0) subscriptions.delete(key);
+      return true;
+    },
+    emit(channelName, cardId, eventPayload) {
+      const key = subKey(channelName, cardId);
+      const clients = subscriptions.get(key);
+      if (!clients?.size) return 0;
+      const frame = {
+        kind: 'notification-batch',
+        notifications: [{ kind: 'card_watchparty', cardId, channel: channelName, ...eventPayload }],
+      };
+      let sent = 0;
+      for (const clientId of [...clients]) {
+        const writer = writers.get(clientId);
+        if (!writer) continue;
+        try { writer(frame); sent++; } catch { writers.delete(clientId); clients.delete(clientId); }
+      }
+      return sent;
+    },
+  };
+}
+
+function createWatchpartyDirectoryWatcher(broker, watchDir) {
+  let watcher = null;
+  let scanTimer = null;
+  const timers = new Map();
+  const lastSnapshots = new Map();
+  const filePollers = new Set();
+
+  function clearTimer(fileName) {
+    const existing = timers.get(fileName);
+    if (existing) {
+      clearTimeout(existing);
+      timers.delete(fileName);
+    }
+  }
+
+  function stopFilePoller(fileName) {
+    if (!filePollers.has(fileName)) {
+      return;
+    }
+    filePollers.delete(fileName);
+    try {
+      fs.unwatchFile(path.join(watchDir, fileName));
+    } catch {}
+  }
+
+  function ensureFilePoller(fileName) {
+    if (filePollers.has(fileName)) {
+      return;
+    }
+    const filePath = path.join(watchDir, fileName);
+    fs.watchFile(filePath, { interval: 100 }, (curr, prev) => {
+      if (
+        curr.mtimeMs !== prev.mtimeMs
+        || curr.size !== prev.size
+        || curr.nlink !== prev.nlink
+      ) {
+        emitFileSnapshot(fileName);
+        if (curr.nlink === 0) {
+          stopFilePoller(fileName);
+        }
+      }
+    });
+    filePollers.add(fileName);
+  }
+
+  function emitFileSnapshot(fileName) {
+    clearTimer(fileName);
+    const cardId = parseCopilotOutputFileName(fileName);
+    if (!cardId) {
+      return;
+    }
+
+    const filePath = path.join(watchDir, fileName);
+    let text = '';
+    let clear = false;
+    try {
+      if (fs.existsSync(filePath)) {
+        text = fs.readFileSync(filePath, 'utf-8');
+      } else {
+        clear = true;
+      }
+    } catch {
+      return;
+    }
+
+    const snapshotKey = clear ? '__CLEAR__' : text;
+    if (lastSnapshots.get(fileName) === snapshotKey) {
+      return;
+    }
+    lastSnapshots.set(fileName, snapshotKey);
+    if (clear) {
+      stopFilePoller(fileName);
+    }
+
+    broker.emit(COPILOT_OUTPUT_CHANNEL, cardId, clear ? { clear: true } : { replace: true, payload: { text } });
+  }
+
+  function scanWatchDir() {
+    const fileNames = new Set(lastSnapshots.keys());
+    const existingWatchedFiles = new Set();
+    try {
+      if (fs.existsSync(watchDir)) {
+        for (const entry of fs.readdirSync(watchDir, { withFileTypes: true })) {
+          if (entry.isFile()) {
+            fileNames.add(entry.name);
+          }
+        }
+      }
+    } catch {
+      return;
+    }
+
+    for (const fileName of fileNames) {
+      if (!parseCopilotOutputFileName(fileName)) {
+        continue;
+      }
+      if (fs.existsSync(path.join(watchDir, fileName))) {
+        existingWatchedFiles.add(fileName);
+        ensureFilePoller(fileName);
+      }
+      emitFileSnapshot(fileName);
+    }
+
+    for (const fileName of [...filePollers]) {
+      if (!existingWatchedFiles.has(fileName)) {
+        stopFilePoller(fileName);
+      }
+    }
+  }
+
+  return {
+    ensureStarted() {
+      if (watcher) {
+        return;
+      }
+
+      ensureDirectoryExists(watchDir, 'watchparty directory');
+      watcher = fs.watch(watchDir, (eventType, fileNameValue) => {
+        const fileName = typeof fileNameValue === 'string' ? fileNameValue.trim() : '';
+        if (!fileName) {
+          return;
+        }
+
+        if (parseCopilotOutputFileName(fileName)) {
+          ensureFilePoller(fileName);
+        }
+
+        clearTimer(fileName);
+        const timer = setTimeout(() => emitFileSnapshot(fileName), eventType === 'rename' ? 40 : 0);
+        timers.set(fileName, timer);
+      });
+      watcher.on('error', () => {
+        try { watcher?.close(); } catch {}
+        watcher = null;
+      });
+      scanTimer = setInterval(scanWatchDir, 100);
+      scanWatchDir();
+    },
+    close() {
+      for (const fileName of timers.keys()) {
+        clearTimer(fileName);
+      }
+      for (const fileName of [...filePollers]) {
+        stopFilePoller(fileName);
+      }
+      if (scanTimer) {
+        clearInterval(scanTimer);
+        scanTimer = null;
+      }
+      if (watcher) {
+        try { watcher.close(); } catch {}
+        watcher = null;
+      }
+    },
+  };
+}
+
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      try {
+        const text = Buffer.concat(chunks).toString('utf-8');
+        resolve(text ? JSON.parse(text) : {});
+      } catch {
+        resolve({});
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 function createConfigBackedServerMetaStore(entries) {
   const store = new Map();
   const boards = entries.map(([id, cfg]) => ({ id, label: cfg?.label || id }));
@@ -605,8 +845,151 @@ function invokeExecutionRefAsync(ref, args, opts) {
     cwd: opts?.cwd || BOARD_ROOT,
     timeoutMs: typeof opts?.timeoutMs === 'number' ? opts.timeoutMs : undefined,
     label: 'board-server-chat-flow',
+    transports: {
+      'local-node': invokeExecutionRefViaExecFile,
+      'local-python': invokeExecutionRefViaExecFile,
+      'local-process': invokeExecutionRefViaExecFile,
+    },
   });
 }
+
+function invokeExecutionRefViaExecFile(ref, args, opts) {
+  const label = opts?.label || 'board-server-chat-flow';
+  let massaged;
+  try {
+    massaged = evaluateArgsMassaging(
+      ref.argsMassaging,
+      {
+        ...args,
+        whatToRun: resolveWhatToRunValue(ref.whatToRun),
+        ...(ref.extra ? { extra: ref.extra } : {}),
+      },
+      label,
+    );
+  } catch (error) {
+    return Promise.resolve(toExecutionFailure(error instanceof Error ? error.message : String(error)));
+  }
+
+  let command;
+  let baseArgs;
+  try {
+    ({ command, baseArgs } = resolveAsyncExecutionCommand(ref));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return Promise.resolve(toExecutionFailure(`[${label}] ref resolution failed: ${message}`));
+  }
+
+  const commandArgs = [...baseArgs, ...(massaged.cmdArgs ?? [])];
+  const stdin = JSON.stringify(massaged.stdin ?? args);
+
+  return new Promise((resolve) => {
+    const child = spawn(command, commandArgs, {
+      cwd: opts?.cwd || BOARD_ROOT,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: isShellWrappedCommand(command),
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const timeoutMs = typeof opts?.timeoutMs === 'number' ? opts.timeoutMs : 30_000;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      try { child.kill(); } catch {}
+      resolve(toExecutionFailure(`[${label}] timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf-8');
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf-8');
+    });
+    child.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(toExecutionFailure(`[${label}] ${error.message}`));
+    });
+    child.on('close', (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        const details = stderr.trim() || stdout.trim() || `process exited ${code}`;
+        resolve(toExecutionFailure(`[${label}] ${details}`));
+        return;
+      }
+      resolve(parseExecutionStdout(stdout));
+    });
+
+    child.stdin.end(stdin);
+  });
+}
+
+function resolveAsyncExecutionCommand(ref) {
+  const whatToRun = resolveWhatToRunValue(ref.whatToRun);
+  switch (ref.howToRun) {
+    case 'local-node':
+      return { command: process.execPath, baseArgs: [whatToRun] };
+    case 'local-python':
+      return { command: process.platform === 'win32' ? 'python' : 'python3', baseArgs: [whatToRun] };
+    case 'local-process':
+      return { command: whatToRun, baseArgs: [] };
+    default:
+      throw new Error(`unsupported async transport: ${ref.howToRun}`);
+  }
+}
+
+function isShellWrappedCommand(command) {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
+}
+
+function toExecutionFailure(message) {
+  return { result: 'failure', data: { error: message } };
+}
+
+function parseExecutionStdout(stdout) {
+  const text = String(stdout || '').trim();
+  if (!text) {
+    return { result: 'success', data: {} };
+  }
+
+  try {
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const parsed = JSON.parse(lines[lines.length - 1]);
+    if (
+      parsed
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && typeof parsed.result === 'string'
+      && parsed.data
+      && typeof parsed.data === 'object'
+      && !Array.isArray(parsed.data)
+    ) {
+      return parsed;
+    }
+    return {
+      result: 'success',
+      data: parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : { stdout: text },
+    };
+  } catch {
+    return { result: 'success', data: { stdout: text } };
+  }
+}
+
+const watchpartyBrokers = new Map(); // boardId → WatchpartyBroker
+const watchpartyDirectoryWatchers = new Map(); // boardId → directory watcher
 
 const runtime = createMultiBoardServerRuntime({
   apiBasePath,
@@ -647,8 +1030,10 @@ const runtime = createMultiBoardServerRuntime({
     const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
     const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
     const scratchStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath });
+    const watchPartyFilesForChatDir = path.join(boardSetupPaths.setupRoot, WATCHPARTY_FILES_FOR_CHAT_DIRNAME);
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
     ensureBoardSetupPaths(boardId, boardSetupPaths);
+    ensureDirectoryExists(watchPartyFilesForChatDir, `boards.${boardId}.watchPartyFilesForChatDir`);
     const chatStorage = createFsBoardChatStorage(boardSetupPaths.chatStorePath);
     const flowRunner = createUserTextAwareChatFlowRunner(
       chatStorage,
@@ -675,6 +1060,7 @@ const runtime = createMultiBoardServerRuntime({
       projectRoot: BOARD_ROOT,
       chatFlowRoot,
       serverUrl: `http://127.0.0.1:${PORT}`,
+      watchPartyFilesForChatDir,
       chatCopilotTimeoutMs,
       ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
     };
@@ -683,6 +1069,10 @@ const runtime = createMultiBoardServerRuntime({
     const boards = [baseCfg];
 
     demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot: boardSetupPaths.setupRoot, aiWorkspaceRoot });
+
+    const broker = createWatchpartyBroker();
+    watchpartyBrokers.set(boardId, broker);
+    watchpartyDirectoryWatchers.set(boardId, createWatchpartyDirectoryWatcher(broker, watchPartyFilesForChatDir));
 
     const singleBoardRuntime = createSingleBoardServerRuntime({
       apiBasePath: `${apiBasePath}/${boardId}`,
@@ -694,6 +1084,10 @@ const runtime = createMultiBoardServerRuntime({
       notificationTransport,
       logger,
       serverUrl: `http://127.0.0.1:${PORT}`,
+      onSseClientConnected: (clientId, writer) => broker.onConnect(clientId, writer),
+      onSseClientDisconnected: (clientId) => broker.onDisconnect(clientId),
+      onChannelSubscribed: (clientId, channelName, params) => broker.onSubscribe(clientId, channelName, params),
+      onChannelUnsubscribed: (clientId, channelName, params) => broker.onUnsubscribe(clientId, channelName, params),
       executionExtra: {
         baseRef,
         aiWorkspaceRoot,
@@ -709,6 +1103,7 @@ const runtime = createMultiBoardServerRuntime({
         archivalStore: boardSetupPaths.archivalStore,
         projectRoot: BOARD_ROOT,
         chatFlowRoot,
+        watchPartyFilesForChatDir,
         chatCopilotTimeoutMs,
         ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
       },
@@ -1149,6 +1544,89 @@ const server = http.createServer((req, res) => {
           error: String(error?.message || error),
           boardId,
         });
+      }
+    })();
+    return;
+  }
+
+  const watchpartyCardChannelMatch = pathname.match(/^\/api\/boards\/([^/]+)\/cards\/([^/]+)\/watch-channel\/([^/]+)\/(subscribe|unsubscribe)-sse$/);
+  if (method === 'POST' && watchpartyCardChannelMatch) {
+    const boardId = decodeURIComponent(watchpartyCardChannelMatch[1] || '').trim();
+    const cardId = decodeURIComponent(watchpartyCardChannelMatch[2] || '').trim();
+    const channelName = decodeURIComponent(watchpartyCardChannelMatch[3] || '').trim();
+    const action = watchpartyCardChannelMatch[4] || '';
+    (async () => {
+      try {
+        const body = await readRequestBody(req);
+        const clientId = typeof body?.clientId === 'string' ? body.clientId.trim() : '';
+        const broker = watchpartyBrokers.get(boardId);
+        if (!clientId) {
+          jsonReply(res, 400, { error: 'clientId is required' });
+          return;
+        }
+        if (!broker) {
+          jsonReply(res, 404, { error: `No watchparty broker for board: ${boardId}` });
+          return;
+        }
+        if (action === 'subscribe') {
+          watchpartyDirectoryWatchers.get(boardId)?.ensureStarted();
+        }
+        if (!broker.hasClient(clientId)) {
+          jsonReply(res, 404, { error: `SSE client not connected: ${clientId}` });
+          return;
+        }
+
+        const subscribed = action === 'subscribe';
+        if (subscribed) {
+          broker.onSubscribe(clientId, channelName, { cardId });
+        } else {
+          broker.onUnsubscribe(clientId, channelName, { cardId });
+        }
+
+        jsonReply(res, 200, { ok: true, boardId, cardId, channel: channelName, clientId, subscribed });
+      } catch (error) {
+        jsonReply(res, 500, { error: String(error?.message || error) });
+      }
+    })();
+    return;
+  }
+
+  const watchpartyBoardChannelMatch = pathname.match(/^\/api\/boards\/([^/]+)\/watch-channel\/([^/]+)\/(subscribe|unsubscribe)-sse$/);
+  if (method === 'POST' && watchpartyBoardChannelMatch) {
+    const boardId = decodeURIComponent(watchpartyBoardChannelMatch[1] || '').trim();
+    const channelName = decodeURIComponent(watchpartyBoardChannelMatch[2] || '').trim();
+    const action = watchpartyBoardChannelMatch[3] || '';
+    (async () => {
+      try {
+        const body = await readRequestBody(req);
+        const clientId = typeof body?.clientId === 'string' ? body.clientId.trim() : '';
+        const broker = watchpartyBrokers.get(boardId);
+        if (!clientId) {
+          jsonReply(res, 400, { error: 'clientId is required' });
+          return;
+        }
+        if (!broker) {
+          jsonReply(res, 404, { error: `No watchparty broker for board: ${boardId}` });
+          return;
+        }
+        if (action === 'subscribe') {
+          watchpartyDirectoryWatchers.get(boardId)?.ensureStarted();
+        }
+        if (!broker.hasClient(clientId)) {
+          jsonReply(res, 404, { error: `SSE client not connected: ${clientId}` });
+          return;
+        }
+
+        const subscribed = action === 'subscribe';
+        if (subscribed) {
+          broker.onSubscribe(clientId, channelName, {});
+        } else {
+          broker.onUnsubscribe(clientId, channelName, {});
+        }
+
+        jsonReply(res, 200, { ok: true, boardId, channel: channelName, clientId, subscribed });
+      } catch (error) {
+        jsonReply(res, 500, { error: String(error?.message || error) });
       }
     })();
     return;

@@ -13,7 +13,7 @@
       "subtitle": "Live operational intelligence for agent workflows",
       "setup": {
         "setupRoot": "../workspaces/finbook/case-workspace",
-        "aiWorkspaceRoot": "../workspaces/finbook/case-workspace/copilot-workspaces",
+        "aiWorkspaceRoot": "copilot-workspaces",
         "cardStore": "ingest/cards-store",
         "artifactsStore": "ingest/cards-files",
         "boardRuntime": "runtime",
@@ -49,7 +49,7 @@
       "subtitle": "Live operational intelligence for agent workflows",
       "setup": {
         "setupRoot": "../workspaces/live/case-workspace",
-        "aiWorkspaceRoot": "../workspaces/live/case-workspace/copilot-workspaces",
+        "aiWorkspaceRoot": "copilot-workspaces",
         "cardStore": "cards-store",
         "artifactsStore": "cards-files",
         "boardRuntime": "runtime",
@@ -85,7 +85,7 @@
       "subtitle": "Live operational intelligence for agent workflows",
       "setup": {
         "setupRoot": "../workspaces/sentinel/case-workspace",
-        "aiWorkspaceRoot": "../workspaces/sentinel/case-workspace/copilot-workspaces",
+        "aiWorkspaceRoot": "copilot-workspaces",
         "cardStore": "cards-store",
         "artifactsStore": "cards-files",
         "boardRuntime": "runtime",

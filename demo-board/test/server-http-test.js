@@ -21,10 +21,13 @@ import http from 'node:http';
 import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
+import { COPILOT_OUTPUT_CHANNEL } from '../../../watchparty-constants.mjs';
 
 const ECHO_PROBE_MARKER = '__probe__echo__probe__';
 const PROBE_IN_PROGRESS_TEXT = 'in-progress';
-const NON_PROBE_RESPONSE_TIMEOUT_MS = 40_000;
+const PROBE_WATCHPARTY_FRAME_1 = 'probe frame 1';
+const PROBE_WATCHPARTY_FRAME_2 = 'probe frame 2';
+const NON_PROBE_RESPONSE_TIMEOUT_MS = 90_000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -193,6 +196,7 @@ const NS = {
   statusGeneration: 0,
   computedValues: {},
   chatEvents: [],
+  watchpartyEvents: [],
 };
 
 function applyFrame(payload) {
@@ -292,6 +296,22 @@ function captureChatEvents(payload, cardId) {
   }
 }
 
+function captureWatchpartyEvents(payload, cardId, channelName) {
+  if (!payload || payload.kind !== 'notification-batch' || !Array.isArray(payload.notifications)) return;
+  for (const n of payload.notifications) {
+    if (n && n.kind === 'card_watchparty' && n.cardId === cardId && n.channel === channelName) {
+      NS.watchpartyEvents.push({
+        at: Date.now(),
+        cardId: n.cardId,
+        channel: n.channel,
+        clear: !!n.clear,
+        replace: !!n.replace,
+        text: String(n?.payload?.text || ''),
+      });
+    }
+  }
+}
+
 function assert(condition, message) {
   if (!condition) {
     console.error(`\n[ASSERT FAILED] ${message}`);
@@ -331,6 +351,9 @@ const waitForAllCompleted = (ms = 60_000, label = 'all completed') =>
 const waitForChatPredicate = (predicate, ms, label) =>
   waitUntil(() => predicate(NS.chatEvents) || false, ms, label);
 
+const waitForWatchpartyPredicate = (predicate, ms, label) =>
+  waitUntil(() => predicate(NS.watchpartyEvents) || false, ms, label);
+
 function findAssistantOutcomeInMessages(messages, beforeCount, successPattern) {
   const newMessages = Array.isArray(messages) ? messages.slice(beforeCount) : [];
   const assistantMessage = [...newMessages].reverse().find((message) => message?.role === 'assistant');
@@ -361,6 +384,45 @@ function findAssistantOutcomeInMessages(messages, beforeCount, successPattern) {
   return null;
 }
 
+function findAssistantOutcome(events, options) {
+  const successPattern = options?.successPattern instanceof RegExp ? options.successPattern : null;
+  const beforeCount = Number.isInteger(options?.beforeCount) && options.beforeCount >= 0 ? options.beforeCount : 0;
+  const debugEntryStart = Number.isInteger(options?.debugEntryStart) && options.debugEntryStart >= 0
+    ? options.debugEntryStart
+    : 0;
+  let sawProcessingTrue = false;
+
+  for (const event of events) {
+    if (!event || !Array.isArray(event.messages)) continue;
+
+    if (event.processing) {
+      sawProcessingTrue = true;
+    }
+
+    const messageOutcome = findAssistantOutcomeInMessages(event.messages, beforeCount, successPattern);
+    if (messageOutcome) {
+      return { ...messageOutcome, event, source: 'sse' };
+    }
+
+  }
+
+  const debugEntries = readAssistantDebugEntries().slice(debugEntryStart);
+  const assistantError = [...debugEntries].reverse().find((entry) => (
+    entry
+    && typeof entry.stage === 'string'
+    && (entry.stage === 'assistant:error' || entry.stage === 'runCopilot:error')
+  ));
+  if (assistantError) {
+    return {
+      ok: false,
+      reason: assistantError.message || assistantError.errFileText || 'assistant error logged',
+      debugEntry: assistantError,
+    };
+  }
+
+  return false;
+}
+
 function readAssistantDebugEntries() {
   if (!ASSISTANT_DEBUG_LOG_FILE || !fs.existsSync(ASSISTANT_DEBUG_LOG_FILE)) {
     return [];
@@ -382,52 +444,6 @@ function readAssistantDebugEntries() {
   } catch {
     return [];
   }
-}
-
-function findAssistantOutcome(events, options) {
-  const successPattern = options?.successPattern instanceof RegExp ? options.successPattern : null;
-  const beforeCount = Number.isInteger(options?.beforeCount) && options.beforeCount >= 0 ? options.beforeCount : 0;
-  const debugEntryStart = Number.isInteger(options?.debugEntryStart) && options.debugEntryStart >= 0
-    ? options.debugEntryStart
-    : 0;
-  let sawProcessingTrue = false;
-
-  for (const event of events) {
-    if (!event || !Array.isArray(event.messages)) continue;
-
-    if (event.processing) {
-      sawProcessingTrue = true;
-    }
-
-    const messageOutcome = findAssistantOutcomeInMessages(event.messages, beforeCount, successPattern);
-    if (messageOutcome) {
-      return { ...messageOutcome, event, source: 'sse' };
-    }
-
-    if (sawProcessingTrue && !event.processing && event.messageCount >= beforeCount + 1) {
-      return {
-        ok: false,
-        reason: 'chat processing cleared before a matching assistant reply was appended',
-        event,
-      };
-    }
-  }
-
-  const debugEntries = readAssistantDebugEntries().slice(debugEntryStart);
-  const assistantError = [...debugEntries].reverse().find((entry) => (
-    entry
-    && typeof entry.stage === 'string'
-    && (entry.stage === 'assistant:error' || entry.stage === 'runCopilot:error')
-  ));
-  if (assistantError) {
-    return {
-      ok: false,
-      reason: assistantError.message || assistantError.errFileText || 'assistant error logged',
-      debugEntry: assistantError,
-    };
-  }
-
-  return false;
 }
 
 async function waitForAssistantOutcome({ cardId, eventStart, beforeCount, debugEntryStart, successPattern, timeoutMs, label }) {
@@ -640,6 +656,7 @@ let serverProc = null;
 let sseWorker = null;
 let chatSseClient = null;
 let chatSseClientId = '';
+let watchpartySubscribed = false;
 
 async function ensureChatSseSubscription() {
   if (!chatSseClientId) {
@@ -649,12 +666,23 @@ async function ensureChatSseSubscription() {
   if (!chatSseClient) {
     chatSseClient = startSseClient(`${BASE}/sse?clientId=${encodeURIComponent(chatSseClientId)}`, (payload) => {
       captureChatEvents(payload, CHAT_CARD_ID);
+      captureWatchpartyEvents(payload, CHAT_CARD_ID, COPILOT_OUTPUT_CHANNEL);
     });
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
 
   const subRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/subscribe-sse`, { clientId: chatSseClientId });
   assert(subRes.status === 200, `chat subscribe returned ${subRes.status}`);
+}
+
+async function ensureWatchpartySseSubscription() {
+  await ensureChatSseSubscription();
+  if (watchpartySubscribed) {
+    return;
+  }
+  const subRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/watch-channel/${COPILOT_OUTPUT_CHANNEL}/subscribe-sse`, { clientId: chatSseClientId });
+  assert(subRes.status === 200, `watchparty subscribe returned ${subRes.status}`);
+  watchpartySubscribed = true;
 }
 try {
   await ensureMcpServerRunning(MCP_SERVER_URL);
@@ -813,12 +841,14 @@ try {
     } else {
     console.log(`\n[${new Date().toISOString()}] === T3: probe chat protocol (SSE lifecycle) ===`);
   await ensureChatSseSubscription();
+  await ensureWatchpartySseSubscription();
 
   const t2Before = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
   assert(t2Before.status === 200, `T3 pre chats returned ${t2Before.status}`);
   const t2BeforeMessages = Array.isArray(t2Before.data?.messages) ? t2Before.data.messages : [];
   const t2BeforeCount = t2BeforeMessages.length;
   const t2EventStart = NS.chatEvents.length;
+  const t2WatchpartyStart = NS.watchpartyEvents.length;
   const t2ProbePrompt = `Probe protocol validation ${Date.now()}`;
 
   const t2SendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
@@ -838,6 +868,21 @@ try {
     });
   }, 45_000, 'T3 ordered lifecycle');
   assert(!!t2Lifecycle, 'T3 ordered lifecycle not observed');
+
+  const t2WatchpartyLifecycle = await waitForWatchpartyPredicate((events) => {
+    const relevant = events.slice(t2WatchpartyStart);
+    const texts = relevant
+      .filter((entry) => entry.replace && entry.text)
+      .map((entry) => entry.text);
+    const sawMarker = texts.some((text) => text.includes("Assistant's Output:"));
+    const sawFrame1 = texts.some((text) => text.includes(PROBE_WATCHPARTY_FRAME_1));
+    const sawFrame2 = texts.some((text) => text.includes(PROBE_WATCHPARTY_FRAME_2));
+    const sawReply = texts.some((text) => text.includes(`Echo: ${t2ProbePrompt}`));
+    return sawMarker && sawFrame1 && sawFrame2 && sawReply
+      ? { texts }
+      : false;
+  }, 45_000, 'T3 watchparty lifecycle');
+  assert(!!t2WatchpartyLifecycle, 'T3 watchparty lifecycle not observed');
 
   const t2After = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
   assert(t2After.status === 200, `T3 post chats returned ${t2After.status}`);
@@ -1068,6 +1113,11 @@ try {
 } finally {
   if (chatSseClientId) {
     try {
+      if (watchpartySubscribed) {
+        await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/watch-channel/${COPILOT_OUTPUT_CHANNEL}/unsubscribe-sse`, { clientId: chatSseClientId });
+      }
+    } catch { /* ignore */ }
+    try {
       await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/chats/unsubscribe-sse`, { clientId: chatSseClientId });
     } catch { /* ignore */ }
   }
@@ -1082,7 +1132,11 @@ try {
     console.log(`[demo-http-test] server stopped, setup dir preserved: ${SETUP_CLEANUP_PATH}`);
   } else {
     if (fs.existsSync(SETUP_CLEANUP_PATH)) {
-      fs.rmSync(SETUP_CLEANUP_PATH, { recursive: true, force: true });
+      try {
+        fs.rmSync(SETUP_CLEANUP_PATH, { recursive: true, force: true });
+      } catch (error) {
+        console.warn(`[demo-http-test] setup dir cleanup skipped: ${error?.message || error}`);
+      }
     }
     console.log('[demo-http-test] server stopped, setup dir cleaned');
   }

@@ -28,7 +28,7 @@ if defined MODEL (
     SET "MODEL_FLAG=--model !MODEL!"
 )
 
-type "%PROMPT_FILE%" | call copilot -C "%WORKING_DIR%" --continue -s --no-ask-user --allow-all-tools !MODEL_FLAG! > "%OUTPUT_FILE%" 2> "%ERR_FILE%"
+type "%PROMPT_FILE%" | call copilot -C "%WORKING_DIR%" --continue -s --no-ask-user --allow-all-tools !MODEL_FLAG! >> "%OUTPUT_FILE%" 2> "%ERR_FILE%"
 exit /b %ERRORLEVEL%
 
 endlocal
