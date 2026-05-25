@@ -10,7 +10,14 @@ logs/
 **/.board-ws/**
 tmp/**
 demo-board/test/live.test.board-ws/
-demo-board/scripts/yaml-flow/**
+demo-board/scripts/cli/artifacts-store-cli.mjs
+demo-board/scripts/cli/batch-runner-cli.mjs
+demo-board/scripts/cli/board-live-cards-cli.js
+demo-board/scripts/cli/board-live-cards-cli.mjs
+demo-board/scripts/cli/card-store-cli.mjs
+demo-board/scripts/cli/chat-store-cli.mjs
+demo-board/scripts/cli/jsonata-sync.cjs
+demo-board/scripts/cli/step-machine-cli.mjs
 .tmp-*.txt
 exit.txt
 stdout.txt

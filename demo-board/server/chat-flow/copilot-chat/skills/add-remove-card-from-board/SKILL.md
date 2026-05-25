@@ -14,7 +14,6 @@ description: >
 Use this skill when the task is about board-level presence and runtime effects:
 
 - inspect one stored card before a live board operation
-- inspect all stored cards in a store before a live board operation
 - upsert a candidate card into the board runtime
 - remove a card from the board runtime
 - understand what adding or removing a card does to the token graph
@@ -113,15 +112,6 @@ node ./.github/scripts/manage-live-board-card.js read-card --store-ref <store-re
 Use this when you need to inspect the current stored card before deciding
 whether to upsert or deprecate it.
 
-### Read all stored cards in a store
-
-```bash
-node ./.github/scripts/manage-live-board-card.js read-all-cards --store-ref <store-ref>
-```
-
-Use this only when you need nearby examples or need to inspect the store before
-a board-level decision.
-
 ### Upsert one card into the board runtime
 
 ```bash
@@ -165,7 +155,6 @@ the board graph. For graph semantics, this is the deletion that matters.
 - `upsert-card` expects `candidate_card_content` on stdin and validates that its `id` matches `--card-id`.
 - `upsert-card` persists the candidate card to the store and syncs it into the board in one command.
 - Use `read-card` if you need the current stored card before building the upsert payload.
-- Use `read-all-cards` only when the task is explicitly store-wide.
 - If a card publishes tokens consumed by other cards, expect board behavior to change when it is removed.
 - Do not describe board membership changes as mere storage changes; they change the live graph.
 

@@ -13,7 +13,6 @@ const validateCandidateCardPath = path.join(__dirname, 'preflight-validate-candi
 const usageLines = [
   'Usage:',
   '  node manage-live-board-card.js read-card --store-ref <store-ref> --card-id <card-id>',
-  '  node manage-live-board-card.js read-all-cards --store-ref <store-ref>',
   '  cat payload.json | node manage-live-board-card.js upsert-card --store-ref <store-ref> --base-ref <board-ref> --card-id <card-id>',
   '  node manage-live-board-card.js deprecate --base-ref <board-ref> --card-id <card-id>',
   '',
@@ -124,12 +123,6 @@ function handleReadCard(flags) {
   printJson(result);
 }
 
-function handleReadAllCards(flags) {
-  const storeRef = requireArgText(flags, 'store-ref');
-  const result = runJsonScript(cardStoreCliPath, ['get', '--store-ref', storeRef]);
-  printJson(result);
-}
-
 function handleUpsertCard(flags) {
   const storeRef = requireArgText(flags, 'store-ref');
   const baseRef = requireArgText(flags, 'base-ref');
@@ -185,9 +178,6 @@ function main() {
   switch (command) {
     case 'read-card':
       handleReadCard(flags);
-      return;
-    case 'read-all-cards':
-      handleReadAllCards(flags);
       return;
     case 'upsert-card':
       handleUpsertCard(flags);

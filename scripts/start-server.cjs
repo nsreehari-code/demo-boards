@@ -16,8 +16,8 @@ if (!fs.existsSync(boardServerPath)) {
   process.exit(1);
 }
 
-const boardLiveCardsCliJs = path.resolve(boardDir, 'scripts', 'yaml-flow', 'board-live-cards-cli.mjs');
-const stepMachineCliPath = path.resolve(boardDir, 'scripts', 'yaml-flow', 'step-machine-cli.mjs');
+const boardLiveCardsCliJs = path.resolve(boardDir, 'scripts', 'cli', 'board-live-cards-cli.mjs');
+const stepMachineCliPath = path.resolve(boardDir, 'scripts', 'cli', 'step-machine-cli.mjs');
 const mcpServerPath = path.resolve(workspaceDir, 'mcp-server', 'src', 'index.js');
 const frontendDir = path.resolve(workspaceDir, 'docs');
 

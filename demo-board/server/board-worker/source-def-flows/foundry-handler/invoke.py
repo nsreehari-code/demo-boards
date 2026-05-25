@@ -140,7 +140,7 @@ def _validate_card(filepath):
     if not repo_root:
         return {"ok": True, "errors": []}
 
-    cli_js = os.path.join(repo_root, "demo-board", "scripts", "yaml-flow", "board-live-cards-cli.mjs")
+    cli_js = os.path.join(repo_root, "demo-board", "scripts", "cli", "board-live-cards-cli.mjs")
     node_bin = shutil.which("node")
     if not node_bin or not os.path.exists(cli_js):
         return {"ok": True, "errors": []}

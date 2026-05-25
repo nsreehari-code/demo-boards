@@ -29,7 +29,7 @@
           "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/live/copilot/default/agents"],
           "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/live/copilot/default/skills"],
           "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/live/copilot/default/hooks"],
-          "copyScripts": ["./scripts/yaml-flow", "./scripts/cli"]
+          "copyScripts": ["./scripts/cli"]
         },
         {
           "copilot-root": "gandalf",
@@ -37,7 +37,7 @@
           "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/live/copilot/gandalf/agents"],
           "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/live/copilot/gandalf/skills"],
           "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/live/copilot/gandalf/hooks"],
-          "copyScripts": ["./scripts/yaml-flow", "./scripts/cli"]
+          "copyScripts": ["./scripts/cli"]
         }
       ]
     }

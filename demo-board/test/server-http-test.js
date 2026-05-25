@@ -124,28 +124,7 @@ async function ensureMcpServerRunning(serverUrl) {
     return;
   }
 
-  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const proc = spawn(npmCommand, ['run', 'mcp:start'], {
-    cwd: REPO_ROOT,
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-    env: {
-      ...process.env,
-    },
-  });
-  proc.unref();
-
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (await probeMcpServer(serverUrl)) {
-      console.log(`[setup] started MCP server via npm run mcp:start at ${serverUrl}`);
-      return;
-    }
-    await sleep(250);
-  }
-
-  throw new Error(`MCP server did not become ready at ${serverUrl} after npm run mcp:start`);
+  throw new Error(`MCP server is down at ${serverUrl}. Start it before running server-http-test.`);
 }
 
 const PORT = await resolveServerPort();

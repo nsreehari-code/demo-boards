@@ -40,7 +40,7 @@ const __filename = fileURLToPath(import.meta.url);
 const SERVER_DIR = path.dirname(__filename);
 const BOARD_ROOT = path.resolve(SERVER_DIR, '..');
 const require = createRequire(import.meta.url);
-const YAML_FLOW_CLI_DIR = path.join(BOARD_ROOT, 'scripts', 'yaml-flow');
+const YAML_FLOW_CLI_DIR = path.join(BOARD_ROOT, 'scripts', 'cli');
 const cliArgs = process.argv.slice(2);
 const SERVER_CONFIG = path.join(BOARD_ROOT, 'server-config.json');
 
