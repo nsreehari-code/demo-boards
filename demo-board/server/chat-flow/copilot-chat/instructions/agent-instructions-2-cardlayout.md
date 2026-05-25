@@ -139,5 +139,4 @@ mind here.
 
 Use:
 
-- [agent-instructions.md](c:\Users\sreenaga\ADO\demo-boards\demo-board\server\chat-flow\copilot-chat\instructions\agent-instructions.md) for the supported dynamic view kinds and shared runtime rules
-- `card-authoring` for `_view` authoring heuristics and `ref`-driven card patterns
+- `manage-cards-on-live-board` for `_view` authoring heuristics and `ref`-driven card patterns

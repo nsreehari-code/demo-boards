@@ -10,10 +10,6 @@ const boardLiveCardsCliPath = path.join(__dirname, 'board-live-cards-cli.mjs');
 const usageLines = [
   'Usage:',
   '  node inspect-board-runtime-status.js read-status --base-ref <board-ref>',
-  '  node inspect-board-runtime-status.js read-data-object --base-ref <board-ref> --output-key <output-key>',
-  '  node inspect-board-runtime-status.js read-all-data-objects --base-ref <board-ref>',
-  '  node inspect-board-runtime-status.js read-card-computed-values --base-ref <board-ref> --card-id <card-id>',
-  '  node inspect-board-runtime-status.js read-all-computed-values --base-ref <board-ref>',
 ];
 
 function parseArgs(argv) {
@@ -127,32 +123,6 @@ function handleReadStatus(flags) {
   printJson(reshapeBoardStatus(unwrapSuccessfulEnvelope(result, 'status')));
 }
 
-function handleReadDataObject(flags) {
-  const baseRef = requireArgText(flags, 'base-ref');
-  const outputKey = requireArgText(flags, 'output-key');
-  const result = runBoardLiveCardsCli(['get-outputs', '--base-ref', baseRef, '--type', 'data-object', '--key', outputKey]);
-  printJson(unwrapSuccessfulEnvelope(result, 'get-outputs data-object'));
-}
-
-function handleReadAllDataObjects(flags) {
-  const baseRef = requireArgText(flags, 'base-ref');
-  const result = runBoardLiveCardsCli(['get-outputs', '--base-ref', baseRef, '--type', 'data-object', '--all']);
-  printJson(unwrapSuccessfulEnvelope(result, 'get-outputs data-object --all'));
-}
-
-function handleReadCardComputedValues(flags) {
-  const baseRef = requireArgText(flags, 'base-ref');
-  const cardId = requireArgText(flags, 'card-id');
-  const result = runBoardLiveCardsCli(['get-outputs', '--base-ref', baseRef, '--type', 'computed-values', '--key', cardId]);
-  printJson(unwrapSuccessfulEnvelope(result, 'get-outputs computed-values'));
-}
-
-function handleReadAllComputedValues(flags) {
-  const baseRef = requireArgText(flags, 'base-ref');
-  const result = runBoardLiveCardsCli(['get-outputs', '--base-ref', baseRef, '--type', 'computed-values', '--all']);
-  printJson(unwrapSuccessfulEnvelope(result, 'get-outputs computed-values --all'));
-}
-
 function main() {
   const { command, flags } = parseArgs(process.argv.slice(2));
   if (flags.help || flags.h) {
@@ -162,18 +132,6 @@ function main() {
   switch (command) {
     case 'read-status':
       handleReadStatus(flags);
-      return;
-    case 'read-data-object':
-      handleReadDataObject(flags);
-      return;
-    case 'read-all-data-objects':
-      handleReadAllDataObjects(flags);
-      return;
-    case 'read-card-computed-values':
-      handleReadCardComputedValues(flags);
-      return;
-    case 'read-all-computed-values':
-      handleReadAllComputedValues(flags);
       return;
     default:
       printUsage(1);

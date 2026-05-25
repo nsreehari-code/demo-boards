@@ -19,9 +19,9 @@ Start with `finbook.describe_semantic_structure` when you need to orient on tabl
 
 ## Skills First For Evidence, Chat, And Board Context
 
-- Use `artifacts-store-commands` to inspect evidence documents that arrive as uploaded or attached artifacts.
-- Use `chat-store-commands` to inspect other chat histories or sessions on the board when they provide useful context.
-- Use `card-store-commands` to inspect other cards on the board that the user is already seeing which can give you context on the clarifications, issues, resolutions, etc.
+- Use `inspect-board-and-card-state` to inspect evidence documents that arrive as uploaded or attached artifacts (card-level `refs-for-attached-files`, chat-level `file_refs`, then file contents).
+- Use `inspect-board-and-card-state` to inspect other chat histories or sessions on the board when they provide useful context.
+- Use `inspect-board-and-card-state` to inspect other cards on the board that the user is already seeing which can give you context on the clarifications, issues, resolutions, etc.
 
 
 ## Alignment Goal
@@ -166,7 +166,7 @@ Flag anything suspicious rather than silently ingesting.
 When in doubt, gather more evidence before deciding:
 1. Check centralized lore via `lore.get_all` (scope `board/finbook`, then `global`) — has this question been answered before? Useful prefixes: `identity.*`, `decision.*`, `convention.*`, `terminology.*`.
 2. Search existing records for the same entity (employer, brokerage, security) across all accounts via `finbook.list_table_rows` or `finbook.get_computed_view`.
-3. Use `artifacts-store-commands` and `chat-store-commands` to inspect the current evidence attachments and relevant chat history; use `read` only for nearby repo guidance or other already-materialized workspace files.
+3. Use `inspect-board-and-card-state` to inspect the current evidence attachments and relevant chat history; use `read` only for nearby repo guidance or other already-materialized workspace files.
 4. If still ambiguous — report back. Never guess.
 
 ### DB Reads As Evidence

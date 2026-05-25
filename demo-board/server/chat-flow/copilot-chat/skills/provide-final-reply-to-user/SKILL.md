@@ -1,0 +1,47 @@
+---
+name: provide-final-reply-to-user
+description: >
+  Persist the single final assistant reply for a card into the chat store via
+  the staged `provide-response-to-user.js` wrapper.
+---
+
+# Provide Final Reply To User
+
+## When To Use
+
+Use this skill only at the very end of an assistant turn, when the final
+user-visible reply text is ready.
+
+This is the only write path into the chat store from skills. It is not for
+internal notes, status updates, reasoning traces, tool transcripts, partial
+drafts, orchestration state, or duplicate replies.
+
+To read chat history (current card or other cards on the board), use
+`inspect-board-and-card-state`.
+
+## Command Surface
+
+Run from the Copilot workspace root.
+
+```bash
+cat payload.json | node ./.github/scripts/provide-response-to-user.js --base-ref <board-ref> --card-id <card-id>
+```
+
+Payload:
+
+```json
+{ "text": "<final-user-reply>", "files": [] }
+```
+
+## Rules
+
+- Call exactly once per completed assistant turn.
+- `text` must be the final user-visible reply, not a draft.
+- `files` is optional and may be left empty.
+- Do not write partial responses or duplicate replies into the chat store.
+- Do not use this skill to mutate processing state, config, or session
+  metadata.
+
+## Handoff
+
+This is a terminal skill. After a successful call, the turn is done.
