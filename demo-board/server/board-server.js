@@ -233,6 +233,70 @@ function listFilesRecursive(dirPath) {
   return out;
 }
 
+function syncFlatFilesIntoDir(targetDir, sourceDirs) {
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  const expectedFiles = new Set();
+  for (const sourceDir of sourceDirs) {
+    if (!sourceDir || !fs.existsSync(sourceDir)) continue;
+    for (const fileName of fs.readdirSync(sourceDir)) {
+      const sourcePath = path.join(sourceDir, fileName);
+      const stat = fs.statSync(sourcePath);
+      if (!stat.isFile()) continue;
+      expectedFiles.add(fileName);
+    }
+  }
+
+  for (const fileName of fs.readdirSync(targetDir)) {
+    const targetPath = path.join(targetDir, fileName);
+    const stat = fs.statSync(targetPath);
+    if (stat.isFile() && !expectedFiles.has(fileName)) {
+      fs.rmSync(targetPath, { force: true });
+    }
+  }
+
+  for (const sourceDir of sourceDirs) {
+    if (!sourceDir || !fs.existsSync(sourceDir)) continue;
+    for (const fileName of fs.readdirSync(sourceDir)) {
+      const sourcePath = path.join(sourceDir, fileName);
+      const stat = fs.statSync(sourcePath);
+      if (!stat.isFile()) continue;
+      fs.copyFileSync(sourcePath, path.join(targetDir, fileName));
+    }
+  }
+}
+
+function syncRecursiveFilesIntoDir(targetDir, sourceDirs) {
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  const expectedFiles = new Set();
+  for (const sourceDir of sourceDirs) {
+    if (!sourceDir || !fs.existsSync(sourceDir)) continue;
+    const files = listFilesRecursive(sourceDir);
+    for (const filePath of files) {
+      expectedFiles.add(path.relative(sourceDir, filePath));
+    }
+  }
+
+  for (const targetPath of listFilesRecursive(targetDir)) {
+    const relativePath = path.relative(targetDir, targetPath);
+    if (!expectedFiles.has(relativePath)) {
+      fs.rmSync(targetPath, { force: true });
+    }
+  }
+
+  for (const sourceDir of sourceDirs) {
+    if (!sourceDir || !fs.existsSync(sourceDir)) continue;
+    const files = listFilesRecursive(sourceDir);
+    for (const filePath of files) {
+      const relativePath = path.relative(sourceDir, filePath);
+      const targetPath = path.join(targetDir, relativePath);
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.copyFileSync(filePath, targetPath);
+    }
+  }
+}
+
 function resolveLastUserText(chatStorage, cardId, lastChatEntryId) {
   if (!chatStorage || typeof chatStorage.readAll !== 'function') return '';
   if (typeof cardId !== 'string' || !cardId.trim()) return '';
@@ -1152,10 +1216,6 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
 
       fs.mkdirSync(workspaceRoot, { recursive: true });
       fs.mkdirSync(githubRoot, { recursive: true });
-      fs.rmSync(agentsTarget, { recursive: true, force: true });
-      fs.rmSync(hooksTarget, { recursive: true, force: true });
-      fs.rmSync(skillsTarget, { recursive: true, force: true });
-      fs.rmSync(scriptsTarget, { recursive: true, force: true });
       fs.mkdirSync(agentsTarget, { recursive: true });
       fs.mkdirSync(hooksTarget, { recursive: true });
       fs.mkdirSync(skillsTarget, { recursive: true });
@@ -1191,6 +1251,10 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
       }
 
       const agentsDirs = Array.isArray(entry.agentsDirs) ? entry.agentsDirs : [];
+      const resolvedAgentsDirs = agentsDirs
+        .map((dir) => resolveFromConfig(dir))
+        .filter(Boolean);
+      syncFlatFilesIntoDir(agentsTarget, resolvedAgentsDirs);
       for (const dir of agentsDirs) {
         const resolvedDir = resolveFromConfig(dir);
         if (!resolvedDir || !fs.existsSync(resolvedDir)) {
@@ -1198,13 +1262,14 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
           continue;
         }
         const files = listFilesRecursive(resolvedDir);
-        for (const filePath of files) {
-          fs.copyFileSync(filePath, path.join(agentsTarget, path.basename(filePath)));
-        }
         logCopiedFiles('agentsDirs', resolvedDir, files.length);
       }
 
       const agentsHooks = Array.isArray(entry.agentsHooks) ? entry.agentsHooks : [];
+      const resolvedAgentsHooks = agentsHooks
+        .map((dir) => resolveFromConfig(dir))
+        .filter(Boolean);
+      syncFlatFilesIntoDir(hooksTarget, resolvedAgentsHooks);
       for (const dir of agentsHooks) {
         const resolvedDir = resolveFromConfig(dir);
         if (!resolvedDir || !fs.existsSync(resolvedDir)) {
@@ -1212,13 +1277,14 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
           continue;
         }
         const files = listFilesRecursive(resolvedDir);
-        for (const filePath of files) {
-          fs.copyFileSync(filePath, path.join(hooksTarget, path.basename(filePath)));
-        }
         logCopiedFiles('agentsHooks', resolvedDir, files.length);
       }
 
       const agentsSkills = Array.isArray(entry.agentsSkills) ? entry.agentsSkills : [];
+      const resolvedAgentsSkills = agentsSkills
+        .map((dir) => resolveFromConfig(dir))
+        .filter(Boolean);
+      syncRecursiveFilesIntoDir(skillsTarget, resolvedAgentsSkills);
       for (const dir of agentsSkills) {
         const resolvedDir = resolveFromConfig(dir);
         if (!resolvedDir || !fs.existsSync(resolvedDir)) {
@@ -1226,12 +1292,6 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
           continue;
         }
         const files = listFilesRecursive(resolvedDir);
-        for (const filePath of files) {
-          const relativePath = path.relative(resolvedDir, filePath);
-          const targetPath = path.join(skillsTarget, relativePath);
-          fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-          fs.copyFileSync(filePath, targetPath);
-        }
         logCopiedFiles('agentsSkills', resolvedDir, files.length);
       }
 
@@ -1243,6 +1303,7 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
       console.log(
         `[board-server] copilot workspace "${copilotRoot}" copyScripts: ${copyScriptDirs.length > 0 ? copyScriptDirs.join(', ') : '(none)'}`,
       );
+      syncFlatFilesIntoDir(scriptsTarget, copyScriptDirs);
       for (const scriptsDir of copyScriptDirs) {
         if (!scriptsDir || !fs.existsSync(scriptsDir)) {
           logCopiedFiles('copyScripts', scriptsDir, 0);
@@ -1253,7 +1314,6 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
           const sourcePath = path.join(scriptsDir, fileName);
           const stat = fs.statSync(sourcePath);
           if (!stat.isFile()) continue;
-          fs.copyFileSync(sourcePath, path.join(scriptsTarget, fileName));
           copiedCount += 1;
         }
         logCopiedFiles('copyScripts', scriptsDir, copiedCount);
