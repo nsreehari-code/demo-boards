@@ -72,7 +72,7 @@ Use it especially when the request says things like:
 - For compute changes, preserve unaffected compute entries and test only the touched compute paths during correctness checks.
 - For `requires` or `provides` changes, update only the fields needed for the requested contract change or repair.
 - Treat `card_data` as protected user content, not as an authoring surface for routine card edits. Only touch it to repair syntax, formatting, or broken structure without changing the user-managed content itself.
-- If the task involves uploaded or attached files, read the card first, take the relevant artifact key from `card_data.files`, and use `artifacts-store-commands` to inspect the file.
+- If the task involves uploaded or attached files, use `inspect-card-definition-and-runtime.js --base-ref <board-ref> --card-id <card-id>` and read `refs-for-attached-files` for card-level file refs, or use `inspect-chat-messages-on-cards.js --base-ref <board-ref> --card-id <card-id> get-messages` for chat-attached file refs, then use `inspect-file-contents.js --file-ref <file-ref>` to inspect the file content.
 - If the card already contains a working pattern for the same kind of field, follow that pattern instead of inventing a new shape.
 
 ## What Not to Do
@@ -95,6 +95,6 @@ correctness pass.
 Use that skill to:
 
 - validate the edited card
-- run `run-source-preflight` for touched sources so the agent can verify the real source path still works
+- run `preflight-run-single-source-in-candidate-card.js` for touched sources so the agent can verify the real source path still works
 - evaluate touched compute paths by - materialize `provided_outputs` and `view_model` when the edit touches `provides[]` or `view`
 - run full simulation only if narrower checks are insufficient

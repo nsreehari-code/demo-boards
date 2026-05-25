@@ -69,7 +69,7 @@ Use this only for narrow object-field updates such as:
 - other small scalar or object-valued fields
 
 Do not use `card-store-cli del` from this workflow. If a card should disappear
-for users, remove it from the live board with `node ./.github/scripts/board-live-cards-cli.mjs remove-card`.
+for users, remove it from the live board with `node ./.github/scripts/manage-live-board-card.js deprecate --base-ref <board-ref> --card-id <card-id>`.
 That is sufficient for the graph and for user-visible board behavior.
 
 ## Command Rules

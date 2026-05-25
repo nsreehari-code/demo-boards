@@ -151,6 +151,6 @@ correctness pass.
 Use that skill to:
 
 - validate the new card structure
-- run `run-source-preflight` for any authored sources so the agent can verify the real source path works
+- run `preflight-run-single-source-in-candidate-card.js` for any authored sources so the agent can verify the real source path works
 - evaluate authored compute paths by materializing `provided_outputs` and `view_model` when the new card authors `provides[]` or `view`
 - run full simulation only if narrower checks are insufficient

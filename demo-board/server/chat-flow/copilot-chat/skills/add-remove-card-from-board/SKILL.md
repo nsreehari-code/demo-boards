@@ -1,8 +1,8 @@
 ---
 name: add-remove-card-from-board
 description: >
-  Add a stored card to the live board runtime or remove a card from the live
-  board with the right board-level mental model. Use when the task is about
+  Add, inspect, or remove a live board card through the staged management
+  wrapper with the right board-level mental model. Use when the task is about
   board membership, runtime dependencies, retriggers, and downstream effects,
   not just raw card persistence.
 ---
@@ -13,8 +13,9 @@ description: >
 
 Use this skill when the task is about board-level presence and runtime effects:
 
-- add a stored card to the board runtime
-- refresh or restart a board card after a change
+- inspect one stored card before a live board operation
+- inspect all stored cards in a store before a live board operation
+- upsert a candidate card into the board runtime
 - remove a card from the board runtime
 - understand what adding or removing a card does to the token graph
 - reason about downstream recompute after a card changes
@@ -83,67 +84,74 @@ propagation.
 
 ## Important Distinction
 
-- `upsert-card` and `remove-card` operate on the live board runtime.
+- `manage-live-board-card.js` is the authoritative staged management wrapper.
 - This skill is about live board membership and runtime graph behavior.
 - Use this skill to reason about whether a card should be active on the board,
   what tokens it contributes, and what downstream runtime effects follow.
 
 Board-level meaning:
 
-- `upsert-card` adds or resyncs a card node into the live graph from stored card definitions.
-- `remove-card` removes that node from the live graph.
-- For board behavior, deleting the card from the board is what matters; that is the operation that changes the live dependency graph.
-- Neither command is a substitute for card authoring or correctness validation.
+- `upsert-card` validates the candidate card, persists it to the store, and syncs it into the live graph with restart semantics.
+- `deprecate` removes that node from the live graph.
+- For board behavior, removing the card from the board is what changes the live dependency graph.
+- These commands are not substitutes for card authoring or correctness validation; `upsert-card` only wraps the minimal validation needed before syncing live.
 
 ## Command Surface
 
 Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.mjs <subcommand>
+node ./.github/scripts/manage-live-board-card.js <subcommand>
 ```
 
-### Add or sync one card into the board runtime
+### Read one stored card before operating on it
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.mjs upsert-card --base-ref <board-ref> --card-id <card-id>
+node ./.github/scripts/manage-live-board-card.js read-card --store-ref <store-ref> --card-id <card-id>
 ```
 
-Use this when the card already exists in the card store and should be made
-present in the live board runtime.
+Use this when you need to inspect the current stored card before deciding
+whether to upsert or deprecate it.
 
-This is the normal command for introducing a stored card into the board graph.
-It makes the runtime see the card's `requires`, `provides`, sources, compute,
-and view definition.
-
-### Restart one card after syncing it
+### Read all stored cards in a store
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.mjs upsert-card --base-ref <board-ref> --card-id <card-id> --restart
+node ./.github/scripts/manage-live-board-card.js read-all-cards --store-ref <store-ref>
 ```
 
-Use `--restart` when the card is already present but should be retriggered after
-a material change.
+Use this only when you need nearby examples or need to inspect the store before
+a board-level decision.
+
+### Upsert one card into the board runtime
+
+```bash
+cat payload.json | node ./.github/scripts/manage-live-board-card.js upsert-card --store-ref <store-ref> --base-ref <board-ref> --card-id <card-id>
+```
+
+Upsert payload shape:
+
+```json
+{
+  "candidate_card_content": {
+    "id": "<card-id>"
+  }
+}
+```
+
+Use this when the candidate card content should be persisted and made present
+in the live board runtime in one step.
 
 Typical reasons:
 
 - the stored card JSON changed materially
-- the stored card definition changed materially
-- its runtime should be re-evaluated immediately
+- the card was newly authored and should now go live
+- its runtime should be restarted immediately
 - you want downstream dependents to see the fresh graph state
-
-### Add or resync all stored cards
-
-```bash
-node ./.github/scripts/board-live-cards-cli.mjs upsert-card --base-ref <board-ref> --all
-```
-
-Use this only when the task explicitly calls for board-wide resync.
 
 ### Remove one card from the board runtime
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.mjs remove-card --base-ref <board-ref> --id <card-id>
+node ./.github/scripts/manage-live-board-card.js deprecate --base-ref <board-ref> --card-id <card-id>
 ```
 
 Use this when the card should stop existing on the live board but should remain
@@ -154,11 +162,11 @@ the board graph. For graph semantics, this is the deletion that matters.
 
 ## Command Rules
 
-- Before `upsert-card`, make sure the target card already exists in the card store.
-- Prefer single-card operations over `--all` unless the task is explicitly board-wide.
-- If a card was just authored or edited, persist it first through `card-store-commands`, then upsert it into the board.
+- `upsert-card` expects `candidate_card_content` on stdin and validates that its `id` matches `--card-id`.
+- `upsert-card` persists the candidate card to the store and syncs it into the board in one command.
+- Use `read-card` if you need the current stored card before building the upsert payload.
+- Use `read-all-cards` only when the task is explicitly store-wide.
 - If a card publishes tokens consumed by other cards, expect board behavior to change when it is removed.
-- If a changed card should affect downstream dependents immediately, prefer `upsert-card --restart`.
 - Do not describe board membership changes as mere storage changes; they change the live graph.
 
 ## How to Think About Add vs Remove
@@ -181,7 +189,7 @@ Be careful: removing a provider card can leave downstream cards waiting on now-m
 
 1. Decide whether the task is about live presence, stored card data, or both.
 2. Identify whether the card is mainly a source/provider, a compute consumer, a UI-only card, or a mix.
-3. If the card content changed, persist the card through `card-store-commands` first.
-4. Use `upsert-card` to add or resync the card into the live board.
-5. Use `upsert-card --restart` when the runtime should immediately retrigger from the new definition.
-6. Use `remove-card` only for runtime removal from the board graph.
+3. If you need the current stored shape, load it with `read-card` first.
+4. Build the full `candidate_card_content` payload for the intended live card.
+5. Use `upsert-card` to validate, persist, and sync the card into the live board.
+6. Use `deprecate` only for runtime removal from the board graph.
