@@ -27,9 +27,10 @@ shared reference:
 - `card-source-defs` for supported source kinds, valid source fields, and source probing
 - `ensure-card-correctness` for validation, probing, and repair
 - `add-remove-card-from-board` for live board membership and retrigger semantics
+- `cards-runtime-status` for live board status, runtime outputs, computed values, and holistic card definition-plus-runtime inspection
 - `card-store-commands` for stored card CRUD
-- `artifacts-store-commands` for uploaded or attached files
-- `chat-store-commands` for card chat history
+- `artifacts-store-commands` for discovering attached files and reading file contents
+- `chat-store-commands` for card chat history and final assistant-message append
 
 For durable board-level and cross-board lore, call the `lore.*` MCP tools directly (`lore.get`, `lore.get_all`, `lore.list_scopes`, `lore.set`, `lore.append`, `lore.deprecate`) instead of any local CLI. Use scope `board/<boardId>` for board lore and `global` for cross-board user lore.
 
@@ -147,11 +148,14 @@ Source definitions may be:
 Use `card-source-defs` when the question is specifically about which source
 kinds exist, which authored fields a kind accepts, or how to probe a source.
 
+For capability discovery, use the staged wrapper `discover-source-kinds.js --base-ref <board-ref>`
+instead of calling executor discovery surfaces directly.
+
 The executor exposes capability discovery, validation, source preflight, and
 fetch execution. Use `ensure-card-correctness` for the authoritative validation,
 source-preflight, compute-check, and repair workflow. In that workflow, use
-`run-source-preflight` when the agent needs proof that the authored source
-works end to end, and use `probe-source-preflight` only for lightweight
+`preflight-run-single-source-in-candidate-card.js` when the agent needs proof that the authored source
+works end to end, and use `preflight-probe-single-source-in-candidate-card.js` only for lightweight
 readiness, connectivity, or configuration probing.
 
 ## Agentic Chat And Context
@@ -189,9 +193,9 @@ When the visible board context or prior interaction context matters, reconstruct
 it through the command skills instead of guessing:
 
 - use `card-store-commands` to inspect stored card definitions and nearby card context
-- use `cards-runtime-status` to inspect board status, published data objects, and computed values
+- use `cards-runtime-status` to inspect board status, published data objects, computed values, or one stitched card definition-and-runtime view
 - use `chat-store-commands` to inspect the current card chat or relevant nearby card chats
-- use `artifacts-store-commands` to inspect uploaded or attached artifacts
+- use `artifacts-store-commands` to discover attached files and read file contents
 
 Treat these sources together as the main way to recover the user's working
 context when the current request depends on what they are seeing on the board.
@@ -288,7 +292,9 @@ Agents are allowed to change the live board by operating on cards as data:
 - upsert that card into the live board
 - remove a card from the live board
 
-Use `add-remove-card-from-board` for the board live-card commands that add, upsert, restart, or remove cards.
+Use `add-remove-card-from-board` for the board live-card commands exposed through
+`manage-live-board-card.js`, including reading the current stored card, upserting
+candidate card content into the live board, and deprecating a live board card.
 
 ## Dynamic Views Of Known Kinds
 
@@ -386,7 +392,7 @@ repair rules around projections.
 Rather than guessing which source kinds or source fields the registered executor supports, query it directly:
 
 ```bash
-node board-live-cards-cli.mjs describe-task-executor-capabilities --rg <boardDir>
+node ./.github/scripts/discover-source-kinds.js --base-ref <board-ref>
 ```
 
 Use this before authoring or repairing a source. If the kind is missing from the

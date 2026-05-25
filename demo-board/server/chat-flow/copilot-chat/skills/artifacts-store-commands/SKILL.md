@@ -1,86 +1,66 @@
 ---
 name: artifacts-store-commands
 description: >
-  Read uploaded or attached artifacts for a card/chat from the current yaml-flow artifacts store
-  using `store-ref` and artifact keys. Use for card or chat attachments when an
-  agent needs to inspect artifacts.
+  Read uploaded or attached files for a card/chat through the staged board-ref and
+  file-ref inspection wrappers. Use for card or chat attachments when an agent
+  needs to discover file refs or inspect file contents.
 ---
 
-# Artifacts Store Commands
+# Attached File Inspection
 
 ## When to Use
 
-Use this skill whenever a task needs to inspect artifacts uploaded or attached by a
+Use this skill whenever a task needs to inspect files uploaded or attached by a
 user for a card or chat.
-
-For both card uploads and chat attachments, the artifact key should normally
-come from the stored card's `card_data.files` section after loading the card
-through `card-store-commands`.
 
 Use it especially when the task already has:
 
-- `store-ref`
-- an artifact key, or enough context to list candidate keys
+- `base-ref` and `card-id` and needs to discover attached file refs
+- a `file-ref` and needs the file contents
 
-This skill is read-only. Do not use write or delete operations from the
-artifacts store CLI in this workflow.
+This skill is read-only.
 
 ## Command Surface
 
-Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
+Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`.
+
+### Read card-level attached file refs
 
 ```bash
-node ./.github/scripts/artifacts-store-cli.mjs <subcommand>
+node ./.github/scripts/inspect-card-definition-and-runtime.js --base-ref <board-ref> --card-id <card-id>
 ```
 
-### Read one artifact as text
+Use the top-level `refs-for-attached-files` array to discover file refs derived from `card_data.files` without changing the stored card payload.
+
+### Read chat-level attached file refs
 
 ```bash
-node ./.github/scripts/artifacts-store-cli.mjs get --store-ref <store-ref> --key <key> --as text
+node ./.github/scripts/inspect-chat-messages-on-cards.js --base-ref <board-ref> --card-id <card-id> get-messages
 ```
 
-Use this for text-like artifacts such as JSON, Markdown, logs, YAML, or source files.
+Use this when the relevant file came through chat attachments or upload-related system messages. The chat inspect output already includes `file_refs` on attachment-bearing messages and `file_ref` on the relevant upload system messages.
 
-### Read one artifact as bytes metadata
+### Read one attached file's contents
 
 ```bash
-node ./.github/scripts/artifacts-store-cli.mjs get --store-ref <store-ref> --key <key>
+node ./.github/scripts/inspect-file-contents.js --file-ref <file-ref>
 ```
 
-This returns artifact metadata plus byte length when printed to stdout.
-
-### Read artifact metadata only
-
-```bash
-node ./.github/scripts/artifacts-store-cli.mjs head --store-ref <store-ref> --key <key>
-```
-
-Use this when you need to confirm existence, size, content type, or update time before fetching content.
-
-### List artifact keys
-
-```bash
-node ./.github/scripts/artifacts-store-cli.mjs list --store-ref <store-ref>
-```
-
-Limit the scan when you know a prefix:
-
-```bash
-node ./.github/scripts/artifacts-store-cli.mjs list --store-ref <store-ref> --prefix <prefix>
-```
-
-Use this only when the needed file is not already discoverable from the stored
-card metadata.
+Use this after discovering the `file_ref` from card inspect or chat inspect.
 
 ## Command Rules
 
 - Treat this skill as read-only.
-- For both card uploads and chat attachments, prefer reading the stored card first and taking the artifact key from `card_data.files`.
-- Use `list --prefix` when you know part of the artifact namespace to avoid broad scans.
-- Do not use `put` or `del` from this skill.
+- Do not mutate the stored card payload just to surface file refs.
+- Prefer `refs-for-attached-files` from card inspect for card-level files.
+- Prefer chat inspect when the file came through chat context or upload flow.
+- Use the returned `file_ref` as the only input to `inspect-file-contents.js`.
+- Do not use raw artifacts store write or delete surfaces from this skill.
 
 ## Recommended Workflow
 
-1. If you encounter any chat reference or need to refer to cards, load the card first and look in `card_data.files` for the artifact key.
-2. If you still do not know the exact artifact key, use `list --store-ref <store-ref> [--prefix <prefix>]`.
-3. Keep the operation read-only; do not modify the artifact store from this workflow.
+1. Use `inspect-card-definition-and-runtime.js --base-ref <board-ref> --card-id <card-id>` when you need refs for files stored on the card itself.
+2. Use `inspect-chat-messages-on-cards.js --base-ref <board-ref> --card-id <card-id> get-messages` when you need refs from chat attachments or upload-related system messages.
+3. Pick the correct `file_ref` from the returned inspect surface.
+4. Use `inspect-file-contents.js --file-ref <file-ref>` when you need the file contents.
+5. Keep the workflow read-only.

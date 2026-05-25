@@ -1,8 +1,8 @@
 ---
 name: ensure-card-correctness
 description: >
-  Validate and repair a board card end to end using the current yaml-flow
-  preflight CLI. Use after creating or editing a card definition, especially when the
+  Validate and repair a board card end to end using the current staged wrapper
+  commands. Use after creating or editing a card definition, especially when the
   change touches `source_defs`, `compute`, `card_data`, `requires`, `provides`, or `card layout`.
 ---
 
@@ -25,7 +25,7 @@ Use it especially when the change affects:
 - `provides[]`
 - `view`
 
-This skill is the command reference for the current yaml-flow CLI commands.
+This skill is the command reference for the current staged wrapper commands.
 Use the commands in this file as the authoritative validation and repair workflow.
 
 If a validation or repair task depends on decisions captured in another card's discussion, use `chat-store-commands` to read that chat history before making further changes.
@@ -58,7 +58,7 @@ correctness checks.
 
 - If a source uses `projections`, those expressions may read only from `card_data` and `requires`.
 - Do not introduce `fetched_sources`, `computed_values`, or `source_defs` into `projections` while repairing a card.
-- If a source repair changes projections, build the smallest `mock-projections` payload that exercises that same source.
+- If a source repair changes projections, build the smallest `mock_projections` payload that exercises that same source.
 - Treat source-specific fields beyond the shared source fields as kind-specific; use `card-source-defs` when you need to confirm the valid source fields instead of guessing broad new shapes.
 
 Use `card-source-defs` when the repair question is specifically about supported
@@ -69,7 +69,7 @@ source kinds, valid source fields, or which source probe to run.
 Run these commands from the Copilot workspace root using the staged CLI in `.github/scripts`:
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.mjs validate-card-preflight
+node ./.github/scripts/preflight-validate-candidate-card-definition.js
 ```
 
 The commands below are payload-driven and read JSON from stdin.
@@ -77,19 +77,14 @@ The commands below are payload-driven and read JSON from stdin.
 ### 1. Validate card structure and semantics
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.mjs validate-card-preflight
+cat payload.json | node ./.github/scripts/preflight-validate-candidate-card-definition.js
 ```
-
-Accepted stdin shapes:
-
-- raw card object
-- `{ "card-content": <card-json> }`
 
 Actual payload contract:
 
 - stdin must be a JSON object
-- the command validates `body["card-content"] ?? body`
-- no top-level mock fields are used by this command
+- required top-level field is `candidate_card_content`
+- `candidate_card_content` must be a JSON object
 
 Expected result shape:
 
@@ -107,41 +102,36 @@ Expected result shape:
 ### 2. Run one source actual fetch preflight
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.mjs run-source-preflight --source-idx 0
+cat payload.json | node ./.github/scripts/preflight-run-single-source-in-candidate-card.js --source-idx 0
 ```
 
-The stdin payload should contain either the raw card object or:
+The stdin payload should be:
 
 ```json
 {
-  "card-content": { "id": "...", "source_defs": [] },
-  "mock-projections": {}
+  "candidate_card_content": { "id": "...", "source_defs": [] },
+  "mock_projections": {}
 }
 ```
 
 Actual payload contract:
 
 - stdin must be a JSON object
-- the command reads `body["card-content"] ?? body`
-- the command reads `body["mock-projections"] ?? {}`
+- required top-level fields are `candidate_card_content` and `mock_projections`
+- each required field must be a JSON object
 - the command requires `--source-idx <n>`
-- the command does not read `mock-requires` or `mock-fetched-sources`
 
 Required argument:
 
 - `--source-idx <n>`: zero-based source index in `source_defs[]`
 
-Optional:
-
-- `--out-ref <ref>` if a downstream workflow explicitly needs the result stored
-
 Mental model:
 
-- `run-source-preflight` is the authoritative real-flow preflight.
+- `preflight-run-single-source-in-candidate-card.js` is the authoritative real-flow preflight.
 - It runs the selected source's real fetch path end to end for the current `source_def`.
 - Use it to verify that the chosen fetch path actually works with the current source definition and projections.
 - It is not a synthetic dry run, mock-only check, or metadata-only validation step.
-- `probe-source-preflight` is the lightweight variant and is useful only for quick readiness, connectivity, or configuration probing.
+- `preflight-probe-single-source-in-candidate-card.js` is the lightweight variant and is useful only for quick readiness, connectivity, or configuration probing.
 
 Expected result includes fields like:
 
@@ -153,7 +143,7 @@ Expected result includes fields like:
 ### 2a. Run one source lightweight probe
 
 ```bash
-node ./.github/scripts/board-live-cards-cli.mjs probe-source-preflight --source-idx 0
+cat payload.json | node ./.github/scripts/preflight-probe-single-source-in-candidate-card.js --source-idx 0
 ```
 
 Use this only when you need a lightweight readiness probe rather than proof that the full source flow works.
@@ -170,21 +160,16 @@ Expected result includes fields like:
 Use the staged helper when you need the authored card's `provided_outputs` and
 resolved `view_model`, not just raw `computed_values`.
 
-Run this helper from the directory that contains both scripts. The helper makes
-one assumption only: `./board-live-cards-cli.mjs` is available in the current
-directory.
-
 ```bash
-cat payload.json | node ./materialize-live-card.js
+cat payload.json | node ./.github/scripts/preflight-materialize-candidate-card.js
 ```
 
 Payload contract:
 
 - stdin must be a JSON object
-- required top-level fields are `card-content`, `mock-fetched-sources`, and `mock-requires`
+- required top-level fields are `candidate_card_content`, `mock_fetched_sources`, and `mock_requires`
 - each required field must be a JSON object
-- empty objects are allowed for `mock-fetched-sources` and `mock-requires`
-- the helper accepts stdin only
+- the wrapper accepts stdin only
 
 Expected result includes:
 
@@ -195,17 +180,16 @@ Expected result includes:
 ### 4. Simulate the full card cycle
 
 ```bash
-cat payload.json | node ./run-one-card-cycle.js --base-ref <board-ref>
+cat payload.json | node ./.github/scripts/preflight-run-one-cycle-with-candidate-card.js --base-ref <board-ref>
 ```
 
 Use this when the card couples validation, projections, sources, and compute and
 you want a combined result in one pass, including materialized `provides[]` and
-`view` on top of the CLI's `simulate-card-cycle` output.
+`view`.
 
 Expected result includes:
 
 - `validation`
-- `fetched_sources`
 - `projection_errors`
 - `computed_values`
 - `compute_errors`
@@ -216,25 +200,24 @@ Expected result includes:
 Actual payload contract:
 
 - stdin must be a JSON object
-- required top-level fields are `card-content` and `mock-requires`
+- required top-level fields are `candidate_card_content` and `mock_requires`
 - each required field must be a JSON object
-- empty objects are allowed for `mock-requires`
+- empty objects are allowed for `mock_requires`
 - the wrapper accepts stdin only
 - source preflight still runs against the card's `source_defs[]`
-- the wrapper exposes the source section as `fetched_sources`
-- `provided_outputs` and `view_model` are materialized from the card plus `mock-requires` and returned `computed_values`
-- because `simulate-card-cycle` does not return fetched source payloads, `fetched_sources.*` bindings in `provides[]` or `view` remain unresolved in this wrapper output
+- `provided_outputs` and `view_model` are materialized from the card plus `mock_requires` and returned `computed_values`
+- `fetched_sources.*` bindings in `provides[]` or `view` should be checked with source preflight or focused materialization when they matter
 
 ## Repair Workflow
 
 Follow this exact order.
 
-1. Run `validate-card-preflight` first.
+1. Run `preflight-validate-candidate-card-definition.js` first.
 2. If it reports issues, repair the card definition first. Do not move to probing or compute until validation is clean.
-3. If the changed card has `source_defs[]`, build the smallest payload that exercises only the touched source and run `run-source-preflight` for each changed source index.
-4. If the changed card has `compute[]`, `provides[]`, or `view`, build the smallest representative mocks and run `materialize-live-card.js`.
-5. Use `materialize-live-card.js` to verify `computed_values`, `provided_outputs`, and `view_model` together from one payload.
-6. If targeted checks are individually clean but the card is still suspicious, run `run-one-card-cycle.js` to surface cross-layer inconsistencies and verify materialized `provides[]` and `view` in the same pass.
+3. If the changed card has `source_defs[]`, build the smallest payload that exercises only the touched source and run `preflight-run-single-source-in-candidate-card.js` for each changed source index.
+4. If the changed card has `compute[]`, `provides[]`, or `view`, build the smallest representative mocks and run `preflight-materialize-candidate-card.js`.
+5. Use `preflight-materialize-candidate-card.js` to verify `computed_values`, `provided_outputs`, and `view_model` together from one payload.
+6. If targeted checks are individually clean but the card is still suspicious, run `preflight-run-one-cycle-with-candidate-card.js` to surface cross-layer inconsistencies and verify materialized `provides[]` and `view` in the same pass.
 7. Repeat until validation is clean and every touched source, compute path, and materialized `provides[]` or `view` path has a passing result.
 
 ## Preferred Scope Discipline
@@ -243,16 +226,16 @@ Follow this exact order.
 - Never change the `id` of a card.
 - Start with the one source index or compute path you changed.
 - Use minimal mocks, not full board snapshots.
-- Escalate to `run-one-card-cycle.js` only when narrower checks are insufficient.
+- Escalate to `preflight-run-one-cycle-with-candidate-card.js` only when narrower checks are insufficient.
 - Repair the card itself, not unrelated board infrastructure.
 
 ## How to Interpret Failures
 
-- `validate-card-preflight` failures usually mean schema issues, invalid JSONata, invalid namespaces, or unsupported source fields.
-- `probe-source-preflight` failures usually mean readiness, connectivity, or configuration issues in the lightweight probe path.
-- `run-source-preflight` failures usually mean the actual fetch path failed because of projection shape problems, missing required source fields, or runtime connectivity/config issues.
-- `materialize-live-card.js` failures usually mean broken compute expressions, wrong mock input shape, or card `provides[].ref` / `view` bindings that do not line up with the runtime namespaces produced by the card.
-- `run-one-card-cycle.js` failures usually mean multiple layers are inconsistent; use its validation, source, compute, and materialized output sections to route the repair back to validation, source defs, compute, `provides[]`, or `view`.
+- `preflight-validate-candidate-card-definition.js` failures usually mean schema issues, invalid JSONata, invalid namespaces, or unsupported source fields.
+- `preflight-probe-single-source-in-candidate-card.js` failures usually mean readiness, connectivity, or configuration issues in the lightweight probe path.
+- `preflight-run-single-source-in-candidate-card.js` failures usually mean the actual fetch path failed because of projection shape problems, missing required source fields, or runtime connectivity/config issues.
+- `preflight-materialize-candidate-card.js` failures usually mean broken compute expressions, wrong mock input shape, or card `provides[].ref` / `view` bindings that do not line up with the runtime namespaces produced by the card.
+- `preflight-run-one-cycle-with-candidate-card.js` failures usually mean multiple layers are inconsistent; use its validation, source, compute, and materialized output sections to route the repair back to validation, source defs, compute, `provides[]`, or `view`.
 
 Common repair routing:
 
@@ -267,14 +250,14 @@ Common repair routing:
 - Prefer minimal mock payloads. Only include the fields needed to exercise the touched source or compute path.
 - If you edit only layout/view and validation passes, you usually do not need source probing.
 - If you edit `source_defs[]`, do not stop at validation; always probe the touched sources.
-- If you edit `compute[]`, do not stop at validation; run `materialize-live-card.js` with representative mocks.
+- If you edit `compute[]`, do not stop at validation; run `preflight-materialize-candidate-card.js` with representative mocks.
 
 ## Payload Construction Rules
 
-- If only validation is needed, stdin can be the raw card object.
-- If probing a source, prefer `{ "card-content": <card>, "mock-projections": { ... } }`.
-- If evaluating compute or validating `provides[]` / `view`, use `{ "card-content": <card>, "mock-fetched-sources": { ... }, "mock-requires": { ... } }` with `materialize-live-card.js`.
-- If simulating a full cycle, use `{ "card-content": <card>, "mock-requires": { ... } }` and run it through `run-one-card-cycle.js --base-ref <board-ref>`.
+- If only validation is needed, use `{ "candidate_card_content": <card> }`.
+- If probing a source, use `{ "candidate_card_content": <card>, "mock_projections": { ... } }`.
+- If evaluating compute or validating `provides[]` / `view`, use `{ "candidate_card_content": <card>, "mock_fetched_sources": { ... }, "mock_requires": { ... } }` with `preflight-materialize-candidate-card.js`.
+- If simulating a full cycle, use `{ "candidate_card_content": <card>, "mock_requires": { ... } }` and run it through `preflight-run-one-cycle-with-candidate-card.js --base-ref <board-ref>`.
 - Required top-level fields must be present even when their values are empty objects.
 - Use realistic field names and shapes, but keep the payload as small as possible.
 - Preserve the actual `id`, `bindTo`, `outputFile`, and compute expressions from the card under repair.
@@ -285,7 +268,7 @@ Common repair routing:
 
 ```json
 {
-  "card-content": {
+  "candidate_card_content": {
     "id": "card-example",
     "card_data": {},
     "source_defs": [
@@ -295,7 +278,7 @@ Common repair routing:
       }
     ]
   },
-  "mock-projections": {
+  "mock_projections": {
     "holdings": [
       { "ticker": "AAPL", "quantity": 1 }
     ]
@@ -307,7 +290,7 @@ Common repair routing:
 
 ```json
 {
-  "card-content": {
+  "candidate_card_content": {
     "id": "card-example",
     "card_data": {},
     "compute": [
@@ -321,13 +304,13 @@ Common repair routing:
       }
     ]
   },
-  "mock-requires": {
+  "mock_requires": {
     "holdings": [
       { "ticker": "AAPL", "quantity": 1 },
       { "ticker": "MSFT", "quantity": 2 }
     ]
   },
-  "mock-fetched-sources": {
+  "mock_fetched_sources": {
     "quotes": {
       "rows": [
         { "ticker": "AAPL", "price": 189.5 },
@@ -342,7 +325,7 @@ Common repair routing:
 
 ```json
 {
-  "card-content": {
+  "candidate_card_content": {
     "id": "card-example",
     "card_data": {
       "title": "Example card"
@@ -363,7 +346,7 @@ Common repair routing:
       }
     ]
   },
-  "mock-requires": {
+  "mock_requires": {
     "holdings": [
       { "ticker": "AAPL", "quantity": 1 }
     ]
@@ -371,7 +354,7 @@ Common repair routing:
 }
 ```
 
-This form is the default simulation payload: validation runs, projections are resolved from `mock-requires`, and source preflight runs against the card's `source_defs[]`.
+This form is the default simulation payload: validation runs, projections are resolved from `mock_requires`, and source preflight runs against the card's `source_defs[]`.
 
 
  
