@@ -429,6 +429,7 @@ if (!process.env.DEMO_INFERENCE_ADAPTER_PATH && configuredInferenceAdapterPath) 
 }
 
 const PORT = Number(process.env.DEMO_SERVER_PORT || serverConfig.port || 7799);
+const HOST = String(process.env.DEMO_SERVER_HOST || serverConfig.host || '127.0.0.1').trim() || '127.0.0.1';
 const SERVER_STARTED_AT = Date.now();
 const SERVER_INSTANCE_ID = `${process.pid}-${SERVER_STARTED_AT}`;
 const cardsPatternArgIndex = cliArgs.indexOf('--cards-pattern');
@@ -1280,7 +1281,11 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
 
 function jsonReply(res, status, payload) {
   const body = JSON.stringify(payload);
-  res.writeHead(status, { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(status, {
+    ...CORS_HEADERS,
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+  });
   res.end(body);
 }
 
@@ -1640,8 +1645,8 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[board-server] listening on http://127.0.0.1:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`[board-server] listening on http://${HOST}:${PORT}`);
   console.log('[board-server] endpoints:');
   console.log('  GET  /healthz                               <- process liveness probe');
   console.log(`  GET  ${apiBasePath}                          <- list boards`);

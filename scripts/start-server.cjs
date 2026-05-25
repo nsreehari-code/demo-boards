@@ -43,6 +43,7 @@ const sharedEnv = {
   BOARD_LIVE_CARDS_CLI_JS: boardLiveCardsCliJs,
   DEMO_STEP_MACHINE_CLI_PATH: stepMachineCliPath,
 };
+const backendHost = String(sharedEnv.DEMO_SERVER_HOST || '127.0.0.1').trim() || '127.0.0.1';
 
 function isPortReachable(port, host = '127.0.0.1', timeoutMs = 500) {
   return new Promise((resolve) => {
@@ -75,7 +76,7 @@ async function handleMcpExit(code) {
 }
 
 console.log(`[start-server] board dir: ${boardDir}`);
-console.log('[start-server] backend:  http://127.0.0.1:7799');
+console.log(`[start-server] backend:  http://${backendHost}:7799`);
 console.log('[start-server] mcp:      http://127.0.0.1:7801/mcp');
 console.log('[start-server] frontend: http://127.0.0.1:8000');
 

@@ -1,4 +1,5 @@
 {
+  "host": "0.0.0.0",
   "port": 7799,
   "prestart": [
     "node ./server/sync-copilot-mcp-config.js --refresh"
