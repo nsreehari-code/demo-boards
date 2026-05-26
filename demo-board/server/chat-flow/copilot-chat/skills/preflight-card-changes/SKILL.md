@@ -131,7 +131,7 @@ Returns `computed_values`, `provided_outputs`, and `view_model` together.
 ### 5. Full card-cycle simulation
 
 ```bash
-cat payload.json | node ./.github/scripts/preflight-run-one-cycle-with-candidate-card.js --base-ref <board-ref>
+cat payload.json | node ./.github/scripts/preflight-run-one-cycle-with-candidate-card.js
 ```
 
 Payload:
@@ -205,7 +205,7 @@ Common routing:
 - Evaluating compute, `provides[]`, or `view`:
   `{ "candidate_card_content": <card>, "mock_fetched_sources": { /* ... */ }, "mock_requires": { /* ... */ } }`.
 - Simulating one cycle: `{ "candidate_card_content": <card>, "mock_requires": { /* ... */ } }`
-  with `preflight-run-one-cycle-with-candidate-card.js --base-ref <board-ref>`.
+  with `preflight-run-one-cycle-with-candidate-card.js`.
 - Required top-level fields must be present even when their values are empty
   objects.
 - Use realistic field names but keep payloads as small as possible.

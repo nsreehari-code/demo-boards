@@ -4,17 +4,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { log_it, readKnownBaseRef, resolveKnownYamlFlowCliPath } from './shared_helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const boardLiveCardsCliPath = path.join(__dirname, 'board-live-cards-cli.mjs');
-const cardStoreCliPath = path.join(__dirname, 'card-store-cli.mjs');
+const boardLiveCardsCliPath = resolveKnownYamlFlowCliPath('board-live-cards-cli.mjs');
+const cardStoreCliPath = resolveKnownYamlFlowCliPath('card-store-cli.mjs');
 const validateCandidateCardPath = path.join(__dirname, 'preflight-validate-candidate-card-definition.js');
 
 const usageLines = [
   'Usage:',
-  '  node manage-live-board-card.js read-card --store-ref <store-ref> --card-id <card-id>',
-  '  cat payload.json | node manage-live-board-card.js upsert-card --store-ref <store-ref> --base-ref <board-ref> --card-id <card-id>',
-  '  node manage-live-board-card.js deprecate --base-ref <board-ref> --card-id <card-id>',
+  '  node manage-live-board-card.js read-card [--base-ref <board-ref> | --store-ref <store-ref>] --card-id <card-id>',
+  '  cat payload.json | node manage-live-board-card.js upsert-card [--base-ref <board-ref>] --card-id <card-id>',
+  '  node manage-live-board-card.js deprecate [--base-ref <board-ref>] --card-id <card-id>',
   '',
   'Upsert payload shape:',
   '  { "candidate_card_content": <card> }',
@@ -112,20 +113,58 @@ function runJsonScript(scriptPath, scriptArgs, payload) {
   return JSON.parse(result.stdout);
 }
 
+function unwrapSuccessfulEnvelope(result, commandName) {
+  if (result?.status === 'success') {
+    return Object.prototype.hasOwnProperty.call(result, 'data') ? result.data : null;
+  }
+
+  if (result?.status === 'fail' || result?.status === 'error') {
+    throw new Error(result.error || `${commandName} failed`);
+  }
+
+  throw new Error(`${commandName} returned an unexpected response shape`);
+}
+
+function readCardStoreRef(baseRef) {
+  const result = runJsonScript(boardLiveCardsCliPath, ['get-card-store-ref', '--base-ref', baseRef]);
+  const data = unwrapSuccessfulEnvelope(result, 'get-card-store-ref');
+  const storeRef = data?.storeRef ?? data?.value;
+  if (typeof storeRef !== 'string' || !storeRef.trim()) {
+    throw new Error('get-card-store-ref did not return a card store ref');
+  }
+  return storeRef.trim();
+}
+
+function resolveBaseRef(flags) {
+  if (typeof flags['base-ref'] === 'string' && flags['base-ref'].trim()) {
+    return flags['base-ref'].trim();
+  }
+
+  return readKnownBaseRef();
+}
+
+function resolveCardStoreRef(flags) {
+  if (typeof flags['store-ref'] === 'string' && flags['store-ref'].trim()) {
+    return flags['store-ref'].trim();
+  }
+
+  return readCardStoreRef(resolveBaseRef(flags));
+}
+
 function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 function handleReadCard(flags) {
-  const storeRef = requireArgText(flags, 'store-ref');
+  const storeRef = resolveCardStoreRef(flags);
   const cardId = requireArgText(flags, 'card-id');
   const result = runJsonScript(cardStoreCliPath, ['get', '--store-ref', storeRef, '--id', cardId]);
   printJson(result);
 }
 
 function handleUpsertCard(flags) {
-  const storeRef = requireArgText(flags, 'store-ref');
-  const baseRef = requireArgText(flags, 'base-ref');
+  const baseRef = resolveBaseRef(flags);
+  const storeRef = readCardStoreRef(baseRef);
   const cardId = requireArgText(flags, 'card-id');
   const candidateCard = readCandidateCardPayload();
 
@@ -163,14 +202,16 @@ function handleUpsertCard(flags) {
 }
 
 function handleDeprecate(flags) {
-  const baseRef = requireArgText(flags, 'base-ref');
+  const baseRef = resolveBaseRef(flags);
   const cardId = requireArgText(flags, 'card-id');
   const result = runJsonScript(boardLiveCardsCliPath, ['remove-card', '--base-ref', baseRef, '--id', cardId]);
   printJson(result);
 }
 
 function main() {
-  const { command, flags } = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  log_it('manage-live-board-card.js', argv.join(' '));
+  const { command, flags } = parseArgs(argv);
   if (flags.help || flags.h) {
     printUsage(0);
   }

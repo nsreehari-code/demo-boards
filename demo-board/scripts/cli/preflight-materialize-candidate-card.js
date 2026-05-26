@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { log_it } from './shared_helpers.js';
 import {
   isHelpRequested,
   parseArgs,
@@ -18,7 +19,9 @@ const usageLines = [
 ];
 
 function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  log_it('preflight-materialize-candidate-card.js', argv.join(' '));
+  const args = parseArgs(argv);
   if (isHelpRequested(args)) {
     printUsage(usageLines, 0);
   }

@@ -88,7 +88,7 @@ Run these from the Copilot workspace root using the staged CLI in
 ### Read the exact stored card
 
 ```bash
-node ./.github/scripts/manage-live-board-card.js read-card --store-ref <store-ref> --card-id <card-id>
+node ./.github/scripts/manage-live-board-card.js read-card --card-id <card-id>
 ```
 
 Use this when you need the raw stored card as the basis for a precise repair.
@@ -96,7 +96,7 @@ Use this when you need the raw stored card as the basis for a precise repair.
 ### Upsert a card into the live board
 
 ```bash
-cat payload.json | node ./.github/scripts/manage-live-board-card.js upsert-card --store-ref <store-ref> --base-ref <board-ref> --card-id <card-id>
+cat payload.json | node ./.github/scripts/manage-live-board-card.js upsert-card --card-id <card-id>
 ```
 
 Payload:
@@ -113,7 +113,7 @@ This is the default persistence path after authoring or editing.
 ### Deprecate (remove) a card from the live board
 
 ```bash
-node ./.github/scripts/manage-live-board-card.js deprecate --base-ref <board-ref> --card-id <card-id>
+node ./.github/scripts/manage-live-board-card.js deprecate --card-id <card-id>
 ```
 
 Removes the card's node and its published tokens from the live graph. Be
