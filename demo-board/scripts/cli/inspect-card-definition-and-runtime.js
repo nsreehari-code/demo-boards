@@ -2,15 +2,14 @@
 
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { log_it, readKnownBaseRef, resolveKnownYamlFlowCliPath } from './shared_helpers.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const boardLiveCardsCliPath = path.join(__dirname, 'board-live-cards-cli.mjs');
-const cardStoreCliPath = path.join(__dirname, 'card-store-cli.mjs');
+const boardLiveCardsCliPath = resolveKnownYamlFlowCliPath('board-live-cards-cli.mjs');
+const cardStoreCliPath = resolveKnownYamlFlowCliPath('card-store-cli.mjs');
 
 const usageLines = [
   'Usage:',
-  '  node inspect-card-definition-and-runtime.js --base-ref <board-ref> --card-id <card-id>',
+  '  node inspect-card-definition-and-runtime.js --card-id <card-id>',
 ];
 
 function parseArgs(argv) {
@@ -247,7 +246,9 @@ function printJson(value) {
 }
 
 function main() {
-  const { command, flags } = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  log_it('inspect-card-definition-and-runtime.js', argv.join(' '));
+  const { command, flags } = parseArgs(argv);
   if (flags.help || flags.h) {
     printUsage(0);
   }
@@ -255,7 +256,7 @@ function main() {
     printUsage(1);
   }
 
-  const baseRef = requireArgText(flags, 'base-ref');
+  const baseRef = readKnownBaseRef();
   const cardId = requireArgText(flags, 'card-id');
   const statusPayload = readBoardStatus(baseRef);
   const cardStatusInBoard = Array.isArray(statusPayload?.cards)

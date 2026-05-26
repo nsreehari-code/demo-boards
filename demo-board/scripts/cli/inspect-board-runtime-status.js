@@ -2,14 +2,13 @@
 
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { log_it, readKnownBaseRef, resolveKnownYamlFlowCliPath } from './shared_helpers.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const boardLiveCardsCliPath = path.join(__dirname, 'board-live-cards-cli.mjs');
+const boardLiveCardsCliPath = resolveKnownYamlFlowCliPath('board-live-cards-cli.mjs');
 
 const usageLines = [
   'Usage:',
-  '  node inspect-board-runtime-status.js read-status --base-ref <board-ref>',
+  '  node inspect-board-runtime-status.js read-status',
 ];
 
 function parseArgs(argv) {
@@ -44,14 +43,6 @@ function printUsage(exitCode = 0) {
   const writer = exitCode === 0 ? process.stdout : process.stderr;
   writer.write(`${usageLines.join('\n')}\n`);
   process.exit(exitCode);
-}
-
-function requireArgText(flags, key) {
-  if (typeof flags[key] !== 'string' || !flags[key].trim()) {
-    printUsage(1);
-  }
-
-  return flags[key].trim();
 }
 
 function runBoardLiveCardsCli(args) {
@@ -118,13 +109,15 @@ function reshapeBoardStatus(statusPayload) {
 }
 
 function handleReadStatus(flags) {
-  const baseRef = requireArgText(flags, 'base-ref');
+  const baseRef = readKnownBaseRef();
   const result = runBoardLiveCardsCli(['status', '--base-ref', baseRef]);
   printJson(reshapeBoardStatus(unwrapSuccessfulEnvelope(result, 'status')));
 }
 
 function main() {
-  const { command, flags } = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  log_it('inspect-board-runtime-status.js', argv.join(' '));
+  const { command, flags } = parseArgs(argv);
   if (flags.help || flags.h) {
     printUsage(0);
   }

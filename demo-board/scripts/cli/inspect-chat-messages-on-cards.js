@@ -1,18 +1,23 @@
 #!/usr/bin/env node
 
-import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import {
+  buildStoredFileIndex,
+  enhanceChatMessageWithFileRefs,
+  log_it,
+  readKnownBaseRef,
+  resolveKnownYamlFlowCliPath,
+} from './shared_helpers.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const boardLiveCardsCliPath = path.join(__dirname, 'board-live-cards-cli.mjs');
-const chatStoreCliPath = path.join(__dirname, 'chat-store-cli.mjs');
-const cardStoreCliPath = path.join(__dirname, 'card-store-cli.mjs');
+const boardLiveCardsCliPath = resolveKnownYamlFlowCliPath('board-live-cards-cli.mjs');
+const chatStoreCliPath = resolveKnownYamlFlowCliPath('chat-store-cli.mjs');
+const cardStoreCliPath = resolveKnownYamlFlowCliPath('card-store-cli.mjs');
 
 const usageLines = [
   'Usage:',
-  '  node inspect-chat-messages-on-cards.js --base-ref <board-ref> --card-id <card-id> get-messages',
-  '  node inspect-chat-messages-on-cards.js --base-ref <board-ref> --card-id <card-id> --tail <n> get-messages',
+  '  node inspect-chat-messages-on-cards.js --card-id <card-id> get-messages',
+  '  node inspect-chat-messages-on-cards.js --card-id <card-id> --last-user-turns <n> get-messages',
+  '  node inspect-chat-messages-on-cards.js --card-id <card-id> --tail <n> get-messages',
 ];
 
 function parseArgs(argv) {
@@ -119,75 +124,15 @@ function readStoredCard(storeRef, cardId) {
   return result[0];
 }
 
-function readChatRecords(chatStoreRef, cardId) {
-  const result = runJsonScript(chatStoreCliPath, ['read-all', '--store-ref', chatStoreRef, '--card-id', cardId]);
+function readChatRecords(chatStoreRef, cardId, lastUserTurns = null) {
+  const scriptArgs = ['read-all', '--store-ref', chatStoreRef, '--card-id', cardId];
+  if (lastUserTurns !== null) {
+    scriptArgs.push('--last-user-turns', String(lastUserTurns));
+  }
+
+  const result = runJsonScript(chatStoreCliPath, scriptArgs);
   const records = Array.isArray(result) ? result : [];
   return records.filter((record) => record && typeof record === 'object');
-}
-
-function buildStoredFileIndex(storedCard) {
-  const files = Array.isArray(storedCard?.card_data?.files) ? storedCard.card_data.files : [];
-  return files.filter((fileEntry) => fileEntry && typeof fileEntry === 'object');
-}
-
-function enhanceMessage(message, storedFiles) {
-  const enhanced = {
-    ...message,
-  };
-
-  if (Array.isArray(message?.files)) {
-    enhanced.file_refs = message.files
-      .map((fileEntry) => toPublicFileRef(fileEntry))
-      .filter((fileRef) => typeof fileRef === 'string' && fileRef.length > 0);
-  }
-
-  if (message?.role === 'system' && typeof message?.text === 'string') {
-    const uploadIndexMatch = /file uploaded:.*#(\d+)\s*$/i.exec(message.text);
-    if (uploadIndexMatch) {
-      const uploadIndex = Number.parseInt(uploadIndexMatch[1], 10);
-      if (Number.isInteger(uploadIndex) && uploadIndex > 0) {
-        const fileEntry = storedFiles[uploadIndex - 1];
-        if (fileEntry) {
-          enhanced.file_ref = toPublicFileRef(fileEntry);
-        }
-      }
-    }
-  }
-
-  return enhanced;
-}
-
-function extractFileRef(fileEntry) {
-  if (!fileEntry || typeof fileEntry !== 'object' || Array.isArray(fileEntry)) {
-    return null;
-  }
-
-  const candidateKeys = ['path', 'stored_name', 'key', 'file_ref', 'fileRef', 'ref'];
-  for (const key of candidateKeys) {
-    const value = fileEntry[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return null;
-}
-
-function serializeFsPathRef(filePath) {
-  return `b64:${Buffer.from(JSON.stringify({ kind: 'fs-path', value: filePath }), 'utf8').toString('base64url')}`;
-}
-
-function toPublicFileRef(fileEntry) {
-  const candidate = extractFileRef(fileEntry);
-  if (typeof candidate !== 'string' || !candidate) {
-    return null;
-  }
-
-  if (path.isAbsolute(candidate)) {
-    return serializeFsPathRef(candidate);
-  }
-
-  return candidate;
 }
 
 function printJson(value) {
@@ -195,14 +140,16 @@ function printJson(value) {
 }
 
 function handleGetMessages(flags) {
-  const baseRef = requireArgText(flags, 'base-ref');
+  const baseRef = readKnownBaseRef();
   const cardId = requireArgText(flags, 'card-id');
+  const lastUserTurns = parseOptionalPositiveInteger(flags, 'last-user-turns');
   const tail = parseOptionalPositiveInteger(flags, 'tail');
   const chatStoreRef = readStoreRef(baseRef, 'get-chat-store-ref', 'get-chat-store-ref');
   const cardStoreRef = readStoreRef(baseRef, 'get-card-store-ref', 'get-card-store-ref');
   const storedCard = readStoredCard(cardStoreRef, cardId);
   const storedFiles = buildStoredFileIndex(storedCard);
-  const messages = readChatRecords(chatStoreRef, cardId).map((message) => enhanceMessage(message, storedFiles));
+  const messages = readChatRecords(chatStoreRef, cardId, lastUserTurns)
+    .map((message) => enhanceChatMessageWithFileRefs(message, storedFiles));
   const visibleMessages = tail === null ? messages : messages.slice(-tail);
 
   printJson({
@@ -212,7 +159,9 @@ function handleGetMessages(flags) {
 }
 
 function main() {
-  const { command, flags } = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  log_it('inspect-chat-messages-on-cards.js', argv.join(' '));
+  const { command, flags } = parseArgs(argv);
   if (flags.help || flags.h) {
     printUsage(0);
   }

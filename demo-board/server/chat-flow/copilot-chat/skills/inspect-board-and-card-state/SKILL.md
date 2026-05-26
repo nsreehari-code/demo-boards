@@ -1,9 +1,8 @@
 ---
 name: inspect-board-and-card-state
 description: >
-  Read-only inspection of a live board: runtime status, a full card view
-  (definition + runtime outputs + computed values + file refs), card chat
-  history, and attached file contents.
+  Read-only inspection of a live board: runtime status and a full card view
+  (definition + runtime outputs + computed values + file refs).
 ---
 
 # Inspect Board And Card State
@@ -12,19 +11,18 @@ description: >
 
 Use this skill whenever you need to read what's on the board without
 changing anything: how the board is running, what a card looks like and
-what it has produced, what was said about the card in chat, and what's
-inside any attached files.
+what it has produced.
 
 Typical questions this skill answers:
 
 - What is the board doing right now (completed / blocked / failed / pending)?
 - What did this card publish or compute?
 - What does this card's definition look like?
-- What was said in this card's chat?
-- Which files are attached on this card or in chat, and what do they contain?
 
 Don't use this skill to change a card, save anything, or send the final
-user-visible reply. The other skills cover those.
+user-visible reply. Use `inspect-card-chat-history` when you need chat
+history, and `inspect-attachments-file-contents` when you need the contents of
+an attachment.
 
 ## Command Surface
 
@@ -33,7 +31,7 @@ Run these from the Copilot workspace root.
 ### Board runtime status
 
 ```bash
-node ./.github/scripts/inspect-board-runtime-status.js read-status --base-ref <board-ref>
+node ./.github/scripts/inspect-board-runtime-status.js read-status
 ```
 
 Returns a compact board-status shape:
@@ -54,7 +52,7 @@ blocked, unresolved, or in progress.
 ### Full card view (definition + runtime + file refs)
 
 ```bash
-node ./.github/scripts/inspect-card-definition-and-runtime.js --base-ref <board-ref> --card-id <card-id>
+node ./.github/scripts/inspect-card-definition-and-runtime.js --card-id <card-id>
 ```
 
 Returns everything you usually need to reason about a single card — its
@@ -82,31 +80,11 @@ This command does not run preflight, simulation, or compute evaluation. It just 
 ### Exact stored card JSON (use before repairing a card)
 
 ```bash
-node ./.github/scripts/manage-live-board-card.js read-card --store-ref <store-ref> --card-id <card-id>
+node ./.github/scripts/manage-live-board-card.js read-card --card-id <card-id>
 ```
 
 Use this when you're about to edit a card and need its exact current shape
 as the starting point, without any runtime data mixed in.
-
-### Card chat history
-
-```bash
-node ./.github/scripts/inspect-chat-messages-on-cards.js --base-ref <board-ref> --card-id <card-id> get-messages
-node ./.github/scripts/inspect-chat-messages-on-cards.js --base-ref <board-ref> --card-id <card-id> --tail <n> get-messages
-```
-
-Returns the conversation on a card. Use `--tail <n>` when only recent turns
-matter. Messages carry `file_refs` for user attachments and `file_ref` on
-upload-related system messages.
-
-### Attached file contents
-
-```bash
-node ./.github/scripts/inspect-file-contents.js --file-ref <file-ref>
-```
-
-Use a `file_ref` you already have from the card view (card-level attachments)
-or from chat messages (chat-level attachments).
 
 ## Command Rules
 
@@ -115,6 +93,10 @@ or from chat messages (chat-level attachments).
   what it has produced (outputs, computed values, view) in a single read.
 - Reach for `read-card` only when you're about to repair the card and need
   its exact current shape.
+- Use `inspect-card-chat-history` when you need to inspect what was said on a
+  card or extract chat-level attachment refs.
+- Use `inspect-attachments-file-contents` when you already have a `file_ref`
+  and need the contents of an attachment.
 - If the task turns into changing a card or board membership, switch to
   `manage-cards-on-live-board`.
 - If the task turns into checking that a card would actually work, switch to
@@ -129,11 +111,8 @@ to the right command.
   `inspect-board-runtime-status.js read-status` for the board-wide picture.
 - *"What does this card show / what did it publish / how is it computed?"* —
   `inspect-card-definition-and-runtime.js` for the full card view in one read.
-- *"What did the user say about this card / what did we agree?"* —
-  `inspect-chat-messages-on-cards.js get-messages` (add `--tail <n>` if only
-  recent turns matter).
-- *"What was in that file the user attached?"* — take the `file_ref` from
-  the card view or chat messages and pass it to `inspect-file-contents.js`.
+- *"What did the user say about this card / what did we agree?"* — use
+  `inspect-card-chat-history`.
 - *"I'm about to repair this card and need its exact current shape."* —
   `manage-live-board-card.js read-card`. (Use the full card view instead if
   you also need runtime context.)
@@ -143,6 +122,10 @@ to the right command.
 These are not next steps in a pipeline — reach for them when the intent
 shifts:
 
+- `inspect-attachments-file-contents` — when you already have a `file_ref`
+  and need the contents of an attached file.
+- `inspect-card-chat-history` — when you need to inspect card chat messages or
+  extract chat-level attachment refs.
 - `manage-cards-on-live-board` — when the task moves from reading to changing
   a card or board membership.
 - `preflight-card-changes` — when reading suggests a card is broken and you

@@ -2,14 +2,13 @@
 
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { log_it, readKnownBaseRef, resolveKnownYamlFlowCliPath } from './shared_helpers.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const boardLiveCardsCliPath = path.join(__dirname, 'board-live-cards-cli.mjs');
+const boardLiveCardsCliPath = resolveKnownYamlFlowCliPath('board-live-cards-cli.mjs');
 
 const usageLines = [
   'Usage:',
-  '  node discover-source-kinds.js --base-ref <board-ref>',
+  '  node discover-source-kinds.js',
   '',
   'Returns the source-authoring subset of describe-task-executor-capabilities:',
   '  { "version": "1.0", "commonSourceDefFields": {...}, "sourceKinds": {...} }',
@@ -41,18 +40,18 @@ function printUsage(exitCode = 0) {
 }
 
 function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  log_it('discover-source-kinds.js', argv.join(' '));
+  const args = parseArgs(argv);
   if (args.help || args.h) {
     printUsage(0);
   }
 
-  if (typeof args['base-ref'] !== 'string' || !args['base-ref'].trim()) {
-    printUsage(1);
-  }
+  const baseRef = readKnownBaseRef();
 
   const result = spawnSync(
     process.execPath,
-    [boardLiveCardsCliPath, 'describe-task-executor-capabilities', '--base-ref', args['base-ref'].trim()],
+    [boardLiveCardsCliPath, 'describe-task-executor-capabilities', '--base-ref', baseRef],
     {
       encoding: 'utf8',
       windowsHide: true,

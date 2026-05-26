@@ -2,8 +2,7 @@
 name: discover-board-capabilities
 description: >
   Discover what a live board can do before authoring or repairing cards:
-  supported source kinds, their authored field schemas, and lightweight
-  source-readiness probes.
+  supported source kinds and their authored field schemas.
 ---
 
 # Discover Board Capabilities
@@ -14,15 +13,14 @@ Use this skill before authoring or editing `source_defs[]`, or any time the
 task asks "what can this board fetch / which source kinds are available /
 what fields does this source kind accept".
 
-It answers three concrete questions:
+Use it to answer:
 
 1. Which source kinds does this board's board worker / task executor support?
 2. Which authored fields are valid on the chosen kind?
-3. Is one specific authored source reachable and well-configured before we
-   commit to running it for real?
+3. What capability metadata does the executor report for the chosen kind?
 
-Do not guess source kinds, source-specific fields, or `supports` metadata from
-nearby cards or prose. Query the executor.
+Use the executor capability report as the source of truth for source kinds,
+source-specific fields, and `supports` metadata.
 
 ## Command Surface
 
@@ -32,7 +30,7 @@ Run these commands from the Copilot workspace root using the staged CLI in
 ### Discover supported source kinds and fields
 
 ```bash
-node ./.github/scripts/discover-source-kinds.js --base-ref <board-ref>
+node ./.github/scripts/discover-source-kinds.js
 ```
 
 Prints the source-authoring slice of the executor capability report:
@@ -53,50 +51,33 @@ Prints the source-authoring slice of the executor capability report:
 }
 ```
 
-### Lightweight source readiness probe
-
-```bash
-cat payload.json | node ./.github/scripts/preflight-probe-single-source-in-candidate-card.js --source-idx 0
-```
-
-Use this for a fast configuration / reachability check on one authored source.
-For real end-to-end fetch validation, use `preflight-card-changes` instead.
-
-Payload:
-
-```json
-{
-  "candidate_card_content": { "id": "...", "source_defs": [ /* ... */ ] },
-  "mock_projections": { /* may be empty */ }
-}
-```
-
-Returned fields: `bindTo`, `reachable`, `latencyMs`, `note`.
-
 ## Authoring Rules
 
 - Treat `commonSourceDefFields` plus the chosen kind's `inputSchema` as the
   source of truth for authored `source_defs[]` fields.
-- Do not author `supports` on a card; it is discovery metadata only.
-- Do not assume fields from one kind are valid on another.
+- Keep `supports` in the discovery layer; it is capability metadata rather than
+  a card-authored field.
+- Validate each kind against its own schema instead of carrying fields across
+  kinds.
 - If a kind is missing from the discovery output, the executor must be extended
   before any card relying on it will work.
 
-## Typical Source Kinds
+## Workflow
 
-Confirm against the executor for the current board, but typical kinds include:
+1. Run `discover-source-kinds` for the target board.
+2. Pick the source kind directly from the returned `sourceKinds` map.
+3. Author only the fields allowed by `commonSourceDefFields` and that kind's
+  `inputSchema`.
+4. Stay with the discovery output until you have identified the supported kind,
+   its schema, and any relevant capability metadata.
 
-- `mock` — fixture or canned values
-- `urls` — HTTP fetches, with optional projections and fan-out
-- `copilot` — Copilot-driven source generation (LLM source)
-- `mcp` — calling an MCP tool through a configured server
-- `foundry` — Azure AI Foundry agent or prompt execution
-- `sqlite` — local SQLite queries
+The executor output is the contract for available source kinds and fields.
+
+If the task shifts from capability discovery to validating whether an authored
+card or source actually runs correctly, switch to `preflight-card-changes`
+for execution checks.
 
 ## Related Skills
-
-These are not next steps in a pipeline — reach for them when the intent
-shifts:
 
 - `manage-cards-on-live-board` — when the discovery feeds into authoring or
   editing the card that uses the chosen source kind.

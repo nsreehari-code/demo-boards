@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { log_it } from './shared_helpers.js';
 
 const usageLines = [
   'Usage:',
@@ -58,7 +59,9 @@ function deserializeFsPathRef(ref) {
 }
 
 function main() {
-  const flags = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  log_it('inspect-file-contents.js', argv.join(' '));
+  const flags = parseArgs(argv);
   if (flags.help || flags.h) {
     printUsage(0);
   }
