@@ -11,7 +11,7 @@ import {
 import {
   appendAssistantReply,
   configureWorkspaceCliScripts,
-  createFinalResponseContainer,
+  createFinalResponseContainerFromRoot,
   FINAL_RESPONSE_FILE_NAME,
   publishFinalResponseFromContainer,
   readEnhancedChatMessages,
@@ -40,6 +40,7 @@ const {
   chatStoreRef = '',
   artifactsStoreRef = '',
   scratchStoreRef = '',
+  finalResponseRootDir = '',
   watchPartyFilesForChatDir = '',
   chatCopilotTimeoutMs: rawChatCopilotTimeoutMs = 300000,
 } = extra;
@@ -96,7 +97,7 @@ function appendDebug(stage, details = {}) {
   } catch {}
 }
 
-function buildPrompt(cId, historyDump, finalResponseContainerRef) {
+function buildPrompt(cId, historyDump, finalResponseHandle) {
   const instructionsBlock = [
     'You are the responder in a three way orchestration.',
     'I am only a mediator passing the runtime context and the user query to you.',
@@ -120,8 +121,7 @@ function buildPrompt(cId, historyDump, finalResponseContainerRef) {
     'Runtime handles:',
     `- boardId: ${boardId || '(not provided)'}`,
     `- cardId: ${cId}`,
-    `- scratchStoreRef: ${scratchStoreRef || '(not provided)'}`,
-    `- finalResponseContainerRef: ${finalResponseContainerRef}`,
+    `- finalResponseHandle: ${finalResponseHandle}`,
   ].join('\n');
 
   return [
@@ -151,11 +151,11 @@ function findNewAssistantMessage(messages, priorCount) {
   return null;
 }
 
-function buildCombinedRepairPrompt(finalResponseContainerRef) {
+function buildCombinedRepairPrompt(cardIdValue, finalResponseHandle) {
   return [
     'The previous attempt did not produce an acceptable result. Fix the issues below before completing.',
     'No staged final reply was written through provide-final-reply-to-user.',
-    `Write the final user-visible reply using finalResponseContainerRef: ${finalResponseContainerRef}.`,
+    `Write the final user-visible reply using cardId: ${cardIdValue} and finalResponseHandle: ${finalResponseHandle}.`,
     'Do not return reply text through stdout or any other response channel.'
   ].join('\n');
 }
@@ -262,13 +262,13 @@ function runCopilot(prompt, workingDir) {
   });
 }
 
-async function runCopilotWithValidationRetries(prompt, workingDir, finalResponseContainerRef, responseFilePath) {
+async function runCopilotWithValidationRetries(prompt, workingDir, cardIdValue, finalResponseHandle, responseFilePath) {
   const maxRetries = 3;
   let attempt = 0;
   let stagedFinalReply = '';
 
   while (attempt <= maxRetries) {
-    await runCopilot(attempt === 0 ? prompt : buildCombinedRepairPrompt(finalResponseContainerRef), workingDir);
+    await runCopilot(attempt === 0 ? prompt : buildCombinedRepairPrompt(cardIdValue, finalResponseHandle), workingDir);
     stagedFinalReply = readStagedFinalResponse(responseFilePath);
 
     if (stagedFinalReply) {
@@ -294,6 +294,7 @@ requireRequiredStrings({
   cardStoreRef,
   chatStoreRef,
   scratchStoreRef,
+  finalResponseRootDir,
 }, 'assistant');
 
 appendDebug('assistant:start', {
@@ -327,8 +328,9 @@ const chatMessages = readEnhancedChatMessages(
   { lastUserTurns: PROMPT_LAST_USER_TURNS },
 );
 const historyDump = JSON.stringify(chatMessages, null, 2);
-const finalResponseContainer = createFinalResponseContainer(scratchStoreRef, cardId);
-const prompt = buildPrompt(cardId, historyDump, finalResponseContainer.containerRef);
+const finalResponseHandle = randomUUID().replace(/-/g, '').slice(0, 8).toLowerCase();
+const finalResponseContainer = createFinalResponseContainerFromRoot(finalResponseRootDir, cardId, finalResponseHandle);
+const prompt = buildPrompt(cardId, historyDump, finalResponseContainer.finalResponseHandle);
 
 try {
   if (bypassCopilotForTest) {
@@ -344,7 +346,8 @@ try {
   const runResult = await runCopilotWithValidationRetries(
     prompt,
     workingDir,
-    finalResponseContainer.containerRef,
+    cardId,
+    finalResponseContainer.finalResponseHandle,
     finalResponseContainer.responseFilePath
   );
   const stagedFinalReply = runResult.stagedFinalReply;
@@ -358,19 +361,18 @@ try {
     cardStoreRef,
     artifactsStoreRef,
     cardId,
-    finalResponseContainerRef: finalResponseContainer.containerRef,
     containerDir: finalResponseContainer.containerDir,
     replyText: stagedFinalReply,
     timeoutMs: Math.min(chatCopilotTimeoutMs, 30000),
   });
   appendDebug('assistant:success', {
     usedFallbackAppend: false,
-    finalResponseContainerRef: finalResponseContainer.containerRef,
+    finalResponseHandle: finalResponseContainer.finalResponseHandle,
     publishedAttachmentCount: publishResult.publishedAttachmentCount,
   });
   DBG_LOG('assistant:success', {
     usedFallbackAppend: false,
-    finalResponseContainerRef: finalResponseContainer.containerRef,
+    finalResponseHandle: finalResponseContainer.finalResponseHandle,
     publishedAttachmentCount: publishResult.publishedAttachmentCount,
   });
   // The flow only consumes success or error from this process. Reply text must not be returned here.

@@ -117,7 +117,6 @@ try {
     cardStoreRef,
     artifactsStoreRef,
     cardId,
-    finalResponseContainerRef: finalResponseContainer.containerRef,
     containerDir: finalResponseContainer.containerDir,
     replyText: probeResponse.replyText,
   });

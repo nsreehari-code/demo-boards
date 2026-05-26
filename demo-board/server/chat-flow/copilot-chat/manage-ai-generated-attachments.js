@@ -1,74 +1,19 @@
-#!/usr/bin/env node
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { resolveStoreDir } from './shared.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const cliScriptsDir = path.resolve(__dirname, '../../../scripts/cli');
 const require = createRequire(import.meta.url);
 const yamlFlowBundledCliDir = path.dirname(require.resolve('yaml-flow/cli-bundled/board-live-cards-cli.mjs'));
 const boardLiveCardsCliPath = path.join(yamlFlowBundledCliDir, 'board-live-cards-cli.mjs');
 const bundledBoardLiveCardsCliPath = path.join(yamlFlowBundledCliDir, 'board-live-cards-cli.mjs');
 const artifactsStoreCliPath = path.join(yamlFlowBundledCliDir, 'artifacts-store-cli.mjs');
 const chatStoreCliPath = path.join(yamlFlowBundledCliDir, 'chat-store-cli.mjs');
-const manageLiveBoardCardCliPath = path.join(cliScriptsDir, 'manage-live-board-card.js');
 
 const FINAL_RESPONSE_FILE_NAME = '001-response.txt';
-const usageLines = [
-  'Usage:',
-  '  node manage-ai-generated-attachments.js --base-ref <board-ref> --card-id <card-id> --attachments-container-ref <fs-path-ref>',
-  '',
-  'Publishes every staged file in the container except 001-response.txt as AI-generated chat attachments.',
-];
-
-function parseArgs(argv) {
-  const flags = {};
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (!arg.startsWith('--')) {
-      continue;
-    }
-
-    const key = arg.slice(2);
-    const value = argv[index + 1];
-    if (!value || value.startsWith('--')) {
-      flags[key] = true;
-      continue;
-    }
-
-    flags[key] = value;
-    index += 1;
-  }
-
-  return flags;
-}
-
-function printUsage(exitCode = 0) {
-  const writer = exitCode === 0 ? process.stdout : process.stderr;
-  writer.write(`${usageLines.join('\n')}\n`);
-  process.exit(exitCode);
-}
-
-function requireArgText(flags, key) {
-  if (typeof flags[key] !== 'string' || !flags[key].trim()) {
-    printUsage(1);
-  }
-
-  return flags[key].trim();
-}
-
-function readOptionalArgText(flags, key) {
-  if (typeof flags[key] !== 'string' || !flags[key].trim()) {
-    return '';
-  }
-
-  return flags[key].trim();
-}
 
 function runJsonScript(scriptPath, scriptArgs, payload) {
   const result = spawnSync(process.execPath, [scriptPath, ...scriptArgs], {
@@ -105,10 +50,6 @@ function runTextScript(scriptPath, scriptArgs) {
   }
 
   return result.stdout.trim();
-}
-
-function printJson(value) {
-  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 function unwrapSuccessfulEnvelope(result, commandName) {
@@ -184,16 +125,10 @@ function listStagedAttachmentFiles(containerDir) {
     }));
 }
 
-function readStoredCard(storeRef, cardId) {
-  const result = runJsonScript(manageLiveBoardCardCliPath, ['read-card', '--store-ref', storeRef, '--card-id', cardId]);
-  if (!Array.isArray(result) || !result[0] || typeof result[0] !== 'object') {
-    throw new Error(`card ${cardId} was not found in card store`);
-  }
-  return result[0];
-}
-
-function buildStoredName(index, displayName) {
-  return `${String(index + 1).padStart(3, '0')}-${sanitizeStoredNameSegment(displayName)}`;
+function buildStoredName(displayName, offset) {
+  const randomToken = randomUUID().replace(/-/g, '').slice(0, 12);
+  const prefix = `${Date.now()}${String(offset).padStart(3, '0')}`;
+  return `${prefix}-${sanitizeStoredNameSegment(displayName)}-${randomToken}`;
 }
 
 function uploadArtifact(artifactsStoreRef, artifactKey, filePath, mimeType) {
@@ -228,28 +163,24 @@ function addCardFiles(baseRef, cardId, fileEntries) {
   );
 }
 
-function publishStagedAttachments({
+export function publishStagedAttachments({
   baseRef,
   cardId,
-  attachmentsContainerRef,
+  attachmentsContainerDir,
   chatStoreRef: explicitChatStoreRef = '',
-  cardStoreRef: explicitCardStoreRef = '',
   artifactsStoreRef: explicitArtifactsStoreRef = '',
 }) {
-  const cardStoreRef = explicitCardStoreRef || readStoreRef(baseRef, 'get-card-store-ref', 'get-card-store-ref');
   const chatStoreRef = explicitChatStoreRef || readStoreRef(baseRef, 'get-chat-store-ref', 'get-chat-store-ref');
   const artifactsStoreRef = explicitArtifactsStoreRef || readStoreRef(baseRef, 'get-artifacts-store-ref', 'get-artifacts-store-ref');
-  const containerDir = resolveStoreDir(attachmentsContainerRef, 'attachments-container-ref');
+  const containerDir = attachmentsContainerDir;
   const stagedFiles = listStagedAttachmentFiles(containerDir);
-  const currentCard = readStoredCard(cardStoreRef, cardId);
-  const existingFiles = Array.isArray(currentCard?.card_data?.files) ? currentCard.card_data.files : [];
 
   if (stagedFiles.length === 0) {
     return {
       status: 'success',
       data: {
         cardId,
-        attachmentsContainerRef,
+        attachmentsContainerDir,
         published: [],
       },
     };
@@ -257,8 +188,7 @@ function publishStagedAttachments({
 
   const uploadedAt = new Date().toISOString();
   const published = stagedFiles.map((stagedFile, offset) => {
-    const fileIndex = existingFiles.length + offset;
-    const storedName = buildStoredName(fileIndex, stagedFile.displayName);
+    const storedName = buildStoredName(stagedFile.displayName, offset);
     const artifactKey = `${cardId}/files/${storedName}`;
     const stat = fs.statSync(stagedFile.filePath);
     const mimeType = inferMimeType(stagedFile.displayName);
@@ -266,7 +196,6 @@ function publishStagedAttachments({
     uploadArtifact(artifactsStoreRef, artifactKey, stagedFile.filePath, mimeType);
 
     return {
-      index: fileIndex,
       name: stagedFile.displayName,
       stored_name: storedName,
       size: stat.size,
@@ -280,7 +209,7 @@ function publishStagedAttachments({
   const addCardFilesResult = addCardFiles(
     baseRef,
     cardId,
-    published.map(({ _staged_file_path, index, ...fileEntry }) => fileEntry),
+    published.map(({ _staged_file_path, ...fileEntry }) => fileEntry),
   );
 
   const addedFiles = Array.isArray(addCardFilesResult?.files_added)
@@ -305,35 +234,10 @@ function publishStagedAttachments({
     status: 'success',
     data: {
       cardId,
-      attachmentsContainerRef,
+      attachmentsContainerDir,
       add_card_files: addCardFilesResult,
       published: addedFiles,
       system_messages: messageResults,
     },
   };
-}
-
-function main() {
-  const flags = parseArgs(process.argv.slice(2));
-  if (flags.help || flags.h) {
-    printUsage(0);
-  }
-
-  const result = publishStagedAttachments({
-    baseRef: requireArgText(flags, 'base-ref'),
-    cardId: requireArgText(flags, 'card-id'),
-    attachmentsContainerRef: requireArgText(flags, 'attachments-container-ref'),
-    chatStoreRef: readOptionalArgText(flags, 'chat-store-ref'),
-    cardStoreRef: readOptionalArgText(flags, 'card-store-ref'),
-    artifactsStoreRef: readOptionalArgText(flags, 'artifacts-store-ref'),
-  });
-
-  printJson(result);
-}
-
-try {
-  main();
-} catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
 }

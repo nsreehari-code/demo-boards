@@ -2,18 +2,26 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { log_it } from './shared_helpers.js';
+import { log_it, readKnownFinalResponseRootDir } from './shared_helpers.js';
 
 const FINAL_RESPONSE_FILE_NAME = '001-response.txt';
 const FILE_STAGE_PREFIX = '100-file-';
 
 const usageLines = [
   'Usage:',
-  '  cat payload.json | node provide-response-to-user.js --final-response-container-ref <fs-path-ref>',
+  '  cat payload.json | node provide-response-to-user.js --card-id <card-id> --final-response-handle <8-char-handle>',
   '',
   'Payload shape:',
   '  { "text": "<final-assistant-reply>", "files": [] }',
 ];
+
+function validateFinalResponseHandle(handle) {
+  if (typeof handle !== 'string' || !/^[a-f0-9]{8}$/i.test(handle.trim())) {
+    throw new Error('Expected --final-response-handle to be an 8-character hex token');
+  }
+
+  return handle.trim().toLowerCase();
+}
 
 function printUsage(exitCode = 0) {
   const writer = exitCode === 0 ? process.stdout : process.stderr;
@@ -52,47 +60,21 @@ function requireArgText(flags, key) {
   return flags[key].trim();
 }
 
-function requireNonEmptyString(value, fieldName) {
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`Missing required value: ${fieldName}`);
-  }
-}
+function resolveFinalResponseDir(flags) {
 
-function parseRefText(refText, fieldName) {
-  requireNonEmptyString(refText, fieldName);
-
-  if (refText.startsWith('b64:')) {
-    const encoded = refText.slice(4);
-    if (!encoded) {
-      throw new Error(`Expected ${fieldName} to contain base64 data`);
-    }
-
-    try {
-      const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-      return JSON.parse(decoded);
-    } catch {
-      throw new Error(`Expected ${fieldName} to be a valid base64 ref`);
-    }
+  const cardId = requireArgText(flags, 'card-id');
+  const finalResponseHandle = validateFinalResponseHandle(requireArgText(flags, 'final-response-handle'));
+  const finalResponseRootDir = readKnownFinalResponseRootDir();
+  const containerDir = path.join(finalResponseRootDir, cardId, finalResponseHandle);
+  if (!fs.existsSync(containerDir) || !fs.statSync(containerDir).isDirectory()) {
+    throw new Error(`final response directory does not exist for card ${cardId} and handle ${finalResponseHandle}`);
   }
 
-  if (refText.startsWith('{')) {
-    try {
-      return JSON.parse(refText);
-    } catch {
-      throw new Error(`Expected ${fieldName} to be valid JSON when not base64-encoded`);
-    }
-  }
-
-  throw new Error(`Expected ${fieldName} to be a supported ref string`);
-}
-
-function resolveStoreDir(storeRef, fieldName) {
-  const parsedRef = parseRefText(storeRef, fieldName);
-  if (!parsedRef || parsedRef.kind !== 'fs-path' || typeof parsedRef.value !== 'string' || !parsedRef.value.trim()) {
-    throw new Error(`Expected ${fieldName} to be an fs-path ref`);
-  }
-
-  return parsedRef.value;
+  return {
+    containerDir,
+    cardId,
+    finalResponseHandle,
+  };
 }
 
 function readPayload() {
@@ -189,9 +171,9 @@ function main() {
     printUsage(0);
   }
 
-  const finalResponseContainerRef = requireArgText(flags, 'final-response-container-ref');
   const payload = readPayload();
-  const containerDir = resolveStoreDir(finalResponseContainerRef, 'final-response-container-ref');
+  const resolvedTarget = resolveFinalResponseDir(flags);
+  const { containerDir, cardId, finalResponseHandle } = resolvedTarget;
   const responseFilePath = path.join(containerDir, FINAL_RESPONSE_FILE_NAME);
   fs.mkdirSync(containerDir, { recursive: true });
   fs.writeFileSync(responseFilePath, payload.text, 'utf8');
@@ -200,7 +182,8 @@ function main() {
   printJson({
     status: 'success',
     data: {
-      finalResponseContainerRef,
+      cardId,
+      finalResponseHandle,
       responseFilePath,
       stagedFiles,
     },

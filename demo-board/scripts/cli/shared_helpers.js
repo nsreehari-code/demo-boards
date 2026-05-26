@@ -69,6 +69,26 @@ export function readKnownBaseRef() {
   return baseRef.trim();
 }
 
+export function readKnownScratchDir() {
+  const knownConstants = loadKnownConstants();
+  const scratchDir = knownConstants.scratch_dir;
+  if (typeof scratchDir !== 'string' || !scratchDir.trim()) {
+    throw new Error(`known_constants.json must contain a non-empty string scratch_dir: ${knownConstantsPath}`);
+  }
+
+  return scratchDir.trim();
+}
+
+export function readKnownFinalResponseRootDir() {
+  const knownConstants = loadKnownConstants();
+  const finalResponseRootDir = knownConstants.final_response_root_dir;
+  if (typeof finalResponseRootDir !== 'string' || !finalResponseRootDir.trim()) {
+    throw new Error(`known_constants.json must contain a non-empty string final_response_root_dir: ${knownConstantsPath}`);
+  }
+
+  return finalResponseRootDir.trim();
+}
+
 export function readKnownYamlFlowCliBundledDir() {
   try {
     const knownConstants = loadKnownConstants();

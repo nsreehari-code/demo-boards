@@ -14,7 +14,6 @@ console.log(`[server-t3c-http-test] assistant debug log: ${assistantDebugLogFile
 
 const args = [
   targetScript,
-  '--use-config-setup-root',
   '--skip-t1',
   '--skip-t2',
   '--skip-t3',

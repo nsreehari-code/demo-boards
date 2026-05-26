@@ -1,10 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { parseRef, serializeRef } from 'yaml-flow/board-worker-adapter';
+import { publishStagedAttachments as publishManagedAiGeneratedAttachments } from './manage-ai-generated-attachments.js';
 import {
   buildStoredFileIndex,
   enhanceChatMessageWithFileRefs,
@@ -16,7 +17,6 @@ let BOARD_LIVE_CARDS_CLI = '';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const YAML_FLOW_BUNDLED_CLI_DIR = path.dirname(require.resolve('yaml-flow/cli-bundled/board-live-cards-cli.mjs'));
-const MANAGE_AI_GENERATED_ATTACHMENTS_PATH = path.join(__dirname, 'manage-ai-generated-attachments.js');
 export const FINAL_RESPONSE_FILE_NAME = '001-response.txt';
 const FILE_STAGE_PREFIX = '100-file-';
 
@@ -332,7 +332,6 @@ function listStagedAttachmentFiles(containerDir) {
 function publishStagedAttachments({
   baseRefValue,
   currentCardId,
-  finalResponseContainerRef,
   containerDir,
   chatStoreRef = '',
   cardStoreRef = '',
@@ -343,41 +342,14 @@ function publishStagedAttachments({
     return null;
   }
 
-  const args = [
-    MANAGE_AI_GENERATED_ATTACHMENTS_PATH,
-    '--base-ref',
-    baseRefValue,
-    '--card-id',
-    currentCardId,
-    '--attachments-container-ref',
-    finalResponseContainerRef,
-  ];
-
-  if (typeof chatStoreRef === 'string' && chatStoreRef.trim()) {
-    args.push('--chat-store-ref', chatStoreRef.trim());
-  }
-  if (typeof cardStoreRef === 'string' && cardStoreRef.trim()) {
-    args.push('--card-store-ref', cardStoreRef.trim());
-  }
-  if (typeof artifactsStoreRef === 'string' && artifactsStoreRef.trim()) {
-    args.push('--artifacts-store-ref', artifactsStoreRef.trim());
-  }
-
-  const result = spawnSync(process.execPath, args, {
-    encoding: 'utf8',
-    windowsHide: true,
+  return publishManagedAiGeneratedAttachments({
+    baseRef: baseRefValue,
+    cardId: currentCardId,
+    attachmentsContainerDir: containerDir,
+    chatStoreRef,
+    cardStoreRef,
+    artifactsStoreRef,
   });
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  if (result.status !== 0) {
-    const stderr = result.stderr ? result.stderr.trim() : '';
-    throw new Error(stderr || `manage-ai-generated-attachments.js failed with exit code ${result.status}`);
-  }
-
-  return result.stdout.trim() ? JSON.parse(result.stdout) : null;
 }
 
 export function createFinalResponseContainer(scratchStoreRef, cardId, scopeName = 'assistant-final-response') {
@@ -387,7 +359,22 @@ export function createFinalResponseContainer(scratchStoreRef, cardId, scopeName 
   fs.mkdirSync(containerDir, { recursive: true });
   return {
     containerDir,
-    containerRef: createFsPathRef(containerDir, 'finalResponseContainerDir'),
+    responseFilePath: path.join(containerDir, FINAL_RESPONSE_FILE_NAME),
+  };
+}
+
+export function createFinalResponseContainerFromRoot(finalResponseRootDir, cardId, handle) {
+  requireRequiredStrings({ finalResponseRootDir, cardId, handle }, 'final response container');
+  const normalizedHandle = handle.trim().toLowerCase();
+  if (!/^[a-f0-9]{8}$/.test(normalizedHandle)) {
+    throw new Error('final response handle must be an 8-character hex token');
+  }
+
+  const containerDir = path.join(finalResponseRootDir, cardId, normalizedHandle);
+  fs.mkdirSync(containerDir, { recursive: true });
+  return {
+    containerDir,
+    finalResponseHandle: normalizedHandle,
     responseFilePath: path.join(containerDir, FINAL_RESPONSE_FILE_NAME),
   };
 }
@@ -439,19 +426,17 @@ export function publishFinalResponseFromContainer({
   cardStoreRef = '',
   artifactsStoreRef = '',
   cardId = '',
-  finalResponseContainerRef = '',
   containerDir = '',
   replyText = '',
   timeoutMs = 30000,
 } = {}) {
-  requireRequiredStrings({ chatStoreRef, cardId, finalResponseContainerRef, containerDir, replyText }, 'final response publish');
+  requireRequiredStrings({ chatStoreRef, cardId, containerDir, replyText }, 'final response publish');
 
   const hasStagedAttachments = listStagedAttachmentFiles(containerDir).length > 0;
   const attachmentsResult = hasStagedAttachments
     ? publishStagedAttachments({
       baseRefValue: baseRef,
       currentCardId: cardId,
-      finalResponseContainerRef,
       containerDir,
       chatStoreRef,
       cardStoreRef,

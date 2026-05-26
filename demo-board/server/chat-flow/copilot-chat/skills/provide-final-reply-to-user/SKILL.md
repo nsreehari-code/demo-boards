@@ -25,7 +25,7 @@ To read chat history (current card or other cards on the board), use
 Run from the Copilot workspace root.
 
 ```bash
-cat payload.json | node ./.github/scripts/provide-response-to-user.js --final-response-container-ref <fs-path-ref>
+cat payload.json | node ./.github/scripts/provide-response-to-user.js --card-id <card-id> --final-response-handle <8-char-handle>
 ```
 
 Payload:
@@ -36,6 +36,9 @@ Payload:
 
 `text` is staged as the final reply payload. If `files` are provided, they are
 staged into the same response container with generated file names.
+
+Use the runtime handles passed into the prompt for `cardId` and
+`finalResponseHandle`.
 
 ## Rules
 

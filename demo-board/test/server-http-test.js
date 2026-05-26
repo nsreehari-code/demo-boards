@@ -10,7 +10,7 @@
  * T1: PATCH holdings (+1 row) → verify recomputation (holdings +1, positions +1)
  *
  * Usage:
- *   node test/server-http-test.js [--port 7799] [--use-config-setup-root]
+ *   node test/server-http-test.js [--port 7799]
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -37,7 +37,6 @@ const portArg = cliArgs.indexOf('--port');
 const cliPort = portArg !== -1 ? parseInt(cliArgs[portArg + 1], 10) : NaN;
 const serverConfigArg = cliArgs.indexOf('--server-config');
 const cliServerConfig = serverConfigArg !== -1 ? String(cliArgs[serverConfigArg + 1] || '').trim() : '';
-const useConfiguredSetupRoot = cliArgs.includes('--use-config-setup-root');
 const skipT1 = cliArgs.includes('--skip-t1');
 const skipT2 = cliArgs.includes('--skip-t2');
 const skipT3 = cliArgs.includes('--skip-t3');
@@ -73,12 +72,6 @@ function loadServerConfigJson(configPath) {
   } catch {
     return {};
   }
-}
-
-function resolveConfiguredBoardSetupRoot(serverConfig, boardId) {
-  const setupRoot = serverConfig?.boards?.[boardId]?.setup?.setupRoot;
-  if (typeof setupRoot !== 'string' || !setupRoot.trim()) return null;
-  return path.resolve(BOARD_DIR, setupRoot);
 }
 
 function resolveConfiguredPerRunSetupBase(serverConfig) {
@@ -135,20 +128,7 @@ const PORT = await resolveServerPort();
 const BASE = `http://127.0.0.1:${PORT}/api/boards/${BOARD_ID}`;
 const MCP_SERVER_URL = (process.env.DEMO_BOARDS_MCP_SERVER_URL || '').trim() || 'http://127.0.0.1:7801/mcp';
 
-function resolveSetupMode(serverConfig, boardId) {
-  if (useConfiguredSetupRoot) {
-    const configuredRoot = resolveConfiguredBoardSetupRoot(serverConfig, boardId);
-    if (!configuredRoot) {
-      throw new Error(`Configured setupRoot missing for board "${boardId}" in ${SERVER_CONFIG}`);
-    }
-    return {
-      setupDir: configuredRoot,
-      boardSetupRoot: configuredRoot,
-      cleanupPath: configuredRoot,
-      preserveSetupDir: true,
-    };
-  }
-
+function resolveSetupMode(serverConfig) {
   const configuredPerRunBase = resolveConfiguredPerRunSetupBase(serverConfig);
   const setupDir = configuredPerRunBase
     ? path.join(configuredPerRunBase, RUN_ID)
@@ -162,7 +142,7 @@ function resolveSetupMode(serverConfig, boardId) {
 }
 
 const TEST_SERVER_CONFIG = loadServerConfigJson(SERVER_CONFIG);
-const SETUP_MODE = resolveSetupMode(TEST_SERVER_CONFIG, BOARD_ID);
+const SETUP_MODE = resolveSetupMode(TEST_SERVER_CONFIG);
 const SETUP_DIR = SETUP_MODE.setupDir;
 const BOARD_SETUP_ROOT = SETUP_MODE.boardSetupRoot;
 const SETUP_CLEANUP_PATH = SETUP_MODE.cleanupPath;
@@ -541,12 +521,8 @@ function startServer(port) {
         DEMO_SERVER_PORT: String(port),
         DEMO_CARDS_PATTERN: CARD_PATTERN,
         DEMO_BOARDS_MCP_SERVER_URL: MCP_SERVER_URL,
-        ...(useConfiguredSetupRoot
-          ? {}
-          : {
-              DEMO_SETUP_DIR: SETUP_DIR,
-              DEMO_BOARD_SETUP_ROOT: BOARD_SETUP_ROOT,
-            }),
+        DEMO_SETUP_DIR: SETUP_DIR,
+        DEMO_BOARD_SETUP_ROOT: BOARD_SETUP_ROOT,
       },
     });
     let ready = false;

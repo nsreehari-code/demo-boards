@@ -1095,9 +1095,11 @@ const runtime = createMultiBoardServerRuntime({
     const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
     const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
     const scratchStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath });
+    const finalResponseRootDir = path.join(boardSetupPaths.scratchStorePath, 'final-responses');
     const watchPartyFilesForChatDir = path.join(boardSetupPaths.setupRoot, WATCHPARTY_FILES_FOR_CHAT_DIRNAME);
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
     ensureBoardSetupPaths(boardId, boardSetupPaths);
+    ensureDirectoryExists(finalResponseRootDir, `boards.${boardId}.finalResponseRootDir`);
     ensureDirectoryExists(watchPartyFilesForChatDir, `boards.${boardId}.watchPartyFilesForChatDir`);
     const chatStorage = createFsBoardChatStorage(boardSetupPaths.chatStorePath);
     const flowRunner = createUserTextAwareChatFlowRunner(
@@ -1121,6 +1123,7 @@ const runtime = createMultiBoardServerRuntime({
       artifactsStoreRef,
       scratchStore: boardSetupPaths.scratchStore,
       scratchStoreRef,
+      finalResponseRootDir,
       archivalStore: boardSetupPaths.archivalStore,
       projectRoot: BOARD_ROOT,
       chatFlowRoot,
@@ -1133,7 +1136,16 @@ const runtime = createMultiBoardServerRuntime({
     const baseCfg = buildBoardContextConfig('base', boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, baseExecutionExtra);
     const boards = [baseCfg];
 
-    demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot: boardSetupPaths.setupRoot, aiWorkspaceRoot, baseRef });
+    demoPrepSetup({
+      boardId,
+      cfg,
+      cardsDir,
+      boardSetupRoot: boardSetupPaths.setupRoot,
+      aiWorkspaceRoot,
+      baseRef,
+      scratchDir: boardSetupPaths.scratchStorePath,
+      finalResponseRootDir,
+    });
 
     const broker = createWatchpartyBroker();
     watchpartyBrokers.set(boardId, broker);
@@ -1165,6 +1177,7 @@ const runtime = createMultiBoardServerRuntime({
         artifactsStoreRef,
         scratchStore: boardSetupPaths.scratchStore,
         scratchStoreRef,
+        finalResponseRootDir,
         archivalStore: boardSetupPaths.archivalStore,
         projectRoot: BOARD_ROOT,
         chatFlowRoot,
@@ -1190,7 +1203,7 @@ const runtime = createMultiBoardServerRuntime({
 // Host setup — prepares Copilot workspaces under the board setup root.
 // ---------------------------------------------------------------------------
 
-function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot, baseRef }) {
+function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot, baseRef, scratchDir, finalResponseRootDir }) {
   ensureDirectoryExists(boardSetupRoot, `boards.${boardId}.setup.setupRoot`);
 
   const workspaceSetup = Array.isArray(cfg?.['copilot-workdirs-setup'])
@@ -1306,7 +1319,12 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
       syncFlatFilesIntoDir(scriptsTarget, copyScriptDirs);
       fs.writeFileSync(
         path.join(scriptsTarget, 'known_constants.json'),
-        `${JSON.stringify({ base_ref: baseRef, yaml_flow_cli_bundled_dir: YAML_FLOW_BUNDLED_CLI_DIR }, null, 2)}\n`,
+        `${JSON.stringify({
+          base_ref: baseRef,
+          yaml_flow_cli_bundled_dir: YAML_FLOW_BUNDLED_CLI_DIR,
+          scratch_dir: scratchDir,
+          final_response_root_dir: finalResponseRootDir,
+        }, null, 2)}\n`,
         'utf8',
       );
       for (const scriptsDir of copyScriptDirs) {

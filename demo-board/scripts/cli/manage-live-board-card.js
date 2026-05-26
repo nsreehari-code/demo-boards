@@ -13,7 +13,7 @@ const validateCandidateCardPath = path.join(__dirname, 'preflight-validate-candi
 
 const usageLines = [
   'Usage:',
-  '  node manage-live-board-card.js read-card [--base-ref <board-ref> | --store-ref <store-ref>] --card-id <card-id>',
+  '  node manage-live-board-card.js read-card [--base-ref <board-ref>] --card-id <card-id>',
   '  cat payload.json | node manage-live-board-card.js upsert-card [--base-ref <board-ref>] --card-id <card-id>',
   '  node manage-live-board-card.js deprecate [--base-ref <board-ref>] --card-id <card-id>',
   '',
@@ -145,7 +145,7 @@ function resolveBaseRef(flags) {
 
 function resolveCardStoreRef(flags) {
   if (typeof flags['store-ref'] === 'string' && flags['store-ref'].trim()) {
-    return flags['store-ref'].trim();
+    throw new Error('--store-ref is no longer supported; use --base-ref or staged known constants instead');
   }
 
   return readCardStoreRef(resolveBaseRef(flags));
