@@ -6,10 +6,6 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { parseRef, serializeRef } from 'yaml-flow/board-worker-adapter';
 import { publishStagedAttachments as publishManagedAiGeneratedAttachments } from './manage-ai-generated-attachments.js';
-import {
-  buildStoredFileIndex,
-  enhanceChatMessageWithFileRefs,
-} from '../../../scripts/cli/shared_helpers.js';
 
 let CHAT_STORE_CLI = '';
 let CARD_STORE_CLI = '';
@@ -180,6 +176,102 @@ function readStoredCardOnce(cardStoreRef, cardId, timeoutMs = 30000) {
   return Array.isArray(parsed) && parsed.length > 0 ? parsed[0] : null;
 }
 
+function runBoardLiveCardsCommand(args, timeoutMs = 30000) {
+  const raw = execFileSync(process.execPath, [requireConfiguredCliPath(BOARD_LIVE_CARDS_CLI, 'board-live-cards-cli'), ...args], {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: timeoutMs,
+    windowsHide: true,
+  }).trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  return JSON.parse(raw);
+}
+
+function unwrapSuccessfulEnvelope(result, commandName) {
+  if (result?.status === 'success') {
+    return Object.prototype.hasOwnProperty.call(result, 'data') ? result.data : null;
+  }
+
+  if (result?.status === 'fail' || result?.status === 'error') {
+    throw new Error(result.error || `${commandName} failed`);
+  }
+
+  throw new Error(`${commandName} returned an unexpected response shape`);
+}
+
+function readAttachmentRefs(baseRef, cardId, timeoutMs = 30000) {
+  const result = runBoardLiveCardsCommand(['get-attachment-ref', '--base-ref', baseRef, '--card-id', cardId], timeoutMs);
+  const data = unwrapSuccessfulEnvelope(result, 'get-attachment-ref');
+  const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
+  return attachments.filter((attachment) => {
+    if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) {
+      return false;
+    }
+
+    return Number.isInteger(attachment.idx)
+      && attachment.idx >= 0
+      && typeof attachment.ref === 'string'
+      && attachment.ref.trim().length > 0;
+  });
+}
+
+function parseSystemMessageFileIndex(messageText) {
+  if (typeof messageText !== 'string' || !messageText.trim()) {
+    return null;
+  }
+
+  const match = /^(file uploaded|AI generated|AI geneterated):\s*.*?#(\d+)\s*$/i.exec(messageText.trim());
+  if (!match) {
+    return null;
+  }
+
+  const fileIndex = Number.parseInt(match[2], 10);
+  if (!Number.isInteger(fileIndex) || fileIndex < 0) {
+    return null;
+  }
+
+  return fileIndex;
+}
+
+function enhanceChatMessageWithAttachmentHint(message, cardId, attachments) {
+  const enhanced = {
+    ...message,
+  };
+
+  const role = typeof message?.role === 'string'
+    ? message.role
+    : typeof message?.payload?.role === 'string'
+      ? message.payload.role
+      : '';
+  const messageText = typeof message?.text === 'string'
+    ? message.text
+    : typeof message?.payload?.text === 'string'
+      ? message.payload.text
+      : '';
+
+  if (role === 'system') {
+    const fileIndex = parseSystemMessageFileIndex(messageText);
+    const hasAttachment = fileIndex !== null && attachments.some((attachment) => attachment.idx === fileIndex);
+    if (hasAttachment) {
+      const retrievalHint = `Retrieve using inspect-file-contents.js --card-id ${cardId} --file-idx ${fileIndex}`;
+      enhanced.retrieval_hint = retrievalHint;
+      if (message?.payload && typeof message?.role !== 'string') {
+        enhanced.payload = {
+          ...message.payload,
+          retrieval_hint: retrievalHint,
+        };
+      }
+    }
+  }
+
+  return enhanced;
+}
+
 export function readChatMessages(chatStoreRef, cardId, timeoutMs = 30000, options = {}) {
   if (!chatStoreRef || !cardId) {
     return [];
@@ -207,16 +299,15 @@ export function readChatMessages(chatStoreRef, cardId, timeoutMs = 30000, option
   }
 }
 
-export function readEnhancedChatMessages(chatStoreRef, cardStoreRef, cardId, timeoutMs = 30000, options = {}) {
-  if (!chatStoreRef || !cardStoreRef || !cardId) {
+export function readEnhancedChatMessages(baseRef, chatStoreRef, cardId, timeoutMs = 30000, options = {}) {
+  if (!baseRef || !chatStoreRef || !cardId) {
     return [];
   }
 
   try {
-    const storedCard = readStoredCardOnce(cardStoreRef, cardId, timeoutMs);
-    const storedFiles = buildStoredFileIndex(storedCard);
+    const attachments = readAttachmentRefs(baseRef, cardId, timeoutMs);
     const messages = readChatMessages(chatStoreRef, cardId, timeoutMs, options);
-    return messages.map((message) => enhanceChatMessageWithFileRefs(message, storedFiles));
+    return messages.map((message) => enhanceChatMessageWithAttachmentHint(message, cardId, attachments));
   } catch {
     return readChatMessages(chatStoreRef, cardId, timeoutMs, options);
   }
@@ -363,20 +454,25 @@ export function createFinalResponseContainer(scratchStoreRef, cardId, scopeName 
   };
 }
 
-export function createFinalResponseContainerFromRoot(finalResponseRootDir, cardId, handle) {
-  requireRequiredStrings({ finalResponseRootDir, cardId, handle }, 'final response container');
-  const normalizedHandle = handle.trim().toLowerCase();
-  if (!/^[a-f0-9]{8}$/.test(normalizedHandle)) {
-    throw new Error('final response handle must be an 8-character hex token');
-  }
-
-  const containerDir = path.join(finalResponseRootDir, cardId, normalizedHandle);
+export function createFinalResponseContainerFromRoot(finalResponseRootDir, cardId) {
+  requireRequiredStrings({ finalResponseRootDir, cardId }, 'final response container');
+  const containerDir = path.join(finalResponseRootDir, cardId);
   fs.mkdirSync(containerDir, { recursive: true });
   return {
     containerDir,
-    finalResponseHandle: normalizedHandle,
     responseFilePath: path.join(containerDir, FINAL_RESPONSE_FILE_NAME),
   };
+}
+
+export function clearFinalResponseContainer(containerDir) {
+  try {
+    if (!fs.existsSync(containerDir)) {
+      return;
+    }
+    for (const entry of fs.readdirSync(containerDir)) {
+      fs.rmSync(path.join(containerDir, entry), { recursive: true, force: true });
+    }
+  } catch {}
 }
 
 export function stageFinalResponsePayload(containerDir, payload) {
@@ -445,7 +541,7 @@ export function publishFinalResponseFromContainer({
     : null;
 
   appendAssistantReply(chatStoreRef, cardId, replyText, timeoutMs);
-  fs.rmSync(containerDir, { recursive: true, force: true });
+  clearFinalResponseContainer(containerDir);
 
   return {
     attachmentsResult,

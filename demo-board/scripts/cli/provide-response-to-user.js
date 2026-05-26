@@ -9,19 +9,11 @@ const FILE_STAGE_PREFIX = '100-file-';
 
 const usageLines = [
   'Usage:',
-  '  cat payload.json | node provide-response-to-user.js --card-id <card-id> --final-response-handle <8-char-handle>',
+  '  cat payload.json | node provide-response-to-user.js --card-id <card-id>',
   '',
   'Payload shape:',
   '  { "text": "<final-assistant-reply>", "files": [] }',
 ];
-
-function validateFinalResponseHandle(handle) {
-  if (typeof handle !== 'string' || !/^[a-f0-9]{8}$/i.test(handle.trim())) {
-    throw new Error('Expected --final-response-handle to be an 8-character hex token');
-  }
-
-  return handle.trim().toLowerCase();
-}
 
 function printUsage(exitCode = 0) {
   const writer = exitCode === 0 ? process.stdout : process.stderr;
@@ -61,19 +53,13 @@ function requireArgText(flags, key) {
 }
 
 function resolveFinalResponseDir(flags) {
-
   const cardId = requireArgText(flags, 'card-id');
-  const finalResponseHandle = validateFinalResponseHandle(requireArgText(flags, 'final-response-handle'));
   const finalResponseRootDir = readKnownFinalResponseRootDir();
-  const containerDir = path.join(finalResponseRootDir, cardId, finalResponseHandle);
-  if (!fs.existsSync(containerDir) || !fs.statSync(containerDir).isDirectory()) {
-    throw new Error(`final response directory does not exist for card ${cardId} and handle ${finalResponseHandle}`);
-  }
-
+  const containerDir = path.join(finalResponseRootDir, cardId);
+  fs.mkdirSync(containerDir, { recursive: true });
   return {
     containerDir,
     cardId,
-    finalResponseHandle,
   };
 }
 
@@ -173,9 +159,8 @@ function main() {
 
   const payload = readPayload();
   const resolvedTarget = resolveFinalResponseDir(flags);
-  const { containerDir, cardId, finalResponseHandle } = resolvedTarget;
+  const { containerDir, cardId } = resolvedTarget;
   const responseFilePath = path.join(containerDir, FINAL_RESPONSE_FILE_NAME);
-  fs.mkdirSync(containerDir, { recursive: true });
   fs.writeFileSync(responseFilePath, payload.text, 'utf8');
   const stagedFiles = stageAdditionalFiles(containerDir, payload.files);
 
@@ -183,7 +168,6 @@ function main() {
     status: 'success',
     data: {
       cardId,
-      finalResponseHandle,
       responseFilePath,
       stagedFiles,
     },

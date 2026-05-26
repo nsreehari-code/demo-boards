@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import * as fs from 'node:fs';
-import { randomUUID } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -10,9 +9,9 @@ import {
 } from '../../../../../watchparty-constants.mjs';
 import {
   appendAssistantReply,
+  clearFinalResponseContainer,
   configureWorkspaceCliScripts,
   createFinalResponseContainerFromRoot,
-  FINAL_RESPONSE_FILE_NAME,
   publishFinalResponseFromContainer,
   readEnhancedChatMessages,
   readStagedFinalResponse,
@@ -20,7 +19,6 @@ import {
   requireRequiredStrings,
   resolveCopilotWorkspaceDir,
   resolveStoreDir,
-  stageFinalResponsePayload,
 } from './shared.js';
 
 const COPILOT_MODEL = 'gpt-5.4';
@@ -97,31 +95,24 @@ function appendDebug(stage, details = {}) {
   } catch {}
 }
 
-function buildPrompt(cId, historyDump, finalResponseHandle) {
+function buildPrompt(cId, historyDump) {
   const instructionsBlock = [
     'You are the responder in a three way orchestration.',
     'I am only a mediator passing the runtime context and the user query to you.',
-    'The user only sees rendered card data (card definitions from card-store-cli and runtime outputs from board-live-cards-cli)  and exposed board status.',
-    'Do not expose internal orchestration details, logs, handles, refs, paths, directory names, or implementation notes.',
+    'The user only sees rendered card data (card definitions from card-store-cli and runtime outputs from board-live-cards-cli)  and exposed board status and the chat messages/attachments.',
+    'If you need more history or other runtime context (user attached files, chat histories, card definitions, runtime outputs, board status), hill-climb and side-walk conservatively: fetch the minimum additional context needed using the existing CLI surfaces, runtime handles, and appropriate skills.',
     'Use the runtime handles below directly when you need operational context.',
-    'Do not spend time rediscovering these handles from files, directories, or scans.',
-    'Do not return the final user-visible answer text through stdout or any other response channel.',
-    'Do not return status updates, tool transcripts, internal notes, completion acknowledgements, or reply text.',
-    'Use the provide-final-reply-to-user skill exactly once to stage the final user-visible assistant reply.',
-    'Do not write the final reply directly to chat store and do not invent alternate persistence paths.',
-    'Do not include markdown fences.',
-    'Use the current skill command surfaces; do not invent alternate CLI forms.',
-    `The prompt only includes the suffix returned by chat-store-cli read-all --last-user-turns ${PROMPT_LAST_USER_TURNS}.`,
-    'If you need more history or other runtime context (chat histories, card definitions, runtime outputs, board status), hill-climb and side-walk conservatively: fetch the minimum additional context needed using the existing CLI surfaces, runtime handles, and appropriate skills.',
-    'Do not guess missing context when you can retrieve it directly.',
+    `If you need to inspect the file attachment contents, run: "node inspect-file-contents.js --card-id <cardId> --file-idx <fileIndex>"`,
+    'IF you have the required response, then immediately Use the provide-final-reply-to-user skill exactly once to stage the final user-visible assistant reply and any generated attachments.',
+    'Do not expose internal orchestration details, logs, handles, refs, paths, directory names, or implementation notes.',
+    'Do not include markdown fences. No Fluff.',
     'After completing the main task, use the `lore-keeper` agent when the interaction could potentially have durable board-level, user-level, identity, or decision knowledge that should persist across future tasks.',
   ].join(' ');
 
   const runtimeHandlesBlock = [
     'Runtime handles:',
-    `- boardId: ${boardId || '(not provided)'}`,
-    `- cardId: ${cId}`,
-    `- finalResponseHandle: ${finalResponseHandle}`,
+    `- boardId: \"${boardId || '(not provided)'}\"`,
+    `- cardId / card-id: \"${cId}\"`,
   ].join('\n');
 
   return [
@@ -129,11 +120,68 @@ function buildPrompt(cId, historyDump, finalResponseHandle) {
     '',
     runtimeHandlesBlock,
     '',
-    `Recent chat context (chat-store-cli read-all --last-user-turns ${PROMPT_LAST_USER_TURNS}):`,
+    `Recent chat context and the current user Query towards the end:`,
     historyDump,
-    '',
-    'Assistant response:',
   ].join('\n');
+}
+
+function parseSystemMessageFileIndex(messageText) {
+  if (typeof messageText !== 'string' || !messageText.trim()) {
+    return null;
+  }
+
+  const match = /^(file uploaded|AI generated|AI geneterated):\s*.*?#(\d+)\s*$/i.exec(messageText.trim());
+  if (!match) {
+    return null;
+  }
+
+  const fileIndex = Number.parseInt(match[2], 10);
+  if (!Number.isInteger(fileIndex) || fileIndex < 0) {
+    return null;
+  }
+
+  return fileIndex;
+}
+
+function formatTranscriptMessage(message, currentCardId) {
+  if (!message || typeof message !== 'object') {
+    return null;
+  }
+
+  const role = typeof message.role === 'string' && message.role.trim()
+    ? message.role.trim().toLowerCase()
+    : 'message';
+  const roleLabel = role === 'system'
+    ? 'System'
+    : role === 'user'
+      ? 'User'
+      : role === 'assistant'
+        ? 'Assistant'
+        : 'Message';
+  const text = typeof message.text === 'string' && message.text.trim()
+    ? message.text.trim()
+    : '(no text)';
+  const lines = [`${roleLabel}:`, text];
+
+  if (role === 'system') {
+    const fileIndex = parseSystemMessageFileIndex(text);
+    if (fileIndex !== null) {
+      lines.push(`card-id:${currentCardId} file-index:${fileIndex}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function formatChatTranscript(messages, currentCardId) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return 'No recent chat messages.';
+  }
+
+  return messages
+    .map((message) => formatTranscriptMessage(message, currentCardId))
+    .filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+    .join('\n\n');
 }
 
 function findNewAssistantMessage(messages, priorCount) {
@@ -151,16 +199,17 @@ function findNewAssistantMessage(messages, priorCount) {
   return null;
 }
 
-function buildCombinedRepairPrompt(cardIdValue, finalResponseHandle) {
+function buildCombinedRepairPrompt(cardIdValue) {
   return [
     'The previous attempt did not produce an acceptable result. Fix the issues below before completing.',
     'No staged final reply was written through provide-final-reply-to-user.',
-    `Write the final user-visible reply using cardId: ${cardIdValue} and finalResponseHandle: ${finalResponseHandle}.`,
+    `Write the final user-visible reply using cardId: ${cardIdValue}.`,
     'Do not return reply text through stdout or any other response channel.'
   ].join('\n');
 }
 
-function runCopilot(prompt, workingDir) {
+function runCopilot(prompt, workingDir, options = {}) {
+  const { continueSession = false } = options;
   const ts = Date.now();
   const tempRoot = scratchDir;
   const outFile = copilotOutputFile || path.join(tempRoot, `asst-out-${ts}.txt`);
@@ -168,12 +217,14 @@ function runCopilot(prompt, workingDir) {
   return new Promise((resolve, reject) => {
   const copilotArgs = [
     '-C', workingDir,
-    '--continue',
     '-s',
     '--no-ask-user',
     '--allow-all-tools',
     '--model', COPILOT_MODEL,
   ];
+  if (continueSession) {
+    copilotArgs.splice(2, 0, '--continue');
+  }
   const execCommand = process.platform === 'win32' ? 'cmd.exe' : 'copilot';
   const execArgs = process.platform === 'win32'
     ? ['/d', '/c', 'copilot', ...copilotArgs]
@@ -262,13 +313,17 @@ function runCopilot(prompt, workingDir) {
   });
 }
 
-async function runCopilotWithValidationRetries(prompt, workingDir, cardIdValue, finalResponseHandle, responseFilePath) {
+async function runCopilotWithValidationRetries(prompt, workingDir, cardIdValue, responseFilePath) {
   const maxRetries = 3;
   let attempt = 0;
   let stagedFinalReply = '';
 
   while (attempt <= maxRetries) {
-    await runCopilot(attempt === 0 ? prompt : buildCombinedRepairPrompt(cardIdValue, finalResponseHandle), workingDir);
+    await runCopilot(
+      attempt === 0 ? prompt : buildCombinedRepairPrompt(cardIdValue),
+      workingDir,
+      { continueSession: attempt > 0 },
+    );
     stagedFinalReply = readStagedFinalResponse(responseFilePath);
 
     if (stagedFinalReply) {
@@ -321,16 +376,22 @@ DBG_LOG('assistant:start', {
 const workingDir = resolveCopilotWorkspaceDir(aiWorkspaceRoot, cardStoreRef, cardId, 'assistant');
 configureWorkspaceCliScripts(workingDir, 'assistant');
 const chatMessages = readEnhancedChatMessages(
+  baseRef,
   chatStoreRef,
-  cardStoreRef,
   cardId,
   Math.min(chatCopilotTimeoutMs, 30000),
   { lastUserTurns: PROMPT_LAST_USER_TURNS },
 );
-const historyDump = JSON.stringify(chatMessages, null, 2);
-const finalResponseHandle = randomUUID().replace(/-/g, '').slice(0, 8).toLowerCase();
-const finalResponseContainer = createFinalResponseContainerFromRoot(finalResponseRootDir, cardId, finalResponseHandle);
-const prompt = buildPrompt(cardId, historyDump, finalResponseContainer.finalResponseHandle);
+const historyDump = formatChatTranscript(chatMessages, cardId);
+const finalResponseContainer = createFinalResponseContainerFromRoot(finalResponseRootDir, cardId);
+clearFinalResponseContainer(finalResponseContainer.containerDir);
+const prompt = buildPrompt(cardId, historyDump);
+appendDebug('assistant:promptBuilt', {
+  workingDir,
+  historyDumpLength: historyDump.length,
+  promptLength: prompt.length,
+  prompt,
+});
 
 try {
   if (bypassCopilotForTest) {
@@ -347,7 +408,6 @@ try {
     prompt,
     workingDir,
     cardId,
-    finalResponseContainer.finalResponseHandle,
     finalResponseContainer.responseFilePath
   );
   const stagedFinalReply = runResult.stagedFinalReply;
@@ -367,12 +427,10 @@ try {
   });
   appendDebug('assistant:success', {
     usedFallbackAppend: false,
-    finalResponseHandle: finalResponseContainer.finalResponseHandle,
     publishedAttachmentCount: publishResult.publishedAttachmentCount,
   });
   DBG_LOG('assistant:success', {
     usedFallbackAppend: false,
-    finalResponseHandle: finalResponseContainer.finalResponseHandle,
     publishedAttachmentCount: publishResult.publishedAttachmentCount,
   });
   // The flow only consumes success or error from this process. Reply text must not be returned here.

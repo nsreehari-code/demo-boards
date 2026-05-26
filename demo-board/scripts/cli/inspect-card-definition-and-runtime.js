@@ -84,50 +84,6 @@ function unwrapSuccessfulEnvelope(result, commandName) {
   throw new Error(`${commandName} returned an unexpected response shape`);
 }
 
-function extractFileRef(fileEntry) {
-  if (!fileEntry || typeof fileEntry !== 'object' || Array.isArray(fileEntry)) {
-    return null;
-  }
-
-  const candidateKeys = ['path', 'stored_name', 'key', 'file_ref', 'fileRef', 'ref'];
-  for (const key of candidateKeys) {
-    const value = fileEntry[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return null;
-}
-
-function serializeFsPathRef(filePath) {
-  return `b64:${Buffer.from(JSON.stringify({ kind: 'fs-path', value: filePath }), 'utf8').toString('base64url')}`;
-}
-
-function toPublicFileRef(fileEntry) {
-  const candidate = extractFileRef(fileEntry);
-  if (typeof candidate !== 'string' || !candidate) {
-    return null;
-  }
-
-  if (path.isAbsolute(candidate)) {
-    return serializeFsPathRef(candidate);
-  }
-
-  return candidate;
-}
-
-function buildAttachedFileRefs(storedCard) {
-  const files = Array.isArray(storedCard?.card_data?.files) ? storedCard.card_data.files : [];
-  return files
-    .filter((fileEntry) => fileEntry && typeof fileEntry === 'object' && !Array.isArray(fileEntry))
-    .map((fileEntry, index) => ({
-      index,
-      file_ref: toPublicFileRef(fileEntry),
-    }))
-    .filter((fileEntry) => typeof fileEntry.file_ref === 'string' && fileEntry.file_ref.length > 0);
-}
-
 function getAtPath(objectValue, ref) {
   if (typeof ref !== 'string' || ref.length === 0) {
     return undefined;
@@ -273,7 +229,6 @@ function main() {
   const provides = readOutputMap(baseRef, Array.isArray(cardStatusInBoard.provides_runtime) ? cardStatusInBoard.provides_runtime : []);
   const computedValues = readComputedValues(baseRef, cardId);
   const fetchedSourceFileRefs = readFetchedSourceFileRefs(baseRef, cardId);
-  const attachedFileRefs = buildAttachedFileRefs(storedCard);
   const runtimeNode = {
     card_data: storedCard?.card_data ?? {},
     requires,
@@ -285,7 +240,6 @@ function main() {
     cardId,
     card_status_in_board: cardStatusInBoard,
     card_definition_and_static_data: storedCard,
-    'refs-for-attached-files': attachedFileRefs,
     refs_for_fetched_sources_files: fetchedSourceFileRefs,
     runtime_data: {
       requires,

@@ -1,16 +1,16 @@
 ---
 name: inspect-attachments-file-contents
 description: >
-  Read the contents of an attached file on a live board when you already have
-  a file_ref from a card view or chat message.
+  Read the contents of an attached file on a live board using card id and
+  merged file index.
 ---
 
 # Inspect Attachments File Contents
 
 ## When To Use
 
-Use this skill when you already have a `file_ref` for an attachment and need to
-read the file contents without changing anything.
+Use this skill when you know the target card id and file index for an
+attachment and need to read the file contents without changing anything.
 
 Typical questions this skill answers:
 
@@ -19,7 +19,8 @@ Typical questions this skill answers:
 - What does a card-level or chat-level attachment actually contain?
 
 Don't use this skill to discover which files exist on a card. Use
-`inspect-board-and-card-state` first when you need to find file refs.
+`inspect-board-and-card-state` first when you need to find the right card and
+merged file index from chat history or card state.
 
 ## Command Surface
 
@@ -28,18 +29,18 @@ Run this from the Copilot workspace root.
 ### Attached file contents
 
 ```bash
-node ./.github/scripts/inspect-file-contents.js --file-ref <file-ref>
+node ./.github/scripts/inspect-file-contents.js --card-id <card-id> --file-idx <idx>
 ```
 
-Use a `file_ref` you already have from the full card view or from chat
-messages.
+Use the card id and merged file index from the relevant system message, such as
+`file uploaded: ... #1` or `AI generated: ... #0`.
 
-The command returns the stored attachment contents for that exact ref.
+The command returns the stored attachment contents for that card attachment.
 
 ## Command Rules
 
 - This command is read-only. Don't change cards, runtime, or chat.
-- Use this only after you already have a `file_ref`.
+- Use this only after you already know the right card id and merged file index.
 - If you still need to discover which files are attached, switch to
   `inspect-board-and-card-state` first.
 - If the task turns into modifying a card or validating whether a repair would
@@ -49,16 +50,16 @@ The command returns the stored attachment contents for that exact ref.
 ## Choosing What To Read
 
 - *"What was in that file the user attached?"* — run
-  `inspect-file-contents.js --file-ref <file-ref>`.
-- *"What is inside this card attachment?"* — get the `file_ref` from the full
-  card view, then run `inspect-file-contents.js`.
-- *"I do not have a file_ref yet."* — use `inspect-board-and-card-state`
-  first to inspect the card view or chat messages and extract the right ref.
+  `inspect-file-contents.js --card-id <card-id> --file-idx <idx>`.
+- *"What is inside this attachment mentioned in chat?"* — use the `#<idx>`
+  suffix from the system message, then run `inspect-file-contents.js`.
+- *"I do not know the right file index yet."* — use `inspect-board-and-card-state`
+  first to inspect the chat messages and find the right index.
 
 ## Related Skills
 
-- `inspect-board-and-card-state` — when you need to find the right `file_ref`
-  before reading contents.
+- `inspect-board-and-card-state` — when you need to find the right card id and
+  file index before reading contents.
 - `manage-cards-on-live-board` — when the task moves from reading to changing
   cards or board membership.
 - `preflight-card-changes` — when the task shifts from inspection to execution

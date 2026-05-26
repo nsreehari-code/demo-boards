@@ -212,8 +212,8 @@ There is no fixed order. Pick by what the edit actually needs:
   valid for that source kind — `discover-board-capabilities`. Skip if you
   already know.
 - *"The user attached a file that matters for the fix"* — surface it via
-  `inspect-board-and-card-state` (card-level `refs-for-attached-files` or
-  chat-level `file_refs`), then `inspect-file-contents.js`.
+  `inspect-board-and-card-state` (usually chat system messages with `#<idx>`
+  suffixes), then `inspect-file-contents.js --card-id <card-id> --file-idx <idx>`.
 - *Otherwise* — make the smallest edit that addresses the request and
   `upsert-card` the repaired card.
 

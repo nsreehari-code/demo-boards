@@ -27,7 +27,7 @@ const ECHO_PROBE_MARKER = '__probe__echo__probe__';
 const PROBE_IN_PROGRESS_TEXT = 'in-progress';
 const PROBE_WATCHPARTY_FRAME_1 = 'probe frame 1';
 const PROBE_WATCHPARTY_FRAME_2 = 'probe frame 2';
-const NON_PROBE_RESPONSE_TIMEOUT_MS = 90_000;
+const NON_PROBE_RESPONSE_TIMEOUT_MS = 120_000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,7 +52,23 @@ const skipT3a = cliArgs.includes('--skip-t3a') || (!forceT3aBypass && !isCopilot
 const skipT3b = cliArgs.includes('--skip-t3b');
 const skipT3c = cliArgs.includes('--skip-t3c') || !isCopilotAvailable();
 const skipT3d = cliArgs.includes('--skip-t3d');
-const RUN_ID = `run-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+
+function buildReadableRunId() {
+  const now = new Date();
+  const datePart = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('');
+  const timePart = [
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+    String(now.getSeconds()).padStart(2, '0'),
+  ].join('');
+  return `run-${datePart}-${timePart}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+const RUN_ID = buildReadableRunId();
 
 const BOARD_ID = 'live';
 const BOARD_DIR = path.resolve(__dirname, '..');

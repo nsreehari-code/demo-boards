@@ -7,6 +7,31 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const logFilePath = path.join(__dirname, 'log.jsonl');
 const knownConstantsPath = path.join(__dirname, 'known_constants.json');
+const initialProcessCwd = process.cwd();
+const expectedWorkspaceRoot = path.resolve(__dirname, '..', '..');
+
+function normalizeDirPath(dirPath) {
+  return path.resolve(dirPath).replace(/[\\/]+$/, '').toLowerCase();
+}
+
+export function getExpectedWorkspaceRoot() {
+  return expectedWorkspaceRoot;
+}
+
+export function ensureWorkspaceRootCwd() {
+  const currentCwd = process.cwd();
+  if (normalizeDirPath(currentCwd) !== normalizeDirPath(expectedWorkspaceRoot)) {
+    process.chdir(expectedWorkspaceRoot);
+  }
+
+  return {
+    invokedFromCwd: currentCwd,
+    workspaceRoot: expectedWorkspaceRoot,
+    cwdChanged: normalizeDirPath(currentCwd) !== normalizeDirPath(expectedWorkspaceRoot),
+  };
+}
+
+ensureWorkspaceRootCwd();
 
 function toLogText(value) {
   if (typeof value === 'string') {
@@ -26,7 +51,9 @@ export function log_it(cmd, message = '') {
       ts: new Date().toISOString(),
       cmd: toLogText(cmd),
       msg: toLogText(message),
+      invokedFromCwd: initialProcessCwd,
       cwd: process.cwd(),
+      workspaceRoot: expectedWorkspaceRoot,
     };
 
     fs.appendFileSync(logFilePath, `${JSON.stringify(entry)}\n`, 'utf8');

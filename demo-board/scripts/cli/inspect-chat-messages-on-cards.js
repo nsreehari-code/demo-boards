@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
-  buildStoredFileIndex,
-  enhanceChatMessageWithFileRefs,
   log_it,
   readKnownBaseRef,
   resolveKnownYamlFlowCliPath,
@@ -11,7 +10,6 @@ import {
 
 const boardLiveCardsCliPath = resolveKnownYamlFlowCliPath('board-live-cards-cli.mjs');
 const chatStoreCliPath = resolveKnownYamlFlowCliPath('chat-store-cli.mjs');
-const cardStoreCliPath = resolveKnownYamlFlowCliPath('card-store-cli.mjs');
 
 const usageLines = [
   'Usage:',
@@ -116,12 +114,20 @@ function readStoreRef(baseRef, getterCommand, commandName) {
   return storeRef.trim();
 }
 
-function readStoredCard(storeRef, cardId) {
-  const result = runJsonScript(cardStoreCliPath, ['get', '--store-ref', storeRef, '--id', cardId]);
-  if (!Array.isArray(result) || result.length === 0) {
-    throw new Error(`card "${cardId}" not found in card store`);
-  }
-  return result[0];
+function readAttachmentRefs(baseRef, cardId) {
+  const result = runJsonScript(boardLiveCardsCliPath, ['get-attachment-ref', '--base-ref', baseRef, '--card-id', cardId]);
+  const data = unwrapSuccessfulEnvelope(result, 'get-attachment-ref');
+  const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
+  return attachments.filter((attachment) => {
+    if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) {
+      return false;
+    }
+
+    return Number.isInteger(attachment.idx)
+      && attachment.idx >= 0
+      && typeof attachment.ref === 'string'
+      && attachment.ref.trim().length > 0;
+  });
 }
 
 function readChatRecords(chatStoreRef, cardId, lastUserTurns = null) {
@@ -139,17 +145,67 @@ function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function parseSystemMessageFileIndex(messageText) {
+  if (typeof messageText !== 'string' || !messageText.trim()) {
+    return null;
+  }
+
+  const match = /^(file uploaded|AI generated|AI geneterated):\s*.*?#(\d+)\s*$/i.exec(messageText.trim());
+  if (!match) {
+    return null;
+  }
+
+  const fileIndex = Number.parseInt(match[2], 10);
+  if (!Number.isInteger(fileIndex) || fileIndex < 0) {
+    return null;
+  }
+
+  return fileIndex;
+}
+
+function enhanceChatMessageWithAttachmentHint(message, cardId, attachments) {
+  const enhanced = {
+    ...message,
+  };
+
+  const role = typeof message?.role === 'string'
+    ? message.role
+    : typeof message?.payload?.role === 'string'
+      ? message.payload.role
+      : '';
+  const messageText = typeof message?.text === 'string'
+    ? message.text
+    : typeof message?.payload?.text === 'string'
+      ? message.payload.text
+      : '';
+
+  if (role === 'system') {
+    const fileIndex = parseSystemMessageFileIndex(messageText);
+    const hasAttachment = fileIndex !== null && attachments.some((attachment) => attachment.idx === fileIndex);
+    if (hasAttachment) {
+      const retrievalHint = `Retrieve using inspect-file-contents.js --card-id ${cardId} --file-idx ${fileIndex}`;
+      enhanced.retrieval_hint = retrievalHint;
+      if (message?.payload && typeof message?.role !== 'string') {
+        enhanced.payload = {
+          ...message.payload,
+          retrieval_hint: retrievalHint,
+        };
+      }
+    }
+  }
+
+  return enhanced;
+}
+
 function handleGetMessages(flags) {
   const baseRef = readKnownBaseRef();
   const cardId = requireArgText(flags, 'card-id');
   const lastUserTurns = parseOptionalPositiveInteger(flags, 'last-user-turns');
   const tail = parseOptionalPositiveInteger(flags, 'tail');
   const chatStoreRef = readStoreRef(baseRef, 'get-chat-store-ref', 'get-chat-store-ref');
-  const cardStoreRef = readStoreRef(baseRef, 'get-card-store-ref', 'get-card-store-ref');
-  const storedCard = readStoredCard(cardStoreRef, cardId);
-  const storedFiles = buildStoredFileIndex(storedCard);
+  const attachments = readAttachmentRefs(baseRef, cardId);
   const messages = readChatRecords(chatStoreRef, cardId, lastUserTurns)
-    .map((message) => enhanceChatMessageWithFileRefs(message, storedFiles));
+    .map((message) => enhanceChatMessageWithAttachmentHint(message, cardId, attachments));
   const visibleMessages = tail === null ? messages : messages.slice(-tail);
 
   printJson({
