@@ -52,10 +52,8 @@ function isCopilotAvailable() {
 const skipT3a = cliArgs.includes('--skip-t3a') || (!forceT3aBypass && !isCopilotAvailable());
 const skipT3b = cliArgs.includes('--skip-t3b');
 const skipT3c = cliArgs.includes('--skip-t3c') || !isCopilotAvailable();
+const skipT3d = cliArgs.includes('--skip-t3d');
 const RUN_ID = `run-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-const ASSISTANT_DEBUG_LOG_FILE = typeof process.env.ENABLE_DEBUG_LOGGING === 'string' && process.env.ENABLE_DEBUG_LOGGING.trim()
-  ? process.env.ENABLE_DEBUG_LOGGING.trim()
-  : path.join(os.tmpdir(), `demo-board-server-http-assistant-debug-${RUN_ID}.log`);
 
 const BOARD_ID = 'live';
 const BOARD_DIR = path.resolve(__dirname, '..');
@@ -81,6 +79,12 @@ function resolveConfiguredBoardSetupRoot(serverConfig, boardId) {
   const setupRoot = serverConfig?.boards?.[boardId]?.setup?.setupRoot;
   if (typeof setupRoot !== 'string' || !setupRoot.trim()) return null;
   return path.resolve(BOARD_DIR, setupRoot);
+}
+
+function resolveConfiguredPerRunSetupBase(serverConfig) {
+  const setupRootPerRunBase = serverConfig?.setupRootPerRunBase;
+  if (typeof setupRootPerRunBase !== 'string' || !setupRootPerRunBase.trim()) return null;
+  return path.resolve(BOARD_DIR, setupRootPerRunBase);
 }
 
 function findFreePort() {
@@ -145,7 +149,10 @@ function resolveSetupMode(serverConfig, boardId) {
     };
   }
 
-  const setupDir = path.join(os.tmpdir(), RUN_ID);
+  const configuredPerRunBase = resolveConfiguredPerRunSetupBase(serverConfig);
+  const setupDir = configuredPerRunBase
+    ? path.join(configuredPerRunBase, RUN_ID)
+    : path.join(os.tmpdir(), RUN_ID);
   return {
     setupDir,
     boardSetupRoot: path.join(setupDir, 'boards'),
@@ -366,17 +373,9 @@ function findAssistantOutcomeInMessages(messages, beforeCount, successPattern) {
 function findAssistantOutcome(events, options) {
   const successPattern = options?.successPattern instanceof RegExp ? options.successPattern : null;
   const beforeCount = Number.isInteger(options?.beforeCount) && options.beforeCount >= 0 ? options.beforeCount : 0;
-  const debugEntryStart = Number.isInteger(options?.debugEntryStart) && options.debugEntryStart >= 0
-    ? options.debugEntryStart
-    : 0;
-  let sawProcessingTrue = false;
 
   for (const event of events) {
     if (!event || !Array.isArray(event.messages)) continue;
-
-    if (event.processing) {
-      sawProcessingTrue = true;
-    }
 
     const messageOutcome = findAssistantOutcomeInMessages(event.messages, beforeCount, successPattern);
     if (messageOutcome) {
@@ -385,66 +384,18 @@ function findAssistantOutcome(events, options) {
 
   }
 
-  const debugEntries = readAssistantDebugEntries().slice(debugEntryStart);
-  const assistantError = [...debugEntries].reverse().find((entry) => (
-    entry
-    && typeof entry.stage === 'string'
-    && (entry.stage === 'assistant:error' || entry.stage === 'runCopilot:error')
-  ));
-  if (assistantError) {
-    return {
-      ok: false,
-      reason: assistantError.message || assistantError.errFileText || 'assistant error logged',
-      debugEntry: assistantError,
-    };
-  }
-
   return false;
 }
-
-function readAssistantDebugEntries() {
-  if (!ASSISTANT_DEBUG_LOG_FILE || !fs.existsSync(ASSISTANT_DEBUG_LOG_FILE)) {
-    return [];
-  }
-
-  try {
-    return fs.readFileSync(ASSISTANT_DEBUG_LOG_FILE, 'utf-8')
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-async function waitForAssistantOutcome({ cardId, eventStart, beforeCount, debugEntryStart, successPattern, timeoutMs, label }) {
+async function waitForAssistantOutcome({ eventStart, beforeCount, successPattern, timeoutMs, label }) {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() <= deadline) {
     const eventOutcome = findAssistantOutcome(NS.chatEvents.slice(eventStart), {
       beforeCount,
-      debugEntryStart,
       successPattern,
     });
     if (eventOutcome) {
       return eventOutcome;
-    }
-
-    const chatsRes = await httpGet(`${BASE}/cards/${cardId}/chats`);
-    if (chatsRes.status === 200) {
-      const messages = Array.isArray(chatsRes.data?.messages) ? chatsRes.data.messages : [];
-      const messageOutcome = findAssistantOutcomeInMessages(messages, beforeCount, successPattern);
-      if (messageOutcome) {
-        return { ...messageOutcome, source: 'http' };
-      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -587,7 +538,6 @@ function startServer(port) {
       windowsHide: true,
       env: {
         ...process.env,
-        ENABLE_DEBUG_LOGGING: ASSISTANT_DEBUG_LOG_FILE,
         DEMO_SERVER_PORT: String(port),
         DEMO_CARDS_PATTERN: CARD_PATTERN,
         DEMO_BOARDS_MCP_SERVER_URL: MCP_SERVER_URL,
@@ -629,13 +579,13 @@ console.log('\n=== live board HTTP+SSE smoke test ===');
 console.log(`target: ${BASE}`);
 console.log(`card pattern: ${CARD_PATTERN}`);
 console.log(`[setup] MCP server URL: ${MCP_SERVER_URL}`);
-console.log(`[demo-http-test] assistant debug log: ${ASSISTANT_DEBUG_LOG_FILE}`);
 
 let serverProc = null;
 let sseWorker = null;
 let chatSseClient = null;
 let chatSseClientId = '';
 let watchpartySubscribed = false;
+let runCompletedSuccessfully = false;
 
 async function ensureChatSseSubscription() {
   if (!chatSseClientId) {
@@ -961,6 +911,78 @@ try {
     console.log('[T3b] ok: upload protocol and ordered probe lifecycle observed (user+processing, in-progress, assistant+processing clear)');
   }
 
+  // ── T3d: probe-echo chat with one AI-generated attachment ──
+  if (skipT3d) {
+    console.log('\n=== T3d: skipped (--skip-t3d) ===');
+  } else {
+    console.log('\n=== T3d: probe-echo chat with AI-generated attachment ===');
+    await ensureChatSseSubscription();
+    const t2dBeforeChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2dBeforeChats.status === 200, `T3d pre chats returned ${t2dBeforeChats.status}`);
+    const t2dBeforeMessages = Array.isArray(t2dBeforeChats.data?.messages) ? t2dBeforeChats.data.messages : [];
+    const t2dBeforeCount = t2dBeforeMessages.length;
+
+    const t2dBeforeCard = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}`);
+    assert(t2dBeforeCard.status === 200, `T3d pre card returned ${t2dBeforeCard.status}`);
+    const t2dBeforeFiles = Array.isArray(t2dBeforeCard.data?.card_data?.files)
+      ? t2dBeforeCard.data.card_data.files
+      : [];
+
+    const t2dPrompt = `probe generated attachment validation ${Date.now()}`;
+    const t2dEventStart = NS.chatEvents.length;
+    const t2dSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
+      actionType: 'chat-send',
+      payload: {
+        text: `${ECHO_PROBE_MARKER}[attach] ${t2dPrompt}${ECHO_PROBE_MARKER}`,
+      },
+    });
+    assert(t2dSendRes.status === 200, `T3d chat-send returned ${t2dSendRes.status}`);
+
+    const t2dLifecycle = await waitForChatPredicate((events) => {
+      return matchOrderedProbeLifecycle(events.slice(t2dEventStart), {
+        beforeCount: t2dBeforeCount,
+        beforeProcessing: false,
+        prompt: t2dPrompt,
+        inProgressText: PROBE_IN_PROGRESS_TEXT,
+      });
+    }, 60_000, 'T3d ordered lifecycle');
+    assert(!!t2dLifecycle, 'T3d ordered lifecycle not observed');
+
+    const t2dAfterChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    assert(t2dAfterChats.status === 200, `T3d post chats returned ${t2dAfterChats.status}`);
+    const t2dAfterMessages = Array.isArray(t2dAfterChats.data?.messages) ? t2dAfterChats.data.messages : [];
+    const t2dNewMessages = t2dAfterMessages.slice(t2dBeforeCount);
+    assert(t2dNewMessages.length >= 4, `T3d expected at least 4 chat messages after send, got ${t2dNewMessages.length}`);
+
+    const t2dInProgress = t2dNewMessages.find((m) => m?.role === 'system' && String(m?.text || '').trim().toLowerCase() === PROBE_IN_PROGRESS_TEXT);
+    const t2dAiGenerated = t2dNewMessages.find((m) => m?.role === 'system' && /^AI generated:/i.test(String(m?.text || '')));
+    const t2dAssistantMsg = t2dNewMessages.find((m) => m?.role === 'assistant');
+
+    assert(!!t2dInProgress && typeof t2dInProgress.id === 'string', 'T3d missing in-progress system chat message');
+    assert(!!t2dAiGenerated && typeof t2dAiGenerated.id === 'string', 'T3d missing AI-generated attachment system chat message');
+    assert(/#\d+\s*$/.test(String(t2dAiGenerated?.text || '')), 'T3d AI-generated system message should include merged file index');
+    assert(!!t2dAssistantMsg && typeof t2dAssistantMsg.id === 'string', 'T3d missing assistant chat message');
+    assert(String(t2dAssistantMsg?.text || '').includes(`Echo: ${t2dPrompt}`), 'T3d assistant content mismatch');
+
+    const t2dFileIndexMatch = /#(\d+)\s*$/.exec(String(t2dAiGenerated?.text || ''));
+    assert(!!t2dFileIndexMatch, 'T3d AI-generated message missing file index');
+    const t2dFileIndex = Number.parseInt(t2dFileIndexMatch[1], 10);
+    assert(Number.isInteger(t2dFileIndex) && t2dFileIndex >= 0, 'T3d AI-generated message file index should be non-negative');
+
+    const t2dAfterCard = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}`);
+    assert(t2dAfterCard.status === 200, `T3d post card returned ${t2dAfterCard.status}`);
+    const t2dAfterFiles = Array.isArray(t2dAfterCard.data?.card_data?.files)
+      ? t2dAfterCard.data.card_data.files
+      : [];
+    assert(t2dAfterFiles.length === t2dBeforeFiles.length + 1, `T3d expected exactly one new stored file, got ${t2dAfterFiles.length - t2dBeforeFiles.length}`);
+    const t2dStoredFile = t2dAfterFiles[t2dFileIndex];
+    assert(!!t2dStoredFile, `T3d stored file missing at merged index ${t2dFileIndex}`);
+    assert(t2dStoredFile?.chat === true, 'T3d generated file should be marked as chat-origin');
+    assert(String(t2dStoredFile?.stored_name || '').length > 0, 'T3d generated file stored_name missing');
+    assert(!Object.prototype.hasOwnProperty.call(t2dStoredFile || {}, 'path'), 'T3d stored file metadata should not expose path');
+    console.log('[T3d] ok: probe staged one AI-generated attachment and appended the final reply through the shared flow');
+  }
+
   // ── T3a: non-probe chat protocol over API + SSE ──
   // Disabled in the public example unless explicitly requested — requires a
   // configured Azure Foundry endpoint and agent_id in server-config.json.
@@ -974,7 +996,6 @@ try {
     const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
     const t2aBeforeCount = t2aBeforeMessages.length;
     const t2aEventStart = NS.chatEvents.length;
-    const t2aDebugStart = readAssistantDebugEntries().length;
     const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
 
     const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
@@ -986,23 +1007,20 @@ try {
     assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
 
     const t2aOutcome = await waitForAssistantOutcome({
-      cardId: CHAT_CARD_ID,
       eventStart: t2aEventStart,
       beforeCount: t2aBeforeCount,
-      debugEntryStart: t2aDebugStart,
       successPattern: /paris/i,
       timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
       label: 'T3a assistant response with paris',
     });
     assert(t2aOutcome.ok, `T3a failed before assistant response: ${t2aOutcome.reason || 'unknown reason'}`);
+    assert(t2aOutcome.source === 'sse', 'T3a should resolve from SSE chat notifications');
 
-    const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-    assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
-    const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
-    const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
+    const t2aMessages = Array.isArray(t2aOutcome?.event?.messages) ? t2aOutcome.event.messages : [];
+    const t2aNewMessages = t2aMessages.slice(t2aBeforeCount);
     assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat messages, got ${t2aNewMessages.length}`);
     const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
-    assert(!!t2aAssistantMsg && typeof t2aAssistantMsg.id === 'string', 'T3a assistant chat message missing id');
+    assert(!!t2aAssistantMsg, 'T3a assistant chat message missing from SSE payload');
     assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T3a assistant file content missing paris');
     console.log('[T3a] ok: non-probe response contains paris');
   }
@@ -1049,7 +1067,6 @@ try {
 
     const t2cSendBaseline = t2cUploadMessages.length;
     const t2cEventStart = NS.chatEvents.length;
-    const t2cDebugStart = readAssistantDebugEntries().length;
     const t2cPrompt = 'Answer the question in the attached file in one word';
 
     const t2cSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
@@ -1062,33 +1079,31 @@ try {
     assert(t2cSendRes.status === 200, `T3c chat-send returned ${t2cSendRes.status}`);
 
     const t2cOutcome = await waitForAssistantOutcome({
-      cardId: CHAT_CARD_ID,
       eventStart: t2cEventStart,
       beforeCount: t2cSendBaseline,
-      debugEntryStart: t2cDebugStart,
       successPattern: /tokyo/i,
       timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
       label: 'T3c assistant response with tokyo',
     });
     assert(t2cOutcome.ok, `T3c failed before assistant response: ${t2cOutcome.reason || 'unknown reason'}`);
+    assert(t2cOutcome.source === 'sse', 'T3c should resolve from SSE chat notifications');
 
-    const t2cAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-    assert(t2cAfter.status === 200, `T3c post chats returned ${t2cAfter.status}`);
-    const t2cAfterMessages = Array.isArray(t2cAfter.data?.messages) ? t2cAfter.data.messages : [];
-    const t2cNewMessages = t2cAfterMessages.slice(t2cSendBaseline);
+    const t2cMessages = Array.isArray(t2cOutcome?.event?.messages) ? t2cOutcome.event.messages : [];
+    const t2cNewMessages = t2cMessages.slice(t2cSendBaseline);
     assert(t2cNewMessages.length >= 2, `T3c expected at least 2 new chat messages, got ${t2cNewMessages.length}`);
     const t2cUser = t2cNewMessages.find((m) => m?.role === 'user');
     const t2cAssistantMsg = [...t2cNewMessages].reverse().find((m) => m?.role === 'assistant');
-    assert(!!t2cUser && typeof t2cUser.id === 'string', 'T3c user chat message missing id');
+    assert(!!t2cUser, 'T3c user chat message missing from SSE payload');
     assert(Array.isArray(t2cUser?.files) && t2cUser.files.length === 1, 'T3c user chat message missing uploaded file metadata');
     assert(!Object.prototype.hasOwnProperty.call(t2cUser?.files?.[0] || {}, 'path'), 'T3c user chat file metadata should not expose path');
-    assert(!!t2cAssistantMsg && typeof t2cAssistantMsg.id === 'string', 'T3c assistant chat message missing id');
+    assert(!!t2cAssistantMsg, 'T3c assistant chat message missing from SSE payload');
     assert(/tokyo/i.test(String(t2cAssistantMsg?.text || '')), 'T3c assistant file content missing tokyo');
     console.log('[T3c] ok: non-probe file-upload response contains tokyo');
   }
   }
 
   console.log('\n=== All smoke checks passed ===\n');
+  runCompletedSuccessfully = true;
 } finally {
   if (chatSseClientId) {
     try {
@@ -1109,6 +1124,8 @@ try {
 
   if (PRESERVE_SETUP_DIR) {
     console.log(`[demo-http-test] server stopped, setup dir preserved: ${SETUP_CLEANUP_PATH}`);
+  } else if (!runCompletedSuccessfully) {
+    console.log(`[demo-http-test] server stopped, setup dir preserved for failed run: ${SETUP_CLEANUP_PATH}`);
   } else {
     if (fs.existsSync(SETUP_CLEANUP_PATH)) {
       try {

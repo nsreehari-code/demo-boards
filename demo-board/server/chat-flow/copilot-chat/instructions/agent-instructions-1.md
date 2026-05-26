@@ -104,8 +104,8 @@ prior chat turns, attached artifacts. When that visible context matters,
 reconstruct it through `inspect-board-and-card-state` rather than guessing.
 
 The chat flow hands you rich context for each turn — `cardId`, board setup
-and runtime roots, `cardStoreRef`, `chatStoreRef`, `artifactsStoreRef`,
-`scratchStoreRef`, resolved chat history, and the current user text.
+and runtime roots, resolved chat history, and the
+current user text.
 
 ## How This Copilot Workspace Was Assembled
 
@@ -157,7 +157,8 @@ true when you stop":
   `preflight-card-changes` passes for the changed card.** When that gate
   passes is up to you; that it passes before you declare done is not.
 - **The final user-visible reply goes through `provide-final-reply-to-user`,
-  exactly once per turn.** This is the only chat-store write path.
+  exactly once per turn.** That skill stages the terminal reply, and the
+  mediator appends it to chat history after the run completes.
 - **Durable cross-card lore** is set through the `lore.*` MCP tools
   (`lore.get`, `lore.get_all`, `lore.list_scopes`, `lore.set`, `lore.append`,
   `lore.deprecate`) or delegated to the `lore-keeper` agent. Use scope
@@ -194,7 +195,7 @@ Cards may form chains, fan-out trees, or UI-to-compute feedback loops, and
 may publish `_view` hints alongside data. This is the only wiring model;
 the runtime builds the dependency graph from token relationships.
 
-Cards typically take one of a few shapes:
+Cards typically have multiple elements:
 
 - **source cards** that fetch external or generated data
 - **compute cards** that transform upstream tokens

@@ -111,7 +111,7 @@ function buildPrompt(cId, historyDump, finalResponseContainerRef) {
     'Do not include markdown fences.',
     'Use the current skill command surfaces; do not invent alternate CLI forms.',
     `The prompt only includes the suffix returned by chat-store-cli read-all --last-user-turns ${PROMPT_LAST_USER_TURNS}.`,
-    'If you need more history or other runtime context, hill-climb conservatively: fetch the minimum additional context needed using the existing CLI surfaces, runtime handles, and appropriate skills.',
+    'If you need more history or other runtime context (chat histories, card definitions, runtime outputs, board status), hill-climb and side-walk conservatively: fetch the minimum additional context needed using the existing CLI surfaces, runtime handles, and appropriate skills.',
     'Do not guess missing context when you can retrieve it directly.',
     'After completing the main task, use the `lore-keeper` agent when the interaction could potentially have durable board-level, user-level, identity, or decision knowledge that should persist across future tasks.',
   ].join(' ');

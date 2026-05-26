@@ -3,6 +3,8 @@
   "chatFlowTimeoutMs": 1800000,
   "chatInvokeRefTimeoutMs": 1800000,
   "chatCopilotTimeoutMs": 1800000,
+  "setupRootPerRunBase": "./test/live.test.board-ws-tmp",
+
   "boards": {
     "live": {
       "label": "Live",

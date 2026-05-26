@@ -1,8 +1,8 @@
 ---
 name: provide-final-reply-to-user
 description: >
-  Persist the single final assistant reply for a card into the chat store via
-  the staged `provide-response-to-user.js` wrapper.
+  Stage the single final assistant reply for a card via the staged
+  `provide-response-to-user.js` wrapper.
 ---
 
 # Provide Final Reply To User
@@ -12,9 +12,10 @@ description: >
 Use this skill only at the very end of an assistant turn, when the final
 user-visible reply text is ready.
 
-This is the only write path into the chat store from skills. It is not for
-internal notes, status updates, reasoning traces, tool transcripts, partial
-drafts, orchestration state, or duplicate replies.
+This stages the terminal reply for the current turn. The mediator appends it to
+chat history after your run completes. It is not for internal notes, status
+updates, reasoning traces, tool transcripts, partial drafts, orchestration
+state, or duplicate replies.
 
 To read chat history (current card or other cards on the board), use
 `inspect-board-and-card-state`.
@@ -24,7 +25,7 @@ To read chat history (current card or other cards on the board), use
 Run from the Copilot workspace root.
 
 ```bash
-cat payload.json | node ./.github/scripts/provide-response-to-user.js --base-ref <board-ref> --card-id <card-id>
+cat payload.json | node ./.github/scripts/provide-response-to-user.js --final-response-container-ref <fs-path-ref>
 ```
 
 Payload:
@@ -33,12 +34,16 @@ Payload:
 { "text": "<final-user-reply>", "files": [] }
 ```
 
+`text` is staged as the final reply payload. If `files` are provided, they are
+staged into the same response container with generated file names.
+
 ## Rules
 
 - Call exactly once per completed assistant turn.
 - `text` must be the final user-visible reply, not a draft.
-- `files` is optional and may be left empty.
-- Do not write partial responses or duplicate replies into the chat store.
+- If `files` is provided, treat it as staged side data in the same container.
+- Only `text` is currently consumed by the mediator after the run completes.
+- Do not write partial responses or duplicate replies into the staged final-reply container.
 - Do not use this skill to mutate processing state, config, or session
   metadata.
 

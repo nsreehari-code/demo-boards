@@ -2,16 +2,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { log_it } from './shared_helpers.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const boardLiveCardsCliPath = path.join(__dirname, 'board-live-cards-cli.mjs');
-const chatStoreCliPath = path.join(__dirname, 'chat-store-cli.mjs');
+const FINAL_RESPONSE_FILE_NAME = '001-response.txt';
+const FILE_STAGE_PREFIX = '100-file-';
 
 const usageLines = [
   'Usage:',
-  '  cat payload.json | node provide-response-to-user.js --base-ref <board-ref> --card-id <card-id>',
+  '  cat payload.json | node provide-response-to-user.js --final-response-container-ref <fs-path-ref>',
   '',
   'Payload shape:',
   '  { "text": "<final-assistant-reply>", "files": [] }',
@@ -54,6 +52,49 @@ function requireArgText(flags, key) {
   return flags[key].trim();
 }
 
+function requireNonEmptyString(value, fieldName) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`Missing required value: ${fieldName}`);
+  }
+}
+
+function parseRefText(refText, fieldName) {
+  requireNonEmptyString(refText, fieldName);
+
+  if (refText.startsWith('b64:')) {
+    const encoded = refText.slice(4);
+    if (!encoded) {
+      throw new Error(`Expected ${fieldName} to contain base64 data`);
+    }
+
+    try {
+      const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+      return JSON.parse(decoded);
+    } catch {
+      throw new Error(`Expected ${fieldName} to be a valid base64 ref`);
+    }
+  }
+
+  if (refText.startsWith('{')) {
+    try {
+      return JSON.parse(refText);
+    } catch {
+      throw new Error(`Expected ${fieldName} to be valid JSON when not base64-encoded`);
+    }
+  }
+
+  throw new Error(`Expected ${fieldName} to be a supported ref string`);
+}
+
+function resolveStoreDir(storeRef, fieldName) {
+  const parsedRef = parseRefText(storeRef, fieldName);
+  if (!parsedRef || parsedRef.kind !== 'fs-path' || typeof parsedRef.value !== 'string' || !parsedRef.value.trim()) {
+    throw new Error(`Expected ${fieldName} to be an fs-path ref`);
+  }
+
+  return parsedRef.value;
+}
+
 function readPayload() {
   if (process.stdin.isTTY) {
     printUsage(1);
@@ -83,62 +124,57 @@ function readPayload() {
   };
 }
 
-function runJsonScript(scriptPath, scriptArgs) {
-  const result = spawnSync(process.execPath, [scriptPath, ...scriptArgs], {
-    encoding: 'utf8',
-    windowsHide: true,
+function sanitizeFileSegment(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '';
+  }
+
+  const baseName = path.basename(value.trim());
+  return baseName.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function pickStagedFileName(index, fileEntry) {
+  const candidateKeys = ['name', 'fileName', 'filename', 'path', 'stored_name', 'key'];
+  let candidateName = '';
+
+  if (fileEntry && typeof fileEntry === 'object' && !Array.isArray(fileEntry)) {
+    for (const key of candidateKeys) {
+      candidateName = sanitizeFileSegment(fileEntry[key]);
+      if (candidateName) {
+        break;
+      }
+    }
+  }
+
+  const prefix = `${FILE_STAGE_PREFIX}${String(index + 1).padStart(3, '0')}`;
+  return candidateName ? `${prefix}-${candidateName}` : `${prefix}.json`;
+}
+
+function readFileEntryContent(fileEntry) {
+  if (!fileEntry || typeof fileEntry !== 'object' || Array.isArray(fileEntry)) {
+    return JSON.stringify(fileEntry, null, 2);
+  }
+
+  const contentKeys = ['content', 'text', 'body', 'data'];
+  for (const key of contentKeys) {
+    if (typeof fileEntry[key] === 'string') {
+      return fileEntry[key];
+    }
+  }
+
+  return JSON.stringify(fileEntry, null, 2);
+}
+
+function stageAdditionalFiles(containerDir, files) {
+  return files.map((fileEntry, index) => {
+    const fileName = pickStagedFileName(index, fileEntry);
+    const filePath = path.join(containerDir, fileName);
+    fs.writeFileSync(filePath, readFileEntryContent(fileEntry), 'utf8');
+    return {
+      fileName,
+      filePath,
+    };
   });
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  if (result.status !== 0) {
-    const stderr = result.stderr ? result.stderr.trim() : '';
-    throw new Error(stderr || `${path.basename(scriptPath)} failed with exit code ${result.status}`);
-  }
-
-  return JSON.parse(result.stdout);
-}
-
-function runTextScript(scriptPath, scriptArgs) {
-  const result = spawnSync(process.execPath, [scriptPath, ...scriptArgs], {
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  if (result.status !== 0) {
-    const stderr = result.stderr ? result.stderr.trim() : '';
-    throw new Error(stderr || `${path.basename(scriptPath)} failed with exit code ${result.status}`);
-  }
-
-  return result.stdout.trim();
-}
-
-function unwrapSuccessfulEnvelope(result, commandName) {
-  if (result?.status === 'success') {
-    return Object.prototype.hasOwnProperty.call(result, 'data') ? result.data : null;
-  }
-
-  if (result?.status === 'fail' || result?.status === 'error') {
-    throw new Error(result.error || `${commandName} failed`);
-  }
-
-  throw new Error(`${commandName} returned an unexpected response shape`);
-}
-
-function readStoreRef(baseRef, getterCommand, commandName) {
-  const result = runJsonScript(boardLiveCardsCliPath, [getterCommand, '--base-ref', baseRef]);
-  const data = unwrapSuccessfulEnvelope(result, commandName);
-  const storeRef = data?.storeRef ?? data?.value;
-  if (typeof storeRef !== 'string' || !storeRef.trim()) {
-    throw new Error(`${commandName} did not return a store ref`);
-  }
-  return storeRef.trim();
 }
 
 function printJson(value) {
@@ -146,40 +182,27 @@ function printJson(value) {
 }
 
 function main() {
-  const flags = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  log_it('provide-response-to-user.js', argv.join(' '));
+  const flags = parseArgs(argv);
   if (flags.help || flags.h) {
     printUsage(0);
   }
 
-  const baseRef = requireArgText(flags, 'base-ref');
-  const cardId = requireArgText(flags, 'card-id');
+  const finalResponseContainerRef = requireArgText(flags, 'final-response-container-ref');
   const payload = readPayload();
-  const chatStoreRef = readStoreRef(baseRef, 'get-chat-store-ref', 'get-chat-store-ref');
-
-  const appendResult = runTextScript(chatStoreCliPath, [
-    'append',
-    '--store-ref',
-    chatStoreRef,
-    '--card-id',
-    cardId,
-    '--role',
-    'assistant',
-    '--text',
-    payload.text,
-    '--files-json',
-    JSON.stringify(payload.files),
-  ]);
-
-  let parsedAppendResult = null;
-  if (appendResult) {
-    parsedAppendResult = JSON.parse(appendResult);
-  }
+  const containerDir = resolveStoreDir(finalResponseContainerRef, 'final-response-container-ref');
+  const responseFilePath = path.join(containerDir, FINAL_RESPONSE_FILE_NAME);
+  fs.mkdirSync(containerDir, { recursive: true });
+  fs.writeFileSync(responseFilePath, payload.text, 'utf8');
+  const stagedFiles = stageAdditionalFiles(containerDir, payload.files);
 
   printJson({
     status: 'success',
     data: {
-      cardId,
-      append_result: parsedAppendResult,
+      finalResponseContainerRef,
+      responseFilePath,
+      stagedFiles,
     },
   });
 }
