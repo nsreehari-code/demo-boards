@@ -40,7 +40,7 @@ const __filename = fileURLToPath(import.meta.url);
 const SERVER_DIR = path.dirname(__filename);
 const BOARD_ROOT = path.resolve(SERVER_DIR, '..');
 const require = createRequire(import.meta.url);
-const YAML_FLOW_CLI_DIR = path.join(BOARD_ROOT, 'scripts', 'cli');
+const YAML_FLOW_BUNDLED_CLI_DIR = path.dirname(require.resolve('yaml-flow/cli-bundled/board-live-cards-cli.mjs'));
 const cliArgs = process.argv.slice(2);
 const SERVER_CONFIG = path.join(BOARD_ROOT, 'server-config.json');
 
@@ -873,11 +873,11 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
 
   const notifyChannel = `yaml-flow-server-${label}-${boardId}-${process.pid}`;
   const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath }));
-  const boardAdapter = createFsBoardPlatformAdapter(baseRef, YAML_FLOW_CLI_DIR, { notifyChannel });
+  const boardAdapter = createFsBoardPlatformAdapter(baseRef, YAML_FLOW_BUNDLED_CLI_DIR, { notifyChannel });
   boardAdapter.requestProcessAccumulated = () => {};
 
   const artifactsRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath }));
-  const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, YAML_FLOW_CLI_DIR, { suppressSpawn: true });
+  const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, YAML_FLOW_BUNDLED_CLI_DIR, { suppressSpawn: true });
   const artifactsStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath });
   const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
   const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
@@ -1133,7 +1133,7 @@ const runtime = createMultiBoardServerRuntime({
     const baseCfg = buildBoardContextConfig('base', boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, baseExecutionExtra);
     const boards = [baseCfg];
 
-    demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot: boardSetupPaths.setupRoot, aiWorkspaceRoot });
+    demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot: boardSetupPaths.setupRoot, aiWorkspaceRoot, baseRef });
 
     const broker = createWatchpartyBroker();
     watchpartyBrokers.set(boardId, broker);
@@ -1190,7 +1190,7 @@ const runtime = createMultiBoardServerRuntime({
 // Host setup — prepares Copilot workspaces under the board setup root.
 // ---------------------------------------------------------------------------
 
-function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot }) {
+function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot, baseRef }) {
   ensureDirectoryExists(boardSetupRoot, `boards.${boardId}.setup.setupRoot`);
 
   const workspaceSetup = Array.isArray(cfg?.['copilot-workdirs-setup'])
@@ -1304,6 +1304,11 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
         `[board-server] copilot workspace "${copilotRoot}" copyScripts: ${copyScriptDirs.length > 0 ? copyScriptDirs.join(', ') : '(none)'}`,
       );
       syncFlatFilesIntoDir(scriptsTarget, copyScriptDirs);
+      fs.writeFileSync(
+        path.join(scriptsTarget, 'known_constants.json'),
+        `${JSON.stringify({ base_ref: baseRef, yaml_flow_cli_bundled_dir: YAML_FLOW_BUNDLED_CLI_DIR }, null, 2)}\n`,
+        'utf8',
+      );
       for (const scriptsDir of copyScriptDirs) {
         if (!scriptsDir || !fs.existsSync(scriptsDir)) {
           logCopiedFiles('copyScripts', scriptsDir, 0);

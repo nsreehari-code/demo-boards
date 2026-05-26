@@ -1,30 +1,30 @@
 #!/usr/bin/env node
 
 import * as fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   getCopilotOutputFileName,
 } from '../../../../../watchparty-constants.mjs';
 import {
   appendAssistantReply,
   configureWorkspaceCliScripts,
-  createCardStoreSnapshot,
-  hasValidationIssues,
-  readChatMessages,
+  createFinalResponseContainer,
+  FINAL_RESPONSE_FILE_NAME,
+  publishFinalResponseFromContainer,
+  readEnhancedChatMessages,
+  readStagedFinalResponse,
   readJsonStdin,
   requireRequiredStrings,
   resolveCopilotWorkspaceDir,
   resolveStoreDir,
-  syncChangedCardsToBoard,
-  validateAllCards,
+  stageFinalResponsePayload,
 } from './shared.js';
 
-const HANDLER_FILE = fileURLToPath(import.meta.url);
-const HANDLER_DIR = path.dirname(HANDLER_FILE);
 const COPILOT_MODEL = 'gpt-5.4';
+const PROMPT_LAST_USER_TURNS = 4;
 
 function resolveCopilotOutputFilePath(dirPath, cId) {
   return path.join(dirPath, getCopilotOutputFileName(cId));
@@ -96,7 +96,7 @@ function appendDebug(stage, details = {}) {
   } catch {}
 }
 
-function buildPrompt(cId, historyDump) {
+function buildPrompt(cId, historyDump, finalResponseContainerRef) {
   const instructionsBlock = [
     'You are the responder in a three way orchestration.',
     'I am only a mediator passing the runtime context and the user query to you.',
@@ -106,9 +106,13 @@ function buildPrompt(cId, historyDump) {
     'Do not spend time rediscovering these handles from files, directories, or scans.',
     'Do not return the final user-visible answer text through stdout or any other response channel.',
     'Do not return status updates, tool transcripts, internal notes, completion acknowledgements, or reply text.',
-    'Write the final user-visible assistant reply to chat store only.',
-    'Do not write files and do not include markdown fences.',
+    'Use the provide-final-reply-to-user skill exactly once to stage the final user-visible assistant reply.',
+    'Do not write the final reply directly to chat store and do not invent alternate persistence paths.',
+    'Do not include markdown fences.',
     'Use the current skill command surfaces; do not invent alternate CLI forms.',
+    `The prompt only includes the suffix returned by chat-store-cli read-all --last-user-turns ${PROMPT_LAST_USER_TURNS}.`,
+    'If you need more history or other runtime context, hill-climb conservatively: fetch the minimum additional context needed using the existing CLI surfaces, runtime handles, and appropriate skills.',
+    'Do not guess missing context when you can retrieve it directly.',
     'After completing the main task, use the `lore-keeper` agent when the interaction could potentially have durable board-level, user-level, identity, or decision knowledge that should persist across future tasks.',
   ].join(' ');
 
@@ -116,11 +120,8 @@ function buildPrompt(cId, historyDump) {
     'Runtime handles:',
     `- boardId: ${boardId || '(not provided)'}`,
     `- cardId: ${cId}`,
-    `- baseRef: ${baseRef || '(not provided)'}`,
-    `- cardStoreRef: ${cardStoreRef || '(not provided)'}`,
-    `- chatStoreRef: ${chatStoreRef || '(not provided)'}`,
-    `- artifactsStoreRef: ${artifactsStoreRef || '(not provided)'}`,
     `- scratchStoreRef: ${scratchStoreRef || '(not provided)'}`,
+    `- finalResponseContainerRef: ${finalResponseContainerRef}`,
   ].join('\n');
 
   return [
@@ -128,7 +129,7 @@ function buildPrompt(cId, historyDump) {
     '',
     runtimeHandlesBlock,
     '',
-    'Chat history dump:',
+    `Recent chat context (chat-store-cli read-all --last-user-turns ${PROMPT_LAST_USER_TURNS}):`,
     historyDump,
     '',
     'Assistant response:',
@@ -150,48 +151,13 @@ function findNewAssistantMessage(messages, priorCount) {
   return null;
 }
 
-function buildValidationRepairPrompt(issuesByCardId) {
+function buildCombinedRepairPrompt(finalResponseContainerRef) {
   return [
-    'This is a silent validation-repair pass.',
-    'Do not write any assistant reply, status update, or user-visible text to chat store during this pass.',
-    'Only repair the affected cards so validation succeeds.',
-    'The following validations issues surfaced on the cards. Please fix them.',
-    JSON.stringify(issuesByCardId),
-  ].join('\n');
-}
-
-function buildCombinedRepairPrompt(issuesByCardId, missingChatStoreReply) {
-  const promptParts = [
     'The previous attempt did not produce an acceptable result. Fix the issues below before completing.',
-  ];
-
-  if (!missingChatStoreReply) {
-    promptParts.push(
-      'This is a silent validation-repair pass.',
-      'Do not write any assistant reply, status update, or user-visible text to chat store during this pass.',
-      'Only repair cards and other workspace artifacts needed to satisfy validation.'
-    );
-  }
-
-  if (hasValidationIssues(issuesByCardId)) {
-    promptParts.push(
-      'Validation issues surfaced on the cards:',
-      JSON.stringify(issuesByCardId)
-    );
-  }
-
-  if (missingChatStoreReply) {
-    promptParts.push(
-      'No assistant reply was appended to chat store.',
-      'Write the final user-visible reply to chat store only. Do not return reply text through stdout or any other response channel.'
-    );
-  }
-
-  return promptParts.join('\n');
-}
-
-function formatCommandForLog(command, args) {
-  return [command, ...args].map((part) => JSON.stringify(String(part))).join(' ');
+    'No staged final reply was written through provide-final-reply-to-user.',
+    `Write the final user-visible reply using finalResponseContainerRef: ${finalResponseContainerRef}.`,
+    'Do not return reply text through stdout or any other response channel.'
+  ].join('\n');
 }
 
 function runCopilot(prompt, workingDir) {
@@ -296,51 +262,28 @@ function runCopilot(prompt, workingDir) {
   });
 }
 
-async function runValidationRepair(workingDir, issuesByCardId, missingChatStoreReply = false) {
-  const repairPrompt = missingChatStoreReply || hasValidationIssues(issuesByCardId)
-    ? buildCombinedRepairPrompt(issuesByCardId, missingChatStoreReply)
-    : buildValidationRepairPrompt(issuesByCardId);
-  return (await runCopilot(repairPrompt, workingDir)).trim();
-}
-
-async function runCopilotWithValidationRetries(prompt, workingDir, baseRef, storeRef, currentCardId, initialChatCount) {
-  const initialCardSnapshot = createCardStoreSnapshot(baseRef, storeRef);
+async function runCopilotWithValidationRetries(prompt, workingDir, finalResponseContainerRef, responseFilePath) {
   const maxRetries = 3;
   let attempt = 0;
-  let finalValidationIssuesByCardId = {};
-  let finalAppendedAssistantMessage = null;
+  let stagedFinalReply = '';
 
   while (attempt <= maxRetries) {
-    const responseText = (await runCopilot(attempt === 0 ? prompt : buildCombinedRepairPrompt(finalValidationIssuesByCardId, !finalAppendedAssistantMessage), workingDir)).trim();
+    await runCopilot(attempt === 0 ? prompt : buildCombinedRepairPrompt(finalResponseContainerRef), workingDir);
+    stagedFinalReply = readStagedFinalResponse(responseFilePath);
 
-    const validationIssuesByCardId = validateAllCards(baseRef, storeRef, Math.min(chatCopilotTimeoutMs, 30000));
-    const updatedChatMessages = readChatMessages(chatStoreRef, currentCardId, Math.min(chatCopilotTimeoutMs, 30000));
-    const appendedAssistantMessage = findNewAssistantMessage(updatedChatMessages, initialChatCount);
-    const missingChatStoreReply = !appendedAssistantMessage;
-
-    finalValidationIssuesByCardId = validationIssuesByCardId;
-    finalAppendedAssistantMessage = appendedAssistantMessage;
-
-    if (!hasValidationIssues(validationIssuesByCardId) && appendedAssistantMessage) {
+    if (stagedFinalReply) {
       break;
     }
 
-    if (attempt === maxRetries) {
-      break;
-    }
-
-    const repairResponse = await runValidationRepair(workingDir, validationIssuesByCardId, missingChatStoreReply);
     attempt += 1;
   }
 
-  if (hasValidationIssues(finalValidationIssuesByCardId) || !finalAppendedAssistantMessage) {
+  if (!stagedFinalReply) {
     throw new Error("copilot couldn't produce a valid response");
   }
 
-  syncChangedCardsToBoard(initialCardSnapshot);
-
   return {
-    appendedAssistantMessage: finalAppendedAssistantMessage,
+    stagedFinalReply,
   };
 }
 
@@ -376,9 +319,16 @@ DBG_LOG('assistant:start', {
 
 const workingDir = resolveCopilotWorkspaceDir(aiWorkspaceRoot, cardStoreRef, cardId, 'assistant');
 configureWorkspaceCliScripts(workingDir, 'assistant');
-const chatMessages = readChatMessages(chatStoreRef, cardId, Math.min(chatCopilotTimeoutMs, 30000));
+const chatMessages = readEnhancedChatMessages(
+  chatStoreRef,
+  cardStoreRef,
+  cardId,
+  Math.min(chatCopilotTimeoutMs, 30000),
+  { lastUserTurns: PROMPT_LAST_USER_TURNS },
+);
 const historyDump = JSON.stringify(chatMessages, null, 2);
-const prompt = buildPrompt(cardId, historyDump);
+const finalResponseContainer = createFinalResponseContainer(scratchStoreRef, cardId);
+const prompt = buildPrompt(cardId, historyDump, finalResponseContainer.containerRef);
 
 try {
   if (bypassCopilotForTest) {
@@ -394,22 +344,34 @@ try {
   const runResult = await runCopilotWithValidationRetries(
     prompt,
     workingDir,
-    baseRef,
-    cardStoreRef,
-    cardId,
-    chatMessages.length
+    finalResponseContainer.containerRef,
+    finalResponseContainer.responseFilePath
   );
-  const updatedChatMessages = readChatMessages(chatStoreRef, cardId, Math.min(chatCopilotTimeoutMs, 30000));
-  const appendedAssistantMessage = findNewAssistantMessage(updatedChatMessages, chatMessages.length);
+  const stagedFinalReply = runResult.stagedFinalReply;
 
-  if (!appendedAssistantMessage) {
+  if (!stagedFinalReply) {
     throw new Error("copilot couldn't produce a valid response");
   }
+  const publishResult = publishFinalResponseFromContainer({
+    baseRef,
+    chatStoreRef,
+    cardStoreRef,
+    artifactsStoreRef,
+    cardId,
+    finalResponseContainerRef: finalResponseContainer.containerRef,
+    containerDir: finalResponseContainer.containerDir,
+    replyText: stagedFinalReply,
+    timeoutMs: Math.min(chatCopilotTimeoutMs, 30000),
+  });
   appendDebug('assistant:success', {
     usedFallbackAppend: false,
+    finalResponseContainerRef: finalResponseContainer.containerRef,
+    publishedAttachmentCount: publishResult.publishedAttachmentCount,
   });
   DBG_LOG('assistant:success', {
     usedFallbackAppend: false,
+    finalResponseContainerRef: finalResponseContainer.containerRef,
+    publishedAttachmentCount: publishResult.publishedAttachmentCount,
   });
   // The flow only consumes success or error from this process. Reply text must not be returned here.
   process.stdout.write(JSON.stringify({ assistantHandled: true }));

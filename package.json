@@ -9,8 +9,7 @@
     "finbook:build": "npm --prefix mcp-server-managed-truthsets/finbook run build",
     "finbook:check": "npm --prefix mcp-server-managed-truthsets/finbook run check",
     "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt",
-    "sync:yaml-flow-cli": "node scripts/sync-yaml-flow-cli.cjs",
-    "postinstall": "npm run install:foundry && npm run sync:yaml-flow-cli",
+    "postinstall": "npm run install:foundry",
     "start": "node scripts/start-server.cjs demo-board --all",
     "frontend": "node ./node_modules/http-server/bin/http-server docs -p 8000 -c-1",
     "mcp:install": "npm --prefix mcp-server install",
@@ -27,7 +26,7 @@
     "axios": "^1.16.1",
     "better-sqlite3": "^12.9.0",
     "node-sse": "^0.0.2",
-    "yaml-flow": "^8.4.16"
+    "yaml-flow": "^8.4.18"
   },
   "devDependencies": {
     "http-server": "^14.1.1"

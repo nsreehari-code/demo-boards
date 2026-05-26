@@ -3,16 +3,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  appendAssistantReply,
   appendSystemMessage,
   configureWorkspaceCliScripts,
+  createFinalResponseContainer,
+  publishFinalResponseFromContainer,
   readJsonStdin,
   requireRequiredStrings,
   resolveCopilotWorkspaceDir,
+  stageFinalResponsePayload,
 } from './shared.js';
 import { getCopilotOutputFileName } from '../../../../../watchparty-constants.mjs';
 
 const PROBE_MARKER = '__probe__echo__probe__';
+const PROBE_ATTACHMENT_PREFIX = '[attach]';
 
 function normalizeProbeMessageText(text) {
   const trimmed = typeof text === 'string' ? text.trim() : '';
@@ -27,21 +30,50 @@ function normalizeProbeMessageText(text) {
   return trimmed;
 }
 
+function buildProbeResponse(text) {
+  const normalizedText = normalizeProbeMessageText(text);
+  const wantsAttachment = normalizedText.toLowerCase().startsWith(PROBE_ATTACHMENT_PREFIX);
+  const replyBody = wantsAttachment
+    ? normalizedText.slice(PROBE_ATTACHMENT_PREFIX.length).trim()
+    : normalizedText;
+  const replyText = `Echo: ${replyBody}`;
+  const files = wantsAttachment
+    ? [{
+      name: 'probe-generated-summary.txt',
+      content: [
+        `Probe input: ${replyBody}`,
+        `Probe reply: ${replyText}`,
+      ].join('\n'),
+    }]
+    : [];
+
+  return {
+    replyText,
+    files,
+  };
+}
+
 const extra = readJsonStdin();
 const {
   aiWorkspaceRoot = '',
+  baseRef = '',
   cardStoreRef = '',
   chatStoreRef = '',
+  artifactsStoreRef = '',
   cardId = '',
+  scratchStoreRef = '',
   userText = '',
   watchPartyFilesForChatDir = '',
 } = extra;
 
 requireRequiredStrings({
   aiWorkspaceRoot,
+  baseRef,
   cardStoreRef,
   chatStoreRef,
+  artifactsStoreRef,
   cardId,
+  scratchStoreRef,
   userText,
   watchPartyFilesForChatDir,
 }, 'probe');
@@ -72,10 +104,23 @@ try {
   const workingDir = resolveCopilotWorkspaceDir(aiWorkspaceRoot, cardStoreRef, cardId, 'probe');
   configureWorkspaceCliScripts(workingDir, 'probe');
   appendSystemMessage(chatStoreRef, cardId, 'in-progress');
-  const replyText = `Echo: ${normalizeProbeMessageText(userText)}`;
-  await writeWatchpartyFrames(watchPartyFilesForChatDir, cardId, replyText);
-  // User-visible probe text must be written through chat store only.
-  appendAssistantReply(chatStoreRef, cardId, replyText);
+  const probeResponse = buildProbeResponse(userText);
+  const finalResponseContainer = createFinalResponseContainer(scratchStoreRef, cardId, 'probe-final-response');
+  stageFinalResponsePayload(finalResponseContainer.containerDir, {
+    text: probeResponse.replyText,
+    files: probeResponse.files,
+  });
+  await writeWatchpartyFrames(watchPartyFilesForChatDir, cardId, probeResponse.replyText);
+  publishFinalResponseFromContainer({
+    baseRef,
+    chatStoreRef,
+    cardStoreRef,
+    artifactsStoreRef,
+    cardId,
+    finalResponseContainerRef: finalResponseContainer.containerRef,
+    containerDir: finalResponseContainer.containerDir,
+    replyText: probeResponse.replyText,
+  });
   // The flow only consumes success or error from this process. Reply text must not be returned here.
   process.stdout.write(JSON.stringify({ assistantHandled: true }));
 } catch (err) {

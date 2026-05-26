@@ -1,11 +1,24 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { parseRef } from 'yaml-flow/board-worker-adapter';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { parseRef, serializeRef } from 'yaml-flow/board-worker-adapter';
+import {
+  buildStoredFileIndex,
+  enhanceChatMessageWithFileRefs,
+} from '../../../scripts/cli/shared_helpers.js';
 
 let CHAT_STORE_CLI = '';
 let CARD_STORE_CLI = '';
 let BOARD_LIVE_CARDS_CLI = '';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const YAML_FLOW_BUNDLED_CLI_DIR = path.dirname(require.resolve('yaml-flow/cli-bundled/board-live-cards-cli.mjs'));
+const MANAGE_AI_GENERATED_ATTACHMENTS_PATH = path.join(__dirname, 'manage-ai-generated-attachments.js');
+export const FINAL_RESPONSE_FILE_NAME = '001-response.txt';
+const FILE_STAGE_PREFIX = '100-file-';
 
 function resolveFsPathRef(ref, fieldName) {
   requireNonEmptyString(ref, fieldName);
@@ -14,6 +27,15 @@ function resolveFsPathRef(ref, fieldName) {
     throw new Error(`Expected ${fieldName} to be an fs-path ref`);
   }
   return parsedRef.value;
+}
+
+export function createFsPathRef(dirPath, fieldName = 'path') {
+  requireNonEmptyString(dirPath, fieldName);
+  const normalizedPath = dirPath.trim();
+  if (!path.isAbsolute(normalizedPath)) {
+    throw new Error(`Expected ${fieldName} to be an absolute path`);
+  }
+  return serializeRef({ kind: 'fs-path', value: normalizedPath });
 }
 
 export function readJsonStdin() {
@@ -56,23 +78,9 @@ export function configureWorkspaceCliScripts(copilotWorkingDir, contextLabel = '
     throw new Error(`Missing required ${contextLabel} input: ${scriptsDir}`);
   }
 
-  const chatStoreCliPath = path.join(scriptsDir, 'chat-store-cli.mjs');
-  const cardStoreCliPath = path.join(scriptsDir, 'card-store-cli.mjs');
-  const boardLiveCardsCliPath = path.join(scriptsDir, 'board-live-cards-cli.mjs');
-
-  for (const [cliLabel, cliPath] of [
-    ['chat-store-cli.mjs', chatStoreCliPath],
-    ['card-store-cli.mjs', cardStoreCliPath],
-    ['board-live-cards-cli.mjs', boardLiveCardsCliPath],
-  ]) {
-    if (!fs.existsSync(cliPath)) {
-      throw new Error(`Missing required ${contextLabel} input: ${cliLabel} in ${scriptsDir}`);
-    }
-  }
-
-  CHAT_STORE_CLI = chatStoreCliPath;
-  CARD_STORE_CLI = cardStoreCliPath;
-  BOARD_LIVE_CARDS_CLI = boardLiveCardsCliPath;
+  CHAT_STORE_CLI = path.join(YAML_FLOW_BUNDLED_CLI_DIR, 'chat-store-cli.mjs');
+  CARD_STORE_CLI = path.join(YAML_FLOW_BUNDLED_CLI_DIR, 'card-store-cli.mjs');
+  BOARD_LIVE_CARDS_CLI = path.join(YAML_FLOW_BUNDLED_CLI_DIR, 'board-live-cards-cli.mjs');
 }
 
 export function resolveCopilotWorkspaceDir(aiWorkspaceRoot, storeRef, cardId, contextLabel = 'handler') {
@@ -104,7 +112,7 @@ export function resolveCopilotWorkspaceDir(aiWorkspaceRoot, storeRef, cardId, co
 }
 
 function runChatStoreCommands(chatStoreRef, cardId, commands, timeoutMs = 30000) {
-  const raw = execFileSync(process.execPath, [requireConfiguredCliPath(CHAT_STORE_CLI, 'chat-store-cli.mjs'), '--stdin'], {
+  const raw = execFileSync(process.execPath, [requireConfiguredCliPath(CHAT_STORE_CLI, 'chat-store-cli'), '--stdin'], {
     input: JSON.stringify({
       storeRef: chatStoreRef,
       cardId,
@@ -124,72 +132,6 @@ function runChatStoreCommands(chatStoreRef, cardId, commands, timeoutMs = 30000)
   return JSON.parse(raw);
 }
 
-function runBoardLiveCardsCommand(baseRef, command, extraArgs = [], options = {}) {
-  const raw = execFileSync(process.execPath, [
-    requireConfiguredCliPath(BOARD_LIVE_CARDS_CLI, 'board-live-cards-cli.mjs'),
-    command,
-    '--base-ref',
-    baseRef,
-    ...extraArgs,
-  ], {
-    input: options.input,
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-    maxBuffer: 10 * 1024 * 1024,
-    timeout: options.timeoutMs ?? 30000,
-    windowsHide: true,
-  }).trim();
-
-  return raw ? JSON.parse(raw) : null;
-}
-
-function writeStoredCards(storeRef, cards, timeoutMs = 30000) {
-  const payload = Array.isArray(cards) ? cards : [cards];
-  execFileSync(process.execPath, [
-    requireConfiguredCliPath(CARD_STORE_CLI, 'card-store-cli.mjs'),
-    'set',
-    '--store-ref',
-    storeRef,
-  ], {
-    input: JSON.stringify(payload),
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-    maxBuffer: 10 * 1024 * 1024,
-    timeout: timeoutMs,
-    windowsHide: true,
-  });
-}
-
-function checksumCard(card) {
-  return JSON.stringify(card);
-}
-
-function normalizeCardFileEntry(cardId, fileEntry) {
-  if (!fileEntry || typeof fileEntry !== 'object' || Array.isArray(fileEntry)) {
-    return fileEntry;
-  }
-
-  return fileEntry;
-}
-
-function normalizeStoredCard(card) {
-  if (!card || typeof card !== 'object' || Array.isArray(card)) {
-    return card;
-  }
-
-  if (!Array.isArray(card.card_data?.files)) {
-    return card;
-  }
-
-  return {
-    ...card,
-    card_data: {
-      ...(card.card_data && typeof card.card_data === 'object' && !Array.isArray(card.card_data) ? card.card_data : {}),
-      files: card.card_data.files.map((fileEntry) => normalizeCardFileEntry(card.id, fileEntry)),
-    },
-  };
-}
-
 function getBatchCommandData(parsed, index = 0) {
   const results = Array.isArray(parsed?.results)
     ? parsed.results
@@ -206,24 +148,45 @@ function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function readChatRecordsOnce(chatStoreRef, cardId, timeoutMs = 30000) {
+function readChatRecordsOnce(chatStoreRef, cardId, timeoutMs = 30000, options = {}) {
+  const { lastUserTurns = null } = options ?? {};
+  const command = lastUserTurns === null
+    ? { command: 'read-all' }
+    : { command: 'read-all', lastUserTurns };
   const parsed = runChatStoreCommands(
     chatStoreRef,
     cardId,
-    [{ command: 'read-all' }],
+    [command],
     timeoutMs,
   );
   const records = getBatchCommandData(parsed)?.records;
   return Array.isArray(records) ? records : [];
 }
 
-export function readChatMessages(chatStoreRef, cardId, timeoutMs = 30000) {
+function readStoredCardOnce(cardStoreRef, cardId, timeoutMs = 30000) {
+  const raw = execFileSync(process.execPath, [requireConfiguredCliPath(CARD_STORE_CLI, 'card-store-cli'), 'get', '--store-ref', cardStoreRef, '--id', cardId], {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: timeoutMs,
+    windowsHide: true,
+  }).trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) && parsed.length > 0 ? parsed[0] : null;
+}
+
+export function readChatMessages(chatStoreRef, cardId, timeoutMs = 30000, options = {}) {
   if (!chatStoreRef || !cardId) {
     return [];
   }
 
   try {
-    const records = readChatRecordsOnce(chatStoreRef, cardId, timeoutMs);
+    const records = readChatRecordsOnce(chatStoreRef, cardId, timeoutMs, options);
     if (records.length > 0) {
       return records;
     }
@@ -232,7 +195,7 @@ export function readChatMessages(chatStoreRef, cardId, timeoutMs = 30000) {
     const deadline = Date.now() + waitBudgetMs;
     while (Date.now() < deadline) {
       sleepMs(100);
-      const retriedRecords = readChatRecordsOnce(chatStoreRef, cardId, timeoutMs);
+      const retriedRecords = readChatRecordsOnce(chatStoreRef, cardId, timeoutMs, options);
       if (retriedRecords.length > 0) {
         return retriedRecords;
       }
@@ -241,6 +204,21 @@ export function readChatMessages(chatStoreRef, cardId, timeoutMs = 30000) {
     return records;
   } catch {
     return [];
+  }
+}
+
+export function readEnhancedChatMessages(chatStoreRef, cardStoreRef, cardId, timeoutMs = 30000, options = {}) {
+  if (!chatStoreRef || !cardStoreRef || !cardId) {
+    return [];
+  }
+
+  try {
+    const storedCard = readStoredCardOnce(cardStoreRef, cardId, timeoutMs);
+    const storedFiles = buildStoredFileIndex(storedCard);
+    const messages = readChatMessages(chatStoreRef, cardId, timeoutMs, options);
+    return messages.map((message) => enhanceChatMessageWithFileRefs(message, storedFiles));
+  } catch {
+    return readChatMessages(chatStoreRef, cardId, timeoutMs, options);
   }
 }
 
@@ -295,6 +273,203 @@ export function appendSystemMessage(chatStoreRef, cardId, messageText, timeoutMs
   return messageId;
 }
 
+function sanitizeFileSegment(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '';
+  }
+
+  const baseName = path.basename(value.trim());
+  return baseName.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function pickStagedFileName(index, fileEntry) {
+  const candidateKeys = ['name', 'fileName', 'filename', 'path', 'stored_name', 'key'];
+  let candidateName = '';
+
+  if (fileEntry && typeof fileEntry === 'object' && !Array.isArray(fileEntry)) {
+    for (const key of candidateKeys) {
+      candidateName = sanitizeFileSegment(fileEntry[key]);
+      if (candidateName) {
+        break;
+      }
+    }
+  }
+
+  const prefix = `${FILE_STAGE_PREFIX}${String(index + 1).padStart(3, '0')}`;
+  return candidateName ? `${prefix}-${candidateName}` : `${prefix}.json`;
+}
+
+function readFileEntryContent(fileEntry) {
+  if (!fileEntry || typeof fileEntry !== 'object' || Array.isArray(fileEntry)) {
+    return JSON.stringify(fileEntry, null, 2);
+  }
+
+  const contentKeys = ['content', 'text', 'body', 'data'];
+  for (const key of contentKeys) {
+    if (typeof fileEntry[key] === 'string') {
+      return fileEntry[key];
+    }
+  }
+
+  return JSON.stringify(fileEntry, null, 2);
+}
+
+function listStagedAttachmentFiles(containerDir) {
+  try {
+    if (!fs.existsSync(containerDir)) {
+      return [];
+    }
+
+    return fs.readdirSync(containerDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name !== FINAL_RESPONSE_FILE_NAME)
+      .map((entry) => entry.name)
+      .sort((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+}
+
+function publishStagedAttachments({
+  baseRefValue,
+  currentCardId,
+  finalResponseContainerRef,
+  containerDir,
+  chatStoreRef = '',
+  cardStoreRef = '',
+  artifactsStoreRef = '',
+}) {
+  const stagedFiles = listStagedAttachmentFiles(containerDir);
+  if (stagedFiles.length === 0) {
+    return null;
+  }
+
+  const args = [
+    MANAGE_AI_GENERATED_ATTACHMENTS_PATH,
+    '--base-ref',
+    baseRefValue,
+    '--card-id',
+    currentCardId,
+    '--attachments-container-ref',
+    finalResponseContainerRef,
+  ];
+
+  if (typeof chatStoreRef === 'string' && chatStoreRef.trim()) {
+    args.push('--chat-store-ref', chatStoreRef.trim());
+  }
+  if (typeof cardStoreRef === 'string' && cardStoreRef.trim()) {
+    args.push('--card-store-ref', cardStoreRef.trim());
+  }
+  if (typeof artifactsStoreRef === 'string' && artifactsStoreRef.trim()) {
+    args.push('--artifacts-store-ref', artifactsStoreRef.trim());
+  }
+
+  const result = spawnSync(process.execPath, args, {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    const stderr = result.stderr ? result.stderr.trim() : '';
+    throw new Error(stderr || `manage-ai-generated-attachments.js failed with exit code ${result.status}`);
+  }
+
+  return result.stdout.trim() ? JSON.parse(result.stdout) : null;
+}
+
+export function createFinalResponseContainer(scratchStoreRef, cardId, scopeName = 'assistant-final-response') {
+  requireRequiredStrings({ scratchStoreRef, cardId }, 'final response container');
+  const scratchDir = resolveStoreDir(scratchStoreRef, 'scratchStoreRef');
+  const containerDir = path.join(scratchDir, scopeName, cardId, randomUUID());
+  fs.mkdirSync(containerDir, { recursive: true });
+  return {
+    containerDir,
+    containerRef: createFsPathRef(containerDir, 'finalResponseContainerDir'),
+    responseFilePath: path.join(containerDir, FINAL_RESPONSE_FILE_NAME),
+  };
+}
+
+export function stageFinalResponsePayload(containerDir, payload) {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new Error('final response payload must be an object');
+  }
+
+  requireNonEmptyString(payload.text, 'text', 'final response payload');
+  const files = Array.isArray(payload.files) ? payload.files : [];
+  fs.mkdirSync(containerDir, { recursive: true });
+
+  const responseFilePath = path.join(containerDir, FINAL_RESPONSE_FILE_NAME);
+  fs.writeFileSync(responseFilePath, payload.text, 'utf8');
+
+  const stagedFiles = files.map((fileEntry, index) => {
+    const fileName = pickStagedFileName(index, fileEntry);
+    const filePath = path.join(containerDir, fileName);
+    fs.writeFileSync(filePath, readFileEntryContent(fileEntry), 'utf8');
+    return {
+      fileName,
+      filePath,
+    };
+  });
+
+  return {
+    responseFilePath,
+    stagedFiles,
+  };
+}
+
+export function readStagedFinalResponse(responseFilePath) {
+  try {
+    if (!fs.existsSync(responseFilePath)) {
+      return '';
+    }
+
+    const stagedText = fs.readFileSync(responseFilePath, 'utf-8');
+    return stagedText.trim().length > 0 ? stagedText : '';
+  } catch {
+    return '';
+  }
+}
+
+export function publishFinalResponseFromContainer({
+  baseRef = '',
+  chatStoreRef = '',
+  cardStoreRef = '',
+  artifactsStoreRef = '',
+  cardId = '',
+  finalResponseContainerRef = '',
+  containerDir = '',
+  replyText = '',
+  timeoutMs = 30000,
+} = {}) {
+  requireRequiredStrings({ chatStoreRef, cardId, finalResponseContainerRef, containerDir, replyText }, 'final response publish');
+
+  const hasStagedAttachments = listStagedAttachmentFiles(containerDir).length > 0;
+  const attachmentsResult = hasStagedAttachments
+    ? publishStagedAttachments({
+      baseRefValue: baseRef,
+      currentCardId: cardId,
+      finalResponseContainerRef,
+      containerDir,
+      chatStoreRef,
+      cardStoreRef,
+      artifactsStoreRef,
+    })
+    : null;
+
+  appendAssistantReply(chatStoreRef, cardId, replyText, timeoutMs);
+  fs.rmSync(containerDir, { recursive: true, force: true });
+
+  return {
+    attachmentsResult,
+    publishedAttachmentCount: Array.isArray(attachmentsResult?.data?.published)
+      ? attachmentsResult.data.published.length
+      : 0,
+  };
+}
+
 export function resolveStoreDir(storeRef, fieldName) {
   return resolveFsPathRef(storeRef, fieldName);
 }
@@ -303,7 +478,7 @@ export function readStoredCard(storeRef, cardId, timeoutMs = 30000) {
   if (!storeRef || !cardId) return null;
   try {
     const raw = execFileSync(process.execPath, [
-      requireConfiguredCliPath(CARD_STORE_CLI, 'card-store-cli.mjs'),
+      requireConfiguredCliPath(CARD_STORE_CLI, 'card-store-cli'),
       'get',
       '--store-ref',
       storeRef,
@@ -322,168 +497,4 @@ export function readStoredCard(storeRef, cardId, timeoutMs = 30000) {
   } catch {
     return null;
   }
-}
-
-export function readAllStoredCards(storeRef, timeoutMs = 30000) {
-  if (!storeRef) return [];
-  try {
-    const raw = execFileSync(process.execPath, [
-      requireConfiguredCliPath(CARD_STORE_CLI, 'card-store-cli.mjs'),
-      'get',
-      '--store-ref',
-      storeRef,
-    ], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: timeoutMs,
-      windowsHide: true,
-    }).trim();
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((card) => card && typeof card === 'object') : [];
-  } catch {
-    return [];
-  }
-}
-
-export function createCardStoreSnapshot(baseRef, storeRef) {
-  if (!baseRef || !storeRef) {
-    return null;
-  }
-
-  const cards = readAllStoredCards(storeRef).map((card) => normalizeStoredCard(card));
-  return {
-    storeRef,
-    baseRef,
-    cardsById: new Map(
-      cards
-        .filter((card) => typeof card.id === 'string' && card.id.length > 0)
-        .map((card) => [card.id, card])
-    ),
-    checksumIndex: new Map(
-      cards
-        .filter((card) => typeof card.id === 'string' && card.id.length > 0)
-        .map((card) => [card.id, checksumCard(card)])
-    ),
-  };
-}
-
-export function syncChangedCardsToBoard(snapshot) {
-  if (!snapshot) {
-    return;
-  }
-
-  const currentCardsById = new Map(
-    readAllStoredCards(snapshot.storeRef)
-      .map((card) => normalizeStoredCard(card))
-      .filter((card) => typeof card?.id === 'string' && card.id.length > 0)
-      .map((card) => [card.id, card])
-  );
-  const changedCardIds = new Set();
-  for (const [cardId, currentCard] of currentCardsById.entries()) {
-    if (snapshot.checksumIndex.get(cardId) !== checksumCard(currentCard)) {
-      changedCardIds.add(cardId);
-    }
-  }
-  for (const cardId of snapshot.checksumIndex.keys()) {
-    if (!currentCardsById.has(cardId)) {
-      changedCardIds.add(cardId);
-    }
-  }
-
-  for (const changedCardId of changedCardIds) {
-    if (!changedCardId) {
-      continue;
-    }
-
-    const currentCard = currentCardsById.get(changedCardId) ?? null;
-    if (currentCard) {
-      const refreshResult = runBoardLiveCardsCommand(
-        snapshot.baseRef,
-        'upsert-card',
-        ['--card-id', changedCardId, '--restart'],
-      );
-
-      if (refreshResult?.status !== 'success') {
-        throw new Error(refreshResult?.error ?? `Failed to refresh changed card "${changedCardId}"`);
-      }
-      continue;
-    }
-
-    if (!snapshot.cardsById.has(changedCardId)) {
-      continue;
-    }
-
-    const removeResult = runBoardLiveCardsCommand(
-      snapshot.baseRef,
-      'remove-card',
-      ['--id', changedCardId],
-    );
-    if (removeResult?.status !== 'success') {
-      throw new Error(removeResult?.error ?? `Failed to remove deleted card "${changedCardId}" from board runtime`);
-    }
-  }
-}
-
-export function validateAllCards(baseRef, storeRef, timeoutMs = 30000) {
-  if (!baseRef || !storeRef) {
-    return {};
-  }
-
-  const cards = readAllStoredCards(storeRef, timeoutMs);
-  if (cards.length === 0) {
-    return {};
-  }
-
-  const issuesByCardId = {};
-  for (const card of cards) {
-    const currentCardId = typeof card.id === 'string' ? card.id : '';
-    if (!currentCardId) {
-      issuesByCardId['(unknown)'] = ['Card from card-store-cli is missing a string id'];
-      continue;
-    }
-
-    const normalizedCard = normalizeStoredCard(card);
-    if (checksumCard(normalizedCard) !== checksumCard(card)) {
-      writeStoredCards(storeRef, normalizedCard, timeoutMs);
-    }
-
-    const validation = runBoardLiveCardsCommand(
-      baseRef,
-      'validate-card-preflight',
-      [],
-      {
-        input: JSON.stringify(normalizedCard),
-        timeoutMs,
-      },
-    );
-
-    if (validation?.status !== 'success') {
-      issuesByCardId[currentCardId] = [validation?.error ?? 'validate-card-preflight failed'];
-      continue;
-    }
-
-    const result = validation.data && typeof validation.data === 'object'
-      ? validation.data
-      : null;
-    if (!result) {
-      issuesByCardId[currentCardId] = ['validateCardPreflight returned no result for card'];
-      continue;
-    }
-
-    if (!result.isValid) {
-      const failedCardId = result.cardId || currentCardId;
-      const issues = Array.isArray(result.issues) ? result.issues : ['Unknown validation failure'];
-      if (issues.length > 0) {
-        issuesByCardId[failedCardId] = issues;
-      }
-    }
-  }
-
-  return issuesByCardId;
-}
-
-export function hasValidationIssues(issuesByCardId) {
-  return Object.keys(issuesByCardId).length > 0;
 }

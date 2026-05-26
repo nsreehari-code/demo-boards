@@ -91,16 +91,19 @@
       }
     },
     "probe_assistant": {
-      "description": "Run the deterministic probe assistant logic, which persists its own assistant reply into chat storage",
-      "server_reply_contract_comment": "No reply text is expected back from probe.js. The probe must write user-visible replies through chat store only and exit success or error.",
-      "expects_data": ["aiWorkspaceRoot", "cardStoreRef", "chatStoreRef", "cardId", "chatFlowRoot", "userText", "watchPartyFilesForChatDir"],
+      "description": "Run the deterministic probe assistant logic, which stages its final reply and optional generated attachments before chat append",
+      "server_reply_contract_comment": "No reply text is expected back from probe.js. The probe must stage the final user-visible reply through the shared final-response container flow and exit success or error.",
+      "expects_data": ["aiWorkspaceRoot", "baseRef", "cardStoreRef", "chatStoreRef", "artifactsStoreRef", "cardId", "chatFlowRoot", "scratchStoreRef", "userText", "watchPartyFilesForChatDir"],
       "produces_data": ["assistantHandled"],
       "input_validations": [
         "$type(aiWorkspaceRoot) = \"string\" and $length(aiWorkspaceRoot) > 0",
+        "$type(baseRef) = \"string\" and $length(baseRef) > 0",
         "$type(cardStoreRef) = \"string\" and $length(cardStoreRef) > 0",
         "$type(chatStoreRef) = \"string\" and $length(chatStoreRef) > 0",
+        "$type(artifactsStoreRef) = \"string\" and $length(artifactsStoreRef) > 0",
         "$type(cardId) = \"string\" and $length(cardId) > 0",
         "$type(chatFlowRoot) = \"string\" and $length(chatFlowRoot) > 0",
+        "$type(scratchStoreRef) = \"string\" and $length(scratchStoreRef) > 0",
         "$type(userText) = \"string\" and $length($trim(userText)) > 0",
         "$type(watchPartyFilesForChatDir) = \"string\" and $length(watchPartyFilesForChatDir) > 0"
       ],
@@ -113,7 +116,7 @@
         },
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/copilot-chat/probe.js'"],
-          "stdinTemplate": "{ 'aiWorkspaceRoot': aiWorkspaceRoot, 'cardStoreRef': cardStoreRef, 'chatStoreRef': chatStoreRef, 'cardId': cardId, 'userText': userText, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir }"
+          "stdinTemplate": "{ 'aiWorkspaceRoot': aiWorkspaceRoot, 'baseRef': baseRef, 'cardStoreRef': cardStoreRef, 'chatStoreRef': chatStoreRef, 'artifactsStoreRef': artifactsStoreRef, 'cardId': cardId, 'scratchStoreRef': scratchStoreRef, 'userText': userText, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir }"
         },
         "meta": "chat-handler"
       },
