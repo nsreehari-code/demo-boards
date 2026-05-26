@@ -16,19 +16,8 @@ if (!fs.existsSync(boardServerPath)) {
   process.exit(1);
 }
 
-const boardLiveCardsCliJs = path.resolve(boardDir, 'scripts', 'cli', 'board-live-cards-cli.mjs');
-const stepMachineCliPath = path.resolve(boardDir, 'scripts', 'cli', 'step-machine-cli.mjs');
 const mcpServerPath = path.resolve(workspaceDir, 'mcp-server', 'src', 'index.js');
 const frontendDir = path.resolve(workspaceDir, 'docs');
-
-if (!fs.existsSync(boardLiveCardsCliJs)) {
-  console.error(`[start-server] Missing ${boardLiveCardsCliJs}. Run \"npm install\" first.`);
-  process.exit(1);
-}
-if (!fs.existsSync(stepMachineCliPath)) {
-  console.error(`[start-server] Missing ${stepMachineCliPath}. Run \"npm install\" first.`);
-  process.exit(1);
-}
 if (!fs.existsSync(mcpServerPath)) {
   console.error(`[start-server] Missing ${mcpServerPath}. Run \"npm install\" first.`);
   process.exit(1);
@@ -40,8 +29,6 @@ if (!fs.existsSync(frontendDir)) {
 
 const sharedEnv = {
   ...process.env,
-  BOARD_LIVE_CARDS_CLI_JS: boardLiveCardsCliJs,
-  DEMO_STEP_MACHINE_CLI_PATH: stepMachineCliPath,
 };
 const backendHost = String(sharedEnv.DEMO_SERVER_HOST || '127.0.0.1').trim() || '127.0.0.1';
 

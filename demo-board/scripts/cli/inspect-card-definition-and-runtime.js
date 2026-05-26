@@ -154,7 +154,7 @@ function readBoardStatus(baseRef) {
 function readCardStoreRef(baseRef) {
   const result = runJsonScript(boardLiveCardsCliPath, ['get-card-store-ref', '--base-ref', baseRef]);
   const data = unwrapSuccessfulEnvelope(result, 'get-card-store-ref');
-  const storeRef = data?.value;
+  const storeRef = data?.storeRef ?? data?.value;
   if (typeof storeRef !== 'string' || !storeRef.trim()) {
     throw new Error('board did not return a card store ref');
   }

@@ -51,8 +51,8 @@ export function log_it(cmd, message = '') {
       ts: new Date().toISOString(),
       cmd: toLogText(cmd),
       msg: toLogText(message),
-      invokedFromCwd: initialProcessCwd,
-      cwd: process.cwd(),
+    //   invokedFromCwd: initialProcessCwd,
+    //   cwd: process.cwd(),
       workspaceRoot: expectedWorkspaceRoot,
     };
 

@@ -233,7 +233,7 @@ function runCopilot(prompt, workingDir, options = {}) {
   fs.mkdirSync(path.dirname(errFile), { recursive: true });
   const outStream = fs.createWriteStream(outFile, { flags: 'w' });
   const errStream = fs.createWriteStream(errFile, { flags: 'w' });
-  outStream.write("Reasoning:\n");
+  outStream.write("Reasoning...\n");
   let settled = false;
   let timeoutId = null;
 
