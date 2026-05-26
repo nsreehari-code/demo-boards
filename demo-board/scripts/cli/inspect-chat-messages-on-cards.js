@@ -89,7 +89,7 @@ function runJsonScript(scriptPath, scriptArgs, input) {
     throw new Error(stderr || `${path.basename(scriptPath)} failed with exit code ${result.status}`);
   }
 
-  return JSON.parse(result.stdout);
+  return JSON.parse(result.stdout.trim());
 }
 
 function unwrapSuccessfulEnvelope(result, commandName) {
@@ -115,19 +115,25 @@ function readStoreRef(baseRef, getterCommand, commandName) {
 }
 
 function readAttachmentRefs(baseRef, cardId) {
-  const result = runJsonScript(boardLiveCardsCliPath, ['get-attachment-ref', '--base-ref', baseRef, '--card-id', cardId]);
-  const data = unwrapSuccessfulEnvelope(result, 'get-attachment-ref');
-  const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
-  return attachments.filter((attachment) => {
-    if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) {
-      return false;
-    }
+  const cardStoreRefResult = runJsonScript(boardLiveCardsCliPath, ['get-card-store-ref', '--base-ref', baseRef]);
+  const cardStoreData = unwrapSuccessfulEnvelope(cardStoreRefResult, 'get-card-store-ref');
+  const storeRef = cardStoreData?.storeRef ?? cardStoreData?.value;
+  if (typeof storeRef !== 'string' || !storeRef.trim()) {
+    return [];
+  }
 
-    return Number.isInteger(attachment.idx)
-      && attachment.idx >= 0
-      && typeof attachment.ref === 'string'
-      && attachment.ref.trim().length > 0;
-  });
+  let cardResult;
+  try {
+    cardResult = runJsonScript(cardStoreCliPath, ['get', '--store-ref', storeRef, '--id', cardId]);
+  } catch {
+    return [];
+  }
+
+  const card = Array.isArray(cardResult) ? cardResult[0] : cardResult;
+  const files = Array.isArray(card?.card_data?.files) ? card.card_data.files : [];
+  return files
+    .map((file, idx) => ({ idx, stored_name: file?.stored_name }))
+    .filter((entry) => typeof entry.stored_name === 'string' && entry.stored_name.length > 0);
 }
 
 function readChatRecords(chatStoreRef, cardId, lastUserTurns = null) {
@@ -137,8 +143,8 @@ function readChatRecords(chatStoreRef, cardId, lastUserTurns = null) {
   }
 
   const result = runJsonScript(chatStoreCliPath, scriptArgs);
-  const records = Array.isArray(result) ? result : [];
-  return records.filter((record) => record && typeof record === 'object');
+  const raw = Array.isArray(result) ? result : Array.isArray(result?.records) ? result.records : [];
+  return raw.filter((record) => record && typeof record === 'object');
 }
 
 function printJson(value) {

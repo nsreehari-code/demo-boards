@@ -7,7 +7,7 @@ import {
   printJson,
   printUsage,
   readCandidateCardPayload,
-  runSiblingScript,
+  runBoardLiveCardsCli,
 } from './preflight-candidate-card-common.js';
 
 const usageLines = [
@@ -27,7 +27,7 @@ function main() {
   }
 
   const payload = readCandidateCardPayload(usageLines, ['mock_requires', 'mock_fetched_sources']);
-  const result = runSiblingScript('materialize-live-card.js', [], payload);
+  const result = runBoardLiveCardsCli('eval-card-compute', [], payload);
   printJson(result);
 }
 

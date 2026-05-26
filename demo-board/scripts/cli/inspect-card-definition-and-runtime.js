@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { log_it, readKnownBaseRef, resolveKnownYamlFlowCliPath } from './shared_helpers.js';
@@ -69,7 +70,7 @@ function runJsonScript(scriptPath, scriptArgs) {
     throw new Error(stderr || `${path.basename(scriptPath)} failed with exit code ${result.status}`);
   }
 
-  return JSON.parse(result.stdout);
+  return JSON.parse(result.stdout.trim());
 }
 
 function unwrapSuccessfulEnvelope(result, commandName) {
@@ -181,6 +182,38 @@ function readFetchedSourceFileRefs(baseRef, cardId) {
   return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
 }
 
+function readFetchedSourcesData(baseRef, fileRefs, card) {
+  const sourceDefs = Array.isArray(card?.source_defs) ? card.source_defs : [];
+  const outputFileToBindTo = {};
+  for (const src of sourceDefs) {
+    if (typeof src?.bindTo === 'string' && typeof src?.outputFile === 'string') {
+      outputFileToBindTo[src.outputFile] = src.bindTo;
+    }
+  }
+
+  const fetched = {};
+  for (const [outputFile, ref] of Object.entries(fileRefs)) {
+    const bindTo = outputFileToBindTo[outputFile] ?? outputFile;
+    try {
+      // Ref is a serialized KindValueRef — decode to get the file path
+      let filePath;
+      if (typeof ref === 'string' && ref.startsWith('b64:')) {
+        const decoded = JSON.parse(Buffer.from(ref.slice(4), 'base64url').toString('utf8'));
+        filePath = decoded?.value;
+      }
+      if (filePath && fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, 'utf8').trim();
+        fetched[bindTo] = content ? JSON.parse(content) : null;
+      } else {
+        fetched[bindTo] = null;
+      }
+    } catch {
+      fetched[bindTo] = null;
+    }
+  }
+  return fetched;
+}
+
 function readDataObject(baseRef, outputKey) {
   const result = runJsonScript(boardLiveCardsCliPath, ['get-outputs', '--base-ref', baseRef, '--type', 'data-object', '--key', outputKey]);
   return unwrapSuccessfulEnvelope(result, `get-outputs data-object ${outputKey}`);
@@ -229,10 +262,11 @@ function main() {
   const provides = readOutputMap(baseRef, Array.isArray(cardStatusInBoard.provides_runtime) ? cardStatusInBoard.provides_runtime : []);
   const computedValues = readComputedValues(baseRef, cardId);
   const fetchedSourceFileRefs = readFetchedSourceFileRefs(baseRef, cardId);
+  const fetchedSources = readFetchedSourcesData(baseRef, fetchedSourceFileRefs, storedCard);
   const runtimeNode = {
     card_data: storedCard?.card_data ?? {},
     requires,
-    fetched_sources: {},
+    fetched_sources: fetchedSources,
     computed_values: computedValues,
   };
 

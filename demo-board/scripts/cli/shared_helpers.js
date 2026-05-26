@@ -1,10 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
 const logFilePath = path.join(__dirname, 'log.jsonl');
 const knownConstantsPath = path.join(__dirname, 'known_constants.json');
 const initialProcessCwd = process.cwd();
@@ -45,6 +43,14 @@ function toLogText(value) {
   }
 }
 
+function resolveLogOutputPath() {
+  const watchPartyFile = typeof process.env.CHAT_CARD_WATCH_PARTY_FILE === 'string'
+    ? process.env.CHAT_CARD_WATCH_PARTY_FILE.trim()
+    : '';
+
+  return watchPartyFile || logFilePath;
+}
+
 export function log_it(cmd, message = '') {
   try {
     const entry = {
@@ -56,7 +62,9 @@ export function log_it(cmd, message = '') {
       workspaceRoot: expectedWorkspaceRoot,
     };
 
-    fs.appendFileSync(logFilePath, `${JSON.stringify(entry)}\n`, 'utf8');
+    const outputPath = resolveLogOutputPath();
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.appendFileSync(outputPath, `${JSON.stringify(entry)}\n`, 'utf8');
   } catch {
     // Invocation logging must never block the wrapper.
   }
@@ -117,22 +125,13 @@ export function readKnownFinalResponseRootDir() {
 }
 
 export function readKnownYamlFlowCliBundledDir() {
-  try {
-    const knownConstants = loadKnownConstants();
-    const bundledDir = knownConstants.yaml_flow_cli_bundled_dir;
-    if (typeof bundledDir !== 'string' || !bundledDir.trim()) {
-      throw new Error(`known_constants.json must contain a non-empty string yaml_flow_cli_bundled_dir: ${knownConstantsPath}`);
-    }
-
-    return bundledDir.trim();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error ?? '');
-    if (!message.includes('Missing staged constants file')) {
-      throw error;
-    }
-
-    return path.dirname(require.resolve('yaml-flow/cli-bundled/board-live-cards-cli.mjs'));
+  const knownConstants = loadKnownConstants();
+  const bundledDir = knownConstants.yaml_flow_cli_bundled_dir;
+  if (typeof bundledDir !== 'string' || !bundledDir.trim()) {
+    throw new Error(`known_constants.json must contain a non-empty string yaml_flow_cli_bundled_dir: ${knownConstantsPath}`);
   }
+
+  return bundledDir.trim();
 }
 
 export function resolveKnownYamlFlowCliPath(fileName) {

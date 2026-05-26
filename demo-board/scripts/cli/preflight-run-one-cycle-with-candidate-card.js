@@ -8,8 +8,7 @@ import {
   printJson,
   printUsage,
   readCandidateCardPayload,
-  requireArgText,
-  runSiblingScript,
+  runBoardLiveCardsCli,
 } from './preflight-candidate-card-common.js';
 
 const usageLines = [
@@ -30,7 +29,7 @@ function main() {
 
   const baseRef = readKnownBaseRef();
   const payload = readCandidateCardPayload(usageLines, ['mock_requires']);
-  const result = runSiblingScript('run-one-card-cycle.js', ['--base-ref', baseRef], payload);
+  const result = runBoardLiveCardsCli('simulate-card-cycle', ['--base-ref', baseRef], payload);
   printJson(result);
 }
 

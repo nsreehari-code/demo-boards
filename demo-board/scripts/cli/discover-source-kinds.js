@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { log_it, readKnownBaseRef, resolveKnownYamlFlowCliPath } from './shared_helpers.js';
 
@@ -66,7 +65,11 @@ function main() {
     throw new Error(stderr || `describe-task-executor-capabilities failed with exit code ${result.status}`);
   }
 
-  const capabilityReport = JSON.parse(result.stdout);
+  const parsed = JSON.parse(result.stdout.trim());
+  const capabilityReport = parsed?.status === 'success' && parsed.data != null ? parsed.data : parsed;
+  if (parsed?.status === 'fail' || parsed?.status === 'error') {
+    throw new Error(parsed.error || 'describe-task-executor-capabilities failed');
+  }
   process.stdout.write(
     `${JSON.stringify(
       {

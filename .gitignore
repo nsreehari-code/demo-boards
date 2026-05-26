@@ -23,3 +23,4 @@ demo-board/scripts/cli/step-machine-cli.mjs
 exit.txt
 stdout.txt
 stderr.txt
+demo-board/test/live.test.board-ws-tmp/

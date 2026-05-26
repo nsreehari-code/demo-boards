@@ -110,7 +110,8 @@ function runJsonScript(scriptPath, scriptArgs, payload) {
     throw new Error(stderr || `${path.basename(scriptPath)} failed with exit code ${result.status}`);
   }
 
-  return JSON.parse(result.stdout);
+  const out = result.stdout.trim();
+  return out ? JSON.parse(out) : null;
 }
 
 function unwrapSuccessfulEnvelope(result, commandName) {
@@ -188,8 +189,30 @@ function handleUpsertCard(flags) {
     process.exit(1);
   }
 
+  let previousCard;
+  try {
+    const prev = runJsonScript(cardStoreCliPath, ['get', '--store-ref', storeRef, '--id', cardId]);
+    previousCard = Array.isArray(prev) && prev.length > 0 ? prev[0] : null;
+  } catch {
+    previousCard = null;
+  }
+
   const storeUpdate = runJsonScript(cardStoreCliPath, ['set', '--store-ref', storeRef], candidateCard);
-  const boardUpdate = runJsonScript(boardLiveCardsCliPath, ['upsert-card', '--base-ref', baseRef, '--card-id', cardId, '--restart']);
+
+  let boardUpdate;
+  try {
+    const boardRaw = runJsonScript(boardLiveCardsCliPath, ['upsert-card', '--base-ref', baseRef, '--card-id', cardId, '--restart']);
+    unwrapSuccessfulEnvelope(boardRaw, 'upsert-card');
+    boardUpdate = boardRaw;
+  } catch (boardErr) {
+    // Rollback card store to previous state
+    try {
+      if (previousCard) {
+        runJsonScript(cardStoreCliPath, ['set', '--store-ref', storeRef], previousCard);
+      }
+    } catch { /* best-effort rollback */ }
+    throw boardErr;
+  }
 
   printJson({
     status: 'success',
@@ -205,6 +228,7 @@ function handleDeprecate(flags) {
   const baseRef = resolveBaseRef(flags);
   const cardId = requireArgText(flags, 'card-id');
   const result = runJsonScript(boardLiveCardsCliPath, ['remove-card', '--base-ref', baseRef, '--id', cardId]);
+  unwrapSuccessfulEnvelope(result, 'remove-card');
   printJson(result);
 }
 

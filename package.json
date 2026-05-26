@@ -5,7 +5,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node demo-board/test/server-http-test.js && npm run mcp:test",
+    "test": "node demo-board/test/server-http-test.js && node demo-board/scripts/cli/test-scripts.js && npm run mcp:test",
     "finbook:build": "npm --prefix mcp-server-managed-truthsets/finbook run build",
     "finbook:check": "npm --prefix mcp-server-managed-truthsets/finbook run check",
     "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt",

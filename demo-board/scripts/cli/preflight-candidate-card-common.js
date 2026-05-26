@@ -118,11 +118,16 @@ function runNodeScript(scriptPath, scriptArgs, payload) {
     throw new Error(stderr || `${path.basename(scriptPath)} failed with exit code ${result.status}`);
   }
 
-  return JSON.parse(result.stdout);
+  const out = result.stdout.trim();
+  return out ? JSON.parse(out) : null;
 }
 
 export function runBoardLiveCardsCli(subcommand, args, payload) {
-  return runNodeScript(boardLiveCardsCliPath, [subcommand, ...args], payload);
+  const result = runNodeScript(boardLiveCardsCliPath, [subcommand, ...args], payload);
+  if (result?.status === 'fail' || result?.status === 'error') {
+    throw new Error(result.error || `${subcommand} failed`);
+  }
+  return result;
 }
 
 export function runSiblingScript(scriptName, args, payload) {

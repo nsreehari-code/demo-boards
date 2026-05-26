@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { log_it, readKnownBaseRef, resolveKnownYamlFlowCliPath } from './shared_helpers.js';
 
@@ -60,7 +59,7 @@ function runBoardLiveCardsCli(args) {
     throw new Error(stderr || `board-live-cards-cli.mjs failed with exit code ${result.status}`);
   }
 
-  return JSON.parse(result.stdout);
+  return JSON.parse(result.stdout.trim());
 }
 
 function unwrapSuccessfulEnvelope(result, commandName) {
