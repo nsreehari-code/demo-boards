@@ -233,15 +233,15 @@ per-kind view data shapes, layout details, and chart configuration.
 
 ## Source Definitions
 
-`source_defs[]` are executed by the board worker task executor. Each
+`source_defs[]` are executed by the board worker. Each
 source_def is itself an agent shape — a deterministic fetcher (`urls`,
-`sqlite`, `mock`, `foundry`), a tool-backed call (`mcp`), an LLM
-(`copilot`), or any other generative or autonomous participant the executor
+`sqlite`, `foundry`), a tool-backed call (`mcp`), an LLM
+(`copilot`), or any other generative or autonomous participant the board
 supports. Non-determinism and variable latency are normal; the card just
 consumes whatever comes back. Sources may emit data, dynamic `_view` hints,
-or both.
+or both.   `discover-board-capabilities` can give different capabilities of various 'mcp' tools, 'copilot' capabilities, other APIs, etc.
 
-The exact source kinds and allowed authored fields are executor-defined and
+The exact source kinds and allowed authored fields are board worker-defined and
 must be discovered, not guessed. Treat each source_def as having two
 authored layers:
 

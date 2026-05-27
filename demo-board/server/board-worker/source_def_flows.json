@@ -118,6 +118,21 @@
       },
       "manifest": {
         "description": "URL fetch via interpolation and cache, with optional fan-out over a projected URL list.",
+        "semanticManifest": {
+          "kind": "urls",
+          "purpose": "Fetch deterministic HTTP resources and return their response payloads as source data.",
+          "bestFor": [
+            "REST or HTTP JSON endpoints",
+            "lightweight polling of public or internal APIs",
+            "fan-out fetches driven by projected identifiers"
+          ],
+          "expects": [
+            "a concrete URL template",
+            "optional headers, method, args, or cache configuration",
+            "optional projections for interpolation or fan-out"
+          ],
+          "returns": "Fetched HTTP response content, optionally across multiple projected requests."
+        },
         "inputSchema": {
           "urls": {
             "type": "object",
@@ -194,6 +209,21 @@
       },
       "manifest": {
         "description": "Invoke Copilot with prompt interpolation.",
+        "semanticManifest": {
+          "kind": "copilot",
+          "purpose": "Run a Copilot-backed generative source to synthesize or transform data from prompt inputs.",
+          "bestFor": [
+            "language-driven summarization or extraction",
+            "small structured generations from runtime inputs",
+            "reasoning tasks that deterministic sources cannot provide"
+          ],
+          "expects": [
+            "a prompt_template or copilot config object",
+            "optional interpolated arguments from projections",
+            "a result shape when consumers need structured output"
+          ],
+          "returns": "Model-generated text or structured content derived from the authored prompt and runtime context."
+        },
         "inputSchema": {
           "copilot": {
             "type": "object",
@@ -211,6 +241,7 @@
         "field": "mcp"
       },
       "flow": "./source-def-flows/mcp.flow.json",
+      "scriptForDescribingCapabilities": "./source-def-flows/mcp-handler/describe-capabilities.js",
       "supports": {
         "namedRegistryServer": true,
         "inlineServerConfig": true,
@@ -235,6 +266,21 @@
       },
       "manifest": {
         "description": "Invoke an MCP tool via a named server registry entry or an inline connection config.",
+        "semanticManifest": {
+          "kind": "mcp",
+          "purpose": "Call a tool exposed by an MCP server and use the tool result as source data.",
+          "bestFor": [
+            "tool-backed reads or mutations exposed through MCP",
+            "server-integrated domain workflows",
+            "capability surfaces that are already modeled as MCP tools"
+          ],
+          "expects": [
+            "a logical server name or inline server connection config",
+            "a concrete tool name",
+            "optional input or args payloads for that tool"
+          ],
+          "returns": "The invoked MCP tool result, validated against the selected server/tool surface."
+        },
         "inputSchema": {
           "mcp": {
             "type": "object",
@@ -284,6 +330,19 @@
       },
       "manifest": {
         "description": "Look up values from demo MOCK_DB map.",
+        "semanticManifest": {
+          "kind": "mock",
+          "purpose": "Return deterministic canned data for local testing, demos, and offline card development.",
+          "bestFor": [
+            "offline prototyping",
+            "stable regression fixtures",
+            "source contract testing without external dependencies"
+          ],
+          "expects": [
+            "a mock key present in the configured mock database"
+          ],
+          "returns": "Static fixture data associated with the selected mock key."
+        },
         "inputSchema": {
           "mock": {
             "type": "string",
@@ -322,6 +381,21 @@
       },
       "manifest": {
         "description": "Azure AI Foundry Agent invocation via Managed Identity.",
+        "semanticManifest": {
+          "kind": "foundry",
+          "purpose": "Invoke an Azure AI Foundry agent source for managed generative or agentic workflows.",
+          "bestFor": [
+            "Azure-hosted agent tasks",
+            "managed identity based AI integrations",
+            "structured agent responses with enterprise configuration"
+          ],
+          "expects": [
+            "a foundry prompt_template",
+            "optional endpoint and agent identifier",
+            "optional args and expected result shape"
+          ],
+          "returns": "Agent-produced content or structured output from the configured Foundry surface."
+        },
         "inputSchema": {
           "foundry": {
             "type": "object",
@@ -370,6 +444,21 @@
       },
       "manifest": {
         "description": "Query a SQLite database via the sqlite handler's local query runner.",
+        "semanticManifest": {
+          "kind": "sqlite",
+          "purpose": "Execute local SQLite queries and return row or execution results as source data.",
+          "bestFor": [
+            "deterministic local reads",
+            "ad hoc analytical queries over board-local databases",
+            "parameterized data retrieval without external services"
+          ],
+          "expects": [
+            "a database identifier or path alias",
+            "a SQL query string",
+            "optional positional params and query mode"
+          ],
+          "returns": "SQLite query results or execution output from the local database runner."
+        },
         "inputSchema": {
           "sqlite": {
             "type": "object",

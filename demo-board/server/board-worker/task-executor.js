@@ -87,6 +87,36 @@ function loadSourceDefFlowsConfig() {
   }
 }
 
+async function loadDynamicCapabilitiesForKind(kind, spec, registry) {
+  const scriptRef = spec?.scriptForDescribingCapabilities;
+  if (typeof scriptRef !== 'string' || scriptRef.length === 0) {
+    return null;
+  }
+
+  const scriptPath = path.resolve(WORKER_DIR, scriptRef);
+  const mod = await import(pathToFileURL(scriptPath).href);
+  if (typeof mod.describeCapabilities !== 'function') {
+    throw new Error(`Capability describer ${scriptRef} must export describeCapabilities(context)`);
+  }
+
+  const dynamicCapabilities = await mod.describeCapabilities({
+    kind,
+    kindSpec: spec,
+    registry,
+    workerDir: WORKER_DIR,
+    projectRoot: PROJECT_ROOT,
+    sourceDefFlowsFile: SOURCE_DEF_FLOWS_FILE,
+  });
+
+  if (dynamicCapabilities == null) {
+    return null;
+  }
+  if (typeof dynamicCapabilities !== 'object' || Array.isArray(dynamicCapabilities)) {
+    throw new Error(`Capability describer ${scriptRef} must return an object or null`);
+  }
+  return dynamicCapabilities;
+}
+
 function sanitizeRuntimeSourceDef(sourceDef) {
   if (!sourceDef || typeof sourceDef !== 'object' || Array.isArray(sourceDef)) {
     return sourceDef;
@@ -615,18 +645,28 @@ function validateSourceDefSubcommand() {
   process.exit(errors.length === 0 ? 0 : 1);
 }
 
-function describeCapabilities() {
+async function describeCapabilities() {
   const registry = loadSourceDefFlowsConfig();
-  const sourceKinds = Object.fromEntries(
-    Object.entries(registry?.kinds || {}).map(([kind, spec]) => [
-      kind,
-      {
-        ...(spec?.manifest && typeof spec.manifest === 'object' ? spec.manifest : {}),
-        ...(spec?.supports && typeof spec.supports === 'object' ? { supports: spec.supports } : {}),
-        ...(spec?.probe && typeof spec.probe === 'object' ? { probe: spec.probe } : {}),
-      },
-    ]),
-  );
+  const sourceKinds = {};
+  for (const [kind, spec] of Object.entries(registry?.kinds || {})) {
+    const kindPayload = {
+      ...(spec?.manifest && typeof spec.manifest === 'object' ? spec.manifest : {}),
+      ...(spec?.supports && typeof spec.supports === 'object' ? { supports: spec.supports } : {}),
+      ...(spec?.probe && typeof spec.probe === 'object' ? { probe: spec.probe } : {}),
+    };
+
+    try {
+      const dynamicCapabilities = await loadDynamicCapabilitiesForKind(kind, spec, registry);
+      if (dynamicCapabilities) {
+        kindPayload.dynamicCapabilities = dynamicCapabilities;
+      }
+    } catch (err) {
+      kindPayload.dynamicCapabilitiesError = String(err && err.message || err);
+    }
+
+    sourceKinds[kind] = kindPayload;
+  }
+
   const payload = {
     version: registry?.version || '1.0',
     executor: registry?.executor || EXECUTOR_NAME,
@@ -657,7 +697,7 @@ async function main() {
     return;
   }
   if (sub === 'describe' || sub === 'describe-capabilities') {
-    describeCapabilities();
+    await describeCapabilities();
     return;
   }
   if (sub === 'validate-source-def') {
