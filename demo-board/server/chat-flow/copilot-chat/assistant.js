@@ -227,6 +227,23 @@ function runCopilot(prompt, workingDir, options = {}) {
   const tempRoot = scratchDir;
   const outFile = copilotOutputFile || path.join(tempRoot, `asst-out-${ts}.txt`);
   const errFile = path.join(tempRoot, `asst-err-${ts}.txt`);
+  const cleanupFiles = [outFile, chatCardWatchPartyFile].filter((filePath) => typeof filePath === 'string' && filePath.trim().length > 0);
+
+  function cleanupWatchpartyFiles() {
+    for (const filePath of cleanupFiles) {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.writeFileSync(filePath, '', 'utf-8');
+        }
+      } catch {}
+      try {
+        fs.unlinkSync(filePath);
+      } catch {}
+    }
+  }
+
+  cleanupWatchpartyFiles();
+
   return new Promise((resolve, reject) => {
   const copilotArgs = [
     '-C', workingDir,
@@ -325,7 +342,7 @@ function runCopilot(prompt, workingDir, options = {}) {
     });
   }
   }).finally(() => {
-    try { fs.unlinkSync(outFile); } catch {}
+    cleanupWatchpartyFiles();
     try { fs.unlinkSync(errFile); } catch {}
   });
 }
