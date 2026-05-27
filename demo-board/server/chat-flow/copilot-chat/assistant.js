@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import {
   getCopilotOutputFileName,
+  sanitizeWatchpartyToken,
 } from '../../../../../watchparty-constants.mjs';
 import {
   appendAssistantReply,
@@ -26,6 +27,10 @@ const PROMPT_LAST_USER_TURNS = 4;
 
 function resolveCopilotOutputFilePath(dirPath, cId) {
   return path.join(dirPath, getCopilotOutputFileName(cId));
+}
+
+function resolveCopilotToolsLogFilePath(dirPath, cId) {
+  return path.join(dirPath, `${sanitizeWatchpartyToken(cId)}-copilot-tools.txt`);
 }
 
 const extra = readJsonStdin();
@@ -53,6 +58,7 @@ const DEBUG_LOG_PATH = ENABLE_DEBUG_LOGGING || path.join(os.tmpdir(), 'demo-boar
 const scratchDir = scratchStoreRef ? resolveStoreDir(scratchStoreRef, 'scratchStoreRef') : '';
 const DEBUG_LOG_FILE = scratchDir ? path.join(scratchDir, 'assistant-debug.jsonl') : '';
 const copilotOutputFile = watchPartyFilesForChatDir ? resolveCopilotOutputFilePath(watchPartyFilesForChatDir, cardId) : '';
+const chatCardWatchPartyFile = watchPartyFilesForChatDir ? resolveCopilotToolsLogFilePath(watchPartyFilesForChatDir, cardId) : '';
 
 function DBG_LOG(stage, details = {}) {
   if (!ENABLE_DEBUG_LOGGING) {
@@ -229,6 +235,9 @@ function runCopilot(prompt, workingDir, options = {}) {
   const execArgs = process.platform === 'win32'
     ? ['/d', '/c', 'copilot', ...copilotArgs]
     : copilotArgs;
+  const childEnv = chatCardWatchPartyFile
+    ? { ...process.env, CHAT_CARD_WATCH_PARTY_FILE: chatCardWatchPartyFile }
+    : process.env;
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.mkdirSync(path.dirname(errFile), { recursive: true });
   const outStream = fs.createWriteStream(outFile, { flags: 'w' });
@@ -255,6 +264,7 @@ function runCopilot(prompt, workingDir, options = {}) {
     const child = spawn(execCommand, execArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      env: childEnv,
     });
 
     child.stdout.on('data', (chunk) => {
