@@ -280,10 +280,13 @@ def run_copilot(session_uuid: str, prompt: str | None, prompt_file: Path | None,
         "-s",                # silent — no stats/decoration
         "--no-ask-user",     # never block on input
         "--allow-all-tools", # allow all tool permissions
+        "--model=gpt-5.4",   # hardcoded model
     ]
     for d in add_dirs:
         args.append(f"--add-dir={d}")
-    args.extend(["--resume", session_uuid])
+    # --session-id resumes an existing session or creates a new one with this UUID
+    # (--resume requires the session to already exist, which fails on first call).
+    args.extend(["--session-id", session_uuid])
 
     if prompt_file:
         # Pipe prompt from file via stdin
