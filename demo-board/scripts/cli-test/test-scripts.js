@@ -2,13 +2,13 @@
 /**
  * test-scripts.js
  *
- * Smoke-tests every CLI wrapper script under wrapper-scripts/cli/.
+ * Smoke-tests every CLI wrapper script under scripts/cli/.
  *
  * Creates a temporary board, writes known_constants.json, then exercises each
  * script in sequence.  Cleans up on exit.
  *
  * Usage:
- *   node test-scripts.js
+ *   node demo-board/scripts/cli-test/test-scripts.js
  */
 
 import fs from 'node:fs';
@@ -20,7 +20,7 @@ import { createRequire } from 'node:module';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const CLI_DIR = __dirname;  // the scripts live in the same directory
+const CLI_DIR = path.resolve(__dirname, '..', 'cli');
 
 // ── Resolve yaml-flow CLI bundled dir ────────────────────────────────────────
 
@@ -28,7 +28,7 @@ function resolveCliBundledDir() {
   try {
     return path.dirname(require.resolve('yaml-flow/cli-bundled/board-live-cards-cli.mjs'));
   } catch {
-    const candidate = path.resolve(__dirname, '..', '..', 'cli', 'bundled');
+    const candidate = path.resolve(CLI_DIR, 'bundled');
     if (fs.existsSync(path.join(candidate, 'board-live-cards-cli.mjs'))) {
       return candidate;
     }
