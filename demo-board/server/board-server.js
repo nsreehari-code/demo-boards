@@ -8,10 +8,6 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import {
-  COPILOT_OUTPUT_CHANNEL,
-  parseCopilotOutputFileName,
-} from '../../../watchparty-constants.mjs';
 
 import {
   createMultiBoardServerRuntime,
@@ -94,6 +90,14 @@ function ensureDirectoryExists(dirPath, label) {
   }
 }
 
+function normalizeConfigText(value, fallback) {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  const normalized = value.trim();
+  return normalized || fallback;
+}
+
 const DEFAULT_SETUP_LEAVES = {
   boardRuntime: 'runtime',
   boardOutputsStore: 'board-outputs',
@@ -104,7 +108,32 @@ const DEFAULT_SETUP_LEAVES = {
   archivalStore: 'runtime-archive',
 };
 
-const WATCHPARTY_FILES_FOR_CHAT_DIRNAME = 'watchparty-files-for-chat';
+const DEFAULT_WATCHPARTY_CONFIG = {
+  outputChannel: 'copilot-output',
+  toolsChannel: 'copilot-tools',
+  filesForChatDir: 'watchparty-files-for-chat',
+};
+
+function parseCopilotWatchpartyFileName(fileName, watchpartyConfig) {
+  const normalized = String(fileName || '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const outputSuffix = `-${watchpartyConfig.outputChannel}.txt`;
+  if (normalized.endsWith(outputSuffix)) {
+    const cardId = normalized.slice(0, -outputSuffix.length).trim();
+    return cardId ? { cardId, channel: watchpartyConfig.outputChannel } : null;
+  }
+
+  const toolsSuffix = `-${watchpartyConfig.toolsChannel}.txt`;
+  if (normalized.endsWith(toolsSuffix)) {
+    const cardId = normalized.slice(0, -toolsSuffix.length).trim();
+    return cardId ? { cardId, channel: watchpartyConfig.toolsChannel } : null;
+  }
+
+  return null;
+}
 
 function resolveConfiguredBoardSetupRoot(cfg, boardId, boardSetupRootOverride) {
   if (boardSetupRootOverride) {
@@ -469,6 +498,11 @@ const serverConfig = loadServerConfig();
 const configuredChatFlowTimeoutMs = normalizeTimeoutMs(serverConfig.chatFlowTimeoutMs, null);
 const configuredInvokeRefTimeoutMs = normalizeNonNegativeTimeoutMs(serverConfig.chatInvokeRefTimeoutMs, 300000);
 const configuredCopilotTimeoutMs = normalizeTimeoutMs(serverConfig.chatCopilotTimeoutMs, 300000);
+const configuredWatchpartyConfig = {
+  outputChannel: normalizeConfigText(serverConfig.watchparty?.outputChannel, DEFAULT_WATCHPARTY_CONFIG.outputChannel),
+  toolsChannel: normalizeConfigText(serverConfig.watchparty?.toolsChannel, DEFAULT_WATCHPARTY_CONFIG.toolsChannel),
+  filesForChatDir: normalizeConfigText(serverConfig.watchparty?.filesForChatDir, DEFAULT_WATCHPARTY_CONFIG.filesForChatDir),
+};
 
 // Resolve top-level config defaults
 const configuredTaskExecutorPath = resolveFromConfig(serverConfig.taskExecutorPath);
@@ -701,10 +735,11 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
 
   function emitFileSnapshot(fileName) {
     clearTimer(fileName);
-    const cardId = parseCopilotOutputFileName(fileName);
-    if (!cardId) {
+    const watchpartyMeta = parseCopilotWatchpartyFileName(fileName, configuredWatchpartyConfig);
+    if (!watchpartyMeta) {
       return;
     }
+    const { cardId, channel } = watchpartyMeta;
 
     const filePath = path.join(watchDir, fileName);
     let text = '';
@@ -728,7 +763,7 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
       stopFilePoller(fileName);
     }
 
-    broker.emit(COPILOT_OUTPUT_CHANNEL, cardId, clear ? { clear: true } : { replace: true, payload: { text } });
+    broker.emit(channel, cardId, clear ? { clear: true } : { replace: true, payload: { text } });
   }
 
   function scanWatchDir() {
@@ -747,7 +782,7 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
     }
 
     for (const fileName of fileNames) {
-      if (!parseCopilotOutputFileName(fileName)) {
+      if (!parseCopilotWatchpartyFileName(fileName, configuredWatchpartyConfig)) {
         continue;
       }
       if (fs.existsSync(path.join(watchDir, fileName))) {
@@ -777,7 +812,7 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
           return;
         }
 
-        if (parseCopilotOutputFileName(fileName)) {
+        if (parseCopilotWatchpartyFileName(fileName, configuredWatchpartyConfig)) {
           ensureFilePoller(fileName);
         }
 
@@ -1096,7 +1131,7 @@ const runtime = createMultiBoardServerRuntime({
     const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
     const scratchStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath });
     const finalResponseRootDir = path.join(boardSetupPaths.scratchStorePath, 'final-responses');
-    const watchPartyFilesForChatDir = path.join(boardSetupPaths.setupRoot, WATCHPARTY_FILES_FOR_CHAT_DIRNAME);
+    const watchPartyFilesForChatDir = path.join(boardSetupPaths.setupRoot, configuredWatchpartyConfig.filesForChatDir);
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
     ensureBoardSetupPaths(boardId, boardSetupPaths);
     ensureDirectoryExists(finalResponseRootDir, `boards.${boardId}.finalResponseRootDir`);

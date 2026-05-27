@@ -7,6 +7,11 @@
   "chatFlowTimeoutMs": 1800000,
   "chatInvokeRefTimeoutMs": 1800000,
   "chatCopilotTimeoutMs": 1800000,
+  "watchparty": {
+    "outputChannel": "copilot-output",
+    "toolsChannel": "copilot-tools",
+    "filesForChatDir": "watchparty-files-for-chat"
+  },
   "defaultBoard": "live",
   "boards": {
     "finbook": {

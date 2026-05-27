@@ -21,7 +21,8 @@ import http from 'node:http';
 import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
-import { COPILOT_OUTPUT_CHANNEL } from '../../../watchparty-constants.mjs';
+
+const COPILOT_OUTPUT_CHANNEL = 'copilot-output';
 
 const ECHO_PROBE_MARKER = '__probe__echo__probe__';
 const PROBE_IN_PROGRESS_TEXT = 'in-progress';

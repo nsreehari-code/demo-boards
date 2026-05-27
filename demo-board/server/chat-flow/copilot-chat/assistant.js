@@ -5,10 +5,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import {
-  getCopilotOutputFileName,
-  sanitizeWatchpartyToken,
-} from '../../../../../watchparty-constants.mjs';
-import {
   appendAssistantReply,
   clearFinalResponseContainer,
   configureWorkspaceCliScripts,
@@ -24,6 +20,17 @@ import {
 
 const COPILOT_MODEL = 'gpt-5.4';
 const PROMPT_LAST_USER_TURNS = 4;
+
+function sanitizeWatchpartyToken(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'unknown';
+}
+
+function getCopilotOutputFileName(cardId) {
+  return `${sanitizeWatchpartyToken(cardId)}-copilot-output.txt`;
+}
 
 function resolveCopilotOutputFilePath(dirPath, cId) {
   return path.join(dirPath, getCopilotOutputFileName(cId));

@@ -12,10 +12,20 @@ import {
   resolveCopilotWorkspaceDir,
   stageFinalResponsePayload,
 } from './shared.js';
-import { getCopilotOutputFileName } from '../../../../../watchparty-constants.mjs';
 
 const PROBE_MARKER = '__probe__echo__probe__';
 const PROBE_ATTACHMENT_PREFIX = '[attach]';
+
+function sanitizeWatchpartyToken(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'unknown';
+}
+
+function getCopilotOutputFileName(cardId) {
+  return `${sanitizeWatchpartyToken(cardId)}-copilot-output.txt`;
+}
 
 function normalizeProbeMessageText(text) {
   const trimmed = typeof text === 'string' ? text.trim() : '';
