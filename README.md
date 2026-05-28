@@ -40,6 +40,9 @@ npm run frontend
 | `npm run frontend` | Serve `docs/` as static files at `http://127.0.0.1:8000` |
 | `npm run mcp:install` | Install dependencies for `mcp-server/` |
 | `npm run mcp:dry-run` | Validate the WorkIQ MCP manifest without starting transport |
+| `npm run setup:check:copilot-only` | Smoke-check both Copilot wrappers with a simple query (`what is two plus two`) |
+| `npm run setup:check:workiq-only` | Smoke-check direct WorkIQ CLI invocation with a simple query (`what is two plus two`) |
+| `npm run setup:check:copilot-workiq` | Smoke-check both Copilot wrappers and run a direct WorkIQ CLI query (`what is two plus two`) without starting MCP |
 | `npm run mcp:start` | Start the hosted MCP server for the demo-boards WorkIQ manifest at `http://127.0.0.1:7801/mcp` |
 | `npm run clean` | Wipe runtime state in `demo-board/boards/live/` (preserves cards) |
 | `npm run stop` | Kill processes on ports 7799, 7801 and 8000 |
