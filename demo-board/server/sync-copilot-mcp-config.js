@@ -275,6 +275,11 @@ function main() {
     fs.writeFileSync(args.configPath, `${JSON.stringify(mergedConfig, null, 2)}\n`, 'utf8');
   }
 
+  if (!args.dryRun && Array.isArray(updated) && updated.length > 0) {
+    ensureParentDir(args.configPath);
+    fs.writeFileSync(args.configPath, `${JSON.stringify(mergedConfig, null, 2)}\n`, 'utf8');
+  }
+
   if (!args.dryRun && added.length === 0 && !fs.existsSync(args.configPath)) {
     ensureParentDir(args.configPath);
     fs.writeFileSync(args.configPath, `${JSON.stringify(mergedConfig, null, 2)}\n`, 'utf8');

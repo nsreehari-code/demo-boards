@@ -1,5 +1,6 @@
 import { askWorkiq } from './handlers/workiq.js';
 import { handleFinbookTool } from './handlers/finbook.js';
+import { handleLiveboardsTool } from './handlers/liveboards.js';
 import { handleLoreTool } from './handlers/lore.js';
 import { handleTeamsGraph } from './handlers/teams.js';
 import { handleRemoteMcpTool } from './handlers/mcp-proxy.js';
@@ -12,6 +13,7 @@ async function notImplemented(args, tool) {
 const HANDLERS = {
   'finbook': handleFinbookTool,
   'finbook.api': handleFinbookTool,
+  'liveboards.mcp': handleLiveboardsTool,
   'lore': handleLoreTool,
   'mcp.proxy': handleRemoteMcpTool,
   'sentinel.login': handleSentinelLogin,

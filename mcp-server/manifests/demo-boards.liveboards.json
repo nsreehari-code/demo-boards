@@ -1,0 +1,466 @@
+{
+  "server": {
+    "name": "demo-boards-mcp",
+    "version": "0.1.0",
+    "description": "Live board runtime tools proxied through board-server MCP routes"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+    "urlDefault": "http://127.0.0.1:7801/mcp"
+  },
+  "tools": [
+    {
+      "name": "liveboards.discover.source-kinds",
+      "title": "Live Boards Discover Source Kinds",
+      "description": "Discover the source kinds supported by a live board.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "discover.source-kinds",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target via board-server."
+          }
+        },
+        "required": ["board_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.inspect.board-runtime-status",
+      "title": "Live Boards Inspect Board Runtime Status",
+      "description": "Read summary runtime status for all cards on a live board.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "inspect.board-runtime-status",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to inspect."
+          }
+        },
+        "required": ["board_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.inspect.card-definition-and-runtime",
+      "title": "Live Boards Inspect Card Definition And Runtime",
+      "description": "Read a card definition together with its runtime state and outputs.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "inspect.card-definition-and-runtime",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to inspect."
+          },
+          "card_id": {
+            "type": "string",
+            "description": "Card ID to inspect."
+          }
+        },
+        "required": ["board_id", "card_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.inspect.chat-messages-on-cards",
+      "title": "Live Boards Inspect Chat Messages On Cards",
+      "description": "Read chat messages for a live board card with optional turn-based filters.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "inspect.chat-messages-on-cards",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to inspect."
+          },
+          "card_id": {
+            "type": "string",
+            "description": "Card ID whose chat history should be read."
+          },
+          "turn-id": {
+            "type": "string",
+            "description": "Only messages with this turn id."
+          },
+          "tail": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Last N individual messages."
+          },
+          "all-turns": {
+            "type": "boolean",
+            "description": "Return all turns (ignores tail-turns)."
+          },
+          "tail-turns": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Last N user turns only."
+          },
+          "tail-turns-before-id": {
+            "type": "string",
+            "description": "Requires tail-turns; messages before the given turn id."
+          }
+        },
+        "required": ["board_id", "card_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.inspect.file-contents",
+      "title": "Live Boards Inspect File Contents",
+      "description": "Read raw attachment bytes for a card file from a live board.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "inspect.file-contents",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to inspect."
+          },
+          "card_id": {
+            "type": "string",
+            "description": "Card ID owning the attachment."
+          },
+          "file_idx": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based attachment index."
+          }
+        },
+        "required": ["board_id", "card_id", "file_idx"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.preflight.validate-candidate-card-definition",
+      "title": "Live Boards Preflight Validate Candidate Card Definition",
+      "description": "Validate a candidate card definition without persisting it.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "preflight.validate-candidate-card-definition",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target."
+          },
+          "candidate_card_content": {
+            "type": "object",
+            "description": "Candidate card content to validate."
+          }
+        },
+        "required": ["board_id", "candidate_card_content"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.preflight.materialize-candidate-card",
+      "title": "Live Boards Preflight Materialize Candidate Card",
+      "description": "Materialize computed outputs and view data for a candidate card.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "preflight.materialize-candidate-card",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target."
+          },
+          "candidate_card_content": {
+            "type": "object",
+            "description": "Candidate card content to materialize."
+          },
+          "mock_fetched_sources": {
+            "type": "object",
+            "description": "Optional mocked fetched sources."
+          },
+          "mock_requires": {
+            "type": "object",
+            "description": "Optional mocked requires values."
+          }
+        },
+        "required": ["board_id", "candidate_card_content", "mock_fetched_sources", "mock_requires"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.preflight.probe-single-source-in-candidate-card",
+      "title": "Live Boards Preflight Probe Single Source In Candidate Card",
+      "description": "Probe one source definition in a candidate card.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "preflight.probe-single-source-in-candidate-card",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target."
+          },
+          "source_idx": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based source index in source_defs."
+          },
+          "candidate_card_content": {
+            "type": "object",
+            "description": "Candidate card content containing the source."
+          },
+          "mock_projections": {
+            "type": "object",
+            "description": "Projection input values used for probing."
+          }
+        },
+        "required": ["board_id", "source_idx", "candidate_card_content", "mock_projections"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.preflight.run-single-source-in-candidate-card",
+      "title": "Live Boards Preflight Run Single Source In Candidate Card",
+      "description": "Run one source definition in a candidate card end to end.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "preflight.run-single-source-in-candidate-card",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target."
+          },
+          "source_idx": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based source index in source_defs."
+          },
+          "candidate_card_content": {
+            "type": "object",
+            "description": "Candidate card content containing the source."
+          },
+          "mock_projections": {
+            "type": "object",
+            "description": "Projection input values used for the source run."
+          }
+        },
+        "required": ["board_id", "source_idx", "candidate_card_content", "mock_projections"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.preflight.run-single-source-in-live-card",
+      "title": "Live Boards Preflight Run Single Source In Live Card",
+      "description": "Execute a single source from an already-saved live card without supplying candidate_card_content.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "preflight.run-single-source-in-live-card",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target."
+          },
+          "card_id": {
+            "type": "string",
+            "description": "ID of an existing live card."
+          },
+          "source_idx": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based index into the card's source_defs array."
+          },
+          "mock_requires": {
+            "type": "object",
+            "description": "Mock values for requires keys."
+          }
+        },
+        "required": ["board_id", "card_id", "source_idx", "mock_requires"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.preflight.run-one-cycle-with-candidate-card",
+      "title": "Live Boards Preflight Run One Cycle With Candidate Card",
+      "description": "Run a full in-memory cycle for a candidate card.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "preflight.run-one-cycle-with-candidate-card",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target."
+          },
+          "candidate_card_content": {
+            "type": "object",
+            "description": "Candidate card content to simulate."
+          },
+          "mock_requires": {
+            "type": "object",
+            "description": "Requires values used during the simulated run."
+          }
+        },
+        "required": ["board_id", "candidate_card_content", "mock_requires"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.manage.read-card",
+      "title": "Live Boards Manage Read Card",
+      "description": "Read the stored document for a live card.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "manage.read-card",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target."
+          },
+          "card_id": {
+            "type": "string",
+            "description": "Card ID to read."
+          }
+        },
+        "required": ["board_id", "card_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.manage.upsert-card",
+      "title": "Live Boards Manage Upsert Card",
+      "description": "Validate, store, and register a card on the live board.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "manage.upsert-card",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target."
+          },
+          "card_id": {
+            "type": "string",
+            "description": "Card ID to upsert."
+          },
+          "candidate_card_content": {
+            "type": "object",
+            "description": "Full candidate card content to persist."
+          }
+        },
+        "required": ["board_id", "card_id", "candidate_card_content"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.manage.deprecate",
+      "title": "Live Boards Manage Deprecate",
+      "description": "Remove a card from the live board.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "manage.deprecate",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target."
+          },
+          "card_id": {
+            "type": "string",
+            "description": "Card ID to remove."
+          }
+        },
+        "required": ["board_id", "card_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.stage-ai-response-and-any-attachments",
+      "title": "Live Boards Stage AI Response And Any Attachments",
+      "description": "Stage a final AI response and optional attachments for a card.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "stage-ai-response-and-any-attachments",
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "description": "Board ID to target."
+          },
+          "card_id": {
+            "type": "string",
+            "description": "Card ID receiving the staged response."
+          },
+          "text": {
+            "type": "string",
+            "description": "Response text to stage."
+          },
+          "turn-id": {
+            "type": "string",
+            "description": "Turn id to associate the message with."
+          },
+          "files": {
+            "type": "array",
+            "description": "Optional file metadata objects to stage with the response.",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": ["board_id", "card_id", "text"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
