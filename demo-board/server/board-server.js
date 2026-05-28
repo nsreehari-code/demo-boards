@@ -15,6 +15,7 @@ import {
 } from 'yaml-flow/board-live-cards-server-runtime';
 
 import {
+  createFsBoardNonCorePlatformAdapter,
   createFsBoardPlatformAdapter,
   createFsBoardChatStorage,
   createNodeSpawnInvocationAdapter,
@@ -909,7 +910,9 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
   const notifyChannel = `yaml-flow-server-${label}-${boardId}-${process.pid}`;
   const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath }));
   const boardAdapter = createFsBoardPlatformAdapter(baseRef, YAML_FLOW_BUNDLED_CLI_DIR, { notifyChannel });
+  const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(baseRef, YAML_FLOW_BUNDLED_CLI_DIR, { onWarn: console.warn });
   boardAdapter.requestProcessAccumulated = () => {};
+  nonCoreAdapter.requestProcessAccumulated = () => {};
 
   const artifactsRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath }));
   const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, YAML_FLOW_BUNDLED_CLI_DIR, { suppressSpawn: true });
@@ -920,6 +923,7 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
   return {
     label,
     boardAdapter,
+    nonCoreAdapter,
     artifactsAdapter,
     baseRef,
     artifactsStoreRef,
