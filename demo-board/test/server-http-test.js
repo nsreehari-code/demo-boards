@@ -765,7 +765,7 @@ try {
   await ensureChatSseSubscription();
   await ensureWatchpartySseSubscription();
 
-  const t2Before = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  const t2Before = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
   assert(t2Before.status === 200, `T3 pre chats returned ${t2Before.status}`);
   const t2BeforeMessages = Array.isArray(t2Before.data?.messages) ? t2Before.data.messages : [];
   const t2BeforeCount = t2BeforeMessages.length;
@@ -806,7 +806,7 @@ try {
   }, 45_000, 'T3 watchparty lifecycle');
   assert(!!t2WatchpartyLifecycle, 'T3 watchparty lifecycle not observed');
 
-  const t2After = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  const t2After = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
   assert(t2After.status === 200, `T3 post chats returned ${t2After.status}`);
   const t2AfterMessages = Array.isArray(t2After.data?.messages) ? t2After.data.messages : [];
   const t2NewMessages = t2AfterMessages.slice(t2BeforeCount);
@@ -828,7 +828,7 @@ try {
   } else {
     console.log('\n=== T3b: probe-echo chat with file upload protocol ===');
     await ensureChatSseSubscription();
-    const t2bBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    const t2bBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
     assert(t2bBefore.status === 200, `T3b pre chats returned ${t2bBefore.status}`);
     const t2bBeforeMessages = Array.isArray(t2bBefore.data?.messages) ? t2bBefore.data.messages : [];
     const t2bBeforeCount = t2bBeforeMessages.length;
@@ -853,7 +853,7 @@ try {
     assert(t2bStoredFile?.chat === true, 'T3b stored file should be marked as chat-origin');
     assert(!Object.prototype.hasOwnProperty.call(t2bStoredFile || {}, 'path'), 'T3b stored file metadata should not expose path');
 
-    const t2bAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    const t2bAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
     assert(t2bAfterUpload.status === 200, `T3b chats after upload returned ${t2bAfterUpload.status}`);
     const t2bUploadMessages = Array.isArray(t2bAfterUpload.data?.messages) ? t2bAfterUpload.data.messages : [];
     const t2bUploadNewMessages = t2bUploadMessages.slice(t2bBeforeCount);
@@ -885,7 +885,7 @@ try {
     }, 60_000, 'T3b ordered lifecycle');
     assert(!!t2bLifecycle, 'T3b ordered lifecycle not observed');
 
-    const t2bAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    const t2bAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
     assert(t2bAfter.status === 200, `T3b post chats returned ${t2bAfter.status}`);
     const t2bAfterMessages = Array.isArray(t2bAfter.data?.messages) ? t2bAfter.data.messages : [];
     const t2bNewMessages = t2bAfterMessages.slice(t2bSendBaseline);
@@ -910,7 +910,7 @@ try {
   } else {
     console.log('\n=== T3d: probe-echo chat with AI-generated attachment ===');
     await ensureChatSseSubscription();
-    const t2dBeforeChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    const t2dBeforeChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
     assert(t2dBeforeChats.status === 200, `T3d pre chats returned ${t2dBeforeChats.status}`);
     const t2dBeforeMessages = Array.isArray(t2dBeforeChats.data?.messages) ? t2dBeforeChats.data.messages : [];
     const t2dBeforeCount = t2dBeforeMessages.length;
@@ -941,7 +941,7 @@ try {
     }, 60_000, 'T3d ordered lifecycle');
     assert(!!t2dLifecycle, 'T3d ordered lifecycle not observed');
 
-    const t2dAfterChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    const t2dAfterChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
     assert(t2dAfterChats.status === 200, `T3d post chats returned ${t2dAfterChats.status}`);
     const t2dAfterMessages = Array.isArray(t2dAfterChats.data?.messages) ? t2dAfterChats.data.messages : [];
     const t2dNewMessages = t2dAfterMessages.slice(t2dBeforeCount);
@@ -984,7 +984,7 @@ try {
   } else {
     console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');
     await ensureChatSseSubscription();
-    const t2aBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    const t2aBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
     assert(t2aBefore.status === 200, `T3a pre chats returned ${t2aBefore.status}`);
     const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
     const t2aBeforeCount = t2aBeforeMessages.length;
@@ -1024,7 +1024,7 @@ try {
   } else {
     console.log('\n=== T3c: non-probe chat with file upload protocol (expect tokyo) ===');
     await ensureChatSseSubscription();
-    const t2cBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    const t2cBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
     assert(t2cBefore.status === 200, `T3c pre chats returned ${t2cBefore.status}`);
     const t2cBeforeMessages = Array.isArray(t2cBefore.data?.messages) ? t2cBefore.data.messages : [];
     const t2cBeforeCount = t2cBeforeMessages.length;
@@ -1049,7 +1049,7 @@ try {
     assert(t2cStoredFile?.chat === true, 'T3c stored file should be marked as chat-origin');
     assert(!Object.prototype.hasOwnProperty.call(t2cStoredFile || {}, 'path'), 'T3c stored file metadata should not expose path');
 
-    const t2cAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    const t2cAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
     assert(t2cAfterUpload.status === 200, `T3c chats after upload returned ${t2cAfterUpload.status}`);
     const t2cUploadMessages = Array.isArray(t2cAfterUpload.data?.messages) ? t2cAfterUpload.data.messages : [];
     const t2cUploadNewMessages = t2cUploadMessages.slice(t2cBeforeCount);
