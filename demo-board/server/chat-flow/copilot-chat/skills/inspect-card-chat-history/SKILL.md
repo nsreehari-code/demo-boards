@@ -2,65 +2,50 @@
 name: inspect-card-chat-history
 description: >
   Read-only inspection of chat history on a live board card, including user
-  attachment file refs and upload-related system file refs.
+  attachment file refs and upload-related system file refs, through
+  `liveboards.inspect.chat-messages-on-cards`.
 ---
 
 # Inspect Card Chat History
 
 ## When To Use
 
-Use this skill when you need to read what was said on a specific card without
-changing anything.
+Use this skill to read chat history on a specific card without changing anything: user messages, assistant responses, system events, and attachment file refs.
 
-Typical questions this skill answers:
+## MCP Surface
 
-- What did the user say about this card?
-- What did the assistant or system say in response?
-- Which files were attached in chat?
-- What is the recent user-turn-bounded suffix of the conversation?
+Use `liveboards.inspect.chat-messages-on-cards`.
 
-Don't use this skill to change cards, save anything, or send the final
-user-visible reply. Use `inspect-attachments-file-contents` when you already
-have a `file_ref` and need the attachment contents.
-
-## Command Surface
-
-Run these from the Copilot workspace root.
+Pass the runtime `boardId` as `board_id`, the runtime `logId` as `log_id`
+(opaque; forward unchanged), and the runtime `cardId` as `card_id`. Add the
+runtime `turnId` as `turn-id` when you need the current turn only.
 
 ### Card chat history
 
-```bash
-node ./.github/scripts/inspect-chat-messages-on-cards.js --card-id <card-id> get-messages
-node ./.github/scripts/inspect-chat-messages-on-cards.js --card-id <card-id> --last-user-turns <n> get-messages
-node ./.github/scripts/inspect-chat-messages-on-cards.js --card-id <card-id> --tail <n> get-messages
+```json
+Tool: liveboards.inspect.chat-messages-on-cards
+Arguments: { "board_id": "<boardId>", "log_id": "<logId>", "card_id": "<cardId>" }
 ```
 
-Returns the conversation on a card. Prefer `--last-user-turns <n>` when you
-want the suffix beginning at the Nth-last user turn. Use `--tail <n>` only when
-you explicitly want the last N messages regardless of role boundaries.
+Optional scoping fields (add at most one):
+
+- `"tail-turns": <n>` — suffix starting at the Nth-last user turn.
+- `"tail": <n>` — last N messages regardless of role.
+- `"turn-id": "<turnId>"` — only the named turn.
+
+Returns the conversation on a card. Prefer `tail-turns` when you want the
+suffix beginning at the Nth-last user turn. Use `tail` only when you
+explicitly want the last N messages regardless of role boundaries. Use
+`turn-id` when the task is about the current turn only.
 Messages carry `file_refs` for user attachments and `file_ref` on
 upload-related system messages.
 
-## Command Rules
-
-- This command is read-only. Don't change cards, runtime, or chat.
-- Prefer `--last-user-turns <n>` when the question is about recent turns.
-- Use `--tail <n>` only when you want a raw message suffix and role boundaries
-  do not matter.
-- If you need the contents of an attachment, switch to
-  `inspect-attachments-file-contents` after extracting the relevant `file_ref`.
-- If you need broader board or card runtime context, switch to
-  `inspect-board-and-card-state`.
-
 ## Choosing What To Read
 
-- *"What did the user say about this card?"* — use `get-messages`.
-- *"Show me only the recent user-turn-bounded context."* — use
-  `--last-user-turns <n> get-messages`.
-- *"Show me the raw last few chat messages."* — use `--tail <n> get-messages`.
-- *"Which file was uploaded in chat?"* — read the chat history and extract the
-  `file_ref` or `file_refs`, then switch to `inspect-attachments-file-contents`
-  if you need file contents.
+- *"What did the user say?"* — call `liveboards.inspect.chat-messages-on-cards`; use `tail-turns` to scope to recent user turns.
+- *"Show me the raw last N messages"* — use `tail`.
+- *"Show me only this turn"* — use `turn-id` with the runtime `turnId`.
+- *"Which file was uploaded in chat?"* — extract the `file_ref` or `file_refs` from the history; switch to `inspect-attachments-file-contents` if you need the contents.
 
 ## Related Skills
 

@@ -5,9 +5,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import os from 'node:os';
+import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import {
+  deriveCardIdFromLogId,
+  deriveLogIdFromCardId,
+  resolveCopilotToolsLogFilePath,
+} from './chat-flow/copilot-chat/watchparty.js';
 
 import {
   createMultiBoardServerRuntime,
@@ -38,6 +44,7 @@ const SERVER_DIR = path.dirname(__filename);
 const BOARD_ROOT = path.resolve(SERVER_DIR, '..');
 const require = createRequire(import.meta.url);
 const YAML_FLOW_BUNDLED_CLI_DIR = path.dirname(require.resolve('yaml-flow/cli-bundled/board-live-cards-cli.mjs'));
+const DEFAULT_MCP_SERVER_URL = 'http://127.0.0.1:7801/mcp';
 const cliArgs = process.argv.slice(2);
 const SERVER_CONFIG = path.join(BOARD_ROOT, 'server-config.json');
 
@@ -57,6 +64,15 @@ function loadServerConfig() {
     return {};
   }
 }
+
+const __earlyServerConfig = loadServerConfig();
+const ENABLE_LOGGING = __earlyServerConfig.ENABLE_LOGGING !== false;
+const BOARD_SERVER_LOG_FILE = (() => {
+  const configured = typeof __earlyServerConfig.LOG_FILE === 'string' && __earlyServerConfig.LOG_FILE.trim()
+    ? __earlyServerConfig.LOG_FILE.trim()
+    : 'logs/board-server.log';
+  return path.isAbsolute(configured) ? configured : path.join(BOARD_ROOT, configured);
+})();
 
 function resolveFromConfig(configValue) {
   if (typeof configValue !== 'string' || !configValue.trim()) return null;
@@ -99,6 +115,347 @@ function normalizeConfigText(value, fallback) {
   return normalized || fallback;
 }
 
+function titleCase(text) {
+  return String(text || '')
+    .split(/[._\-\s]+/g)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+    .trim();
+}
+
+function resolveMcpToolSemanticName(toolName) {
+  const normalized = typeof toolName === 'string' ? toolName.trim() : '';
+  if (!normalized) {
+    return 'Unknown MCP Tool';
+  }
+  return titleCase(normalized) || 'Unknown MCP Tool';
+}
+
+function formatBoardServerTimestamp(date = new Date()) {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+function normalizeMcpToolName(toolName) {
+  const normalized = typeof toolName === 'string' ? toolName.trim() : '';
+  if (!normalized) return '';
+  return normalized.replace(/^liveboards\./, '');
+}
+
+function normalizeMcpArgs(body) {
+  if (body?.args && typeof body.args === 'object' && !Array.isArray(body.args)) {
+    return body.args;
+  }
+  if (body?.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments)) {
+    return body.arguments;
+  }
+  return {};
+}
+
+function stripLogIdFromArgs(args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return { strippedArgs: {}, logId: '' };
+  }
+
+  const { log_id, ...rest } = args;
+  return {
+    strippedArgs: rest,
+    logId: typeof log_id === 'string' ? log_id.trim() : '',
+  };
+}
+
+function stripLogIdFromMcpBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { strippedBody: {}, logId: '' };
+  }
+
+  const strippedBody = { ...body };
+  let logId = '';
+
+  if (body.args && typeof body.args === 'object' && !Array.isArray(body.args)) {
+    const stripped = stripLogIdFromArgs(body.args);
+    strippedBody.args = stripped.strippedArgs;
+    logId = stripped.logId;
+  }
+
+  if (body.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments)) {
+    const stripped = stripLogIdFromArgs(body.arguments);
+    strippedBody.arguments = stripped.strippedArgs;
+    if (!logId) {
+      logId = stripped.logId;
+    }
+  }
+
+  return { strippedBody, logId };
+}
+
+function readMcpArg(args, ...keys) {
+  for (const key of keys) {
+    if (!key) continue;
+    if (Object.prototype.hasOwnProperty.call(args, key)) {
+      return args[key];
+    }
+  }
+  return undefined;
+}
+
+function formatChatHistoryScope(args) {
+  if (readMcpArg(args, 'all-turns', 'allTurns') === true) {
+    return 'across all turns';
+  }
+  const tailTurns = readMcpArg(args, 'tail-turns', 'tailTurns', 'tail');
+  const n = Number.isInteger(tailTurns)
+    ? tailTurns
+    : Number.parseInt(String(tailTurns ?? ''), 10);
+  if (Number.isInteger(n) && n > 0) {
+    return `across the last ${n} message${n === 1 ? '' : 's'}`;
+  }
+  return null;
+}
+
+function joinPhrases(parts) {
+  const filtered = parts.filter((p) => typeof p === 'string' && p.trim().length > 0);
+  if (filtered.length === 0) return '';
+  if (filtered.length === 1) return ` ${filtered[0]}`;
+  if (filtered.length === 2) return ` ${filtered[0]} and ${filtered[1]}`;
+  return ` ${filtered.slice(0, -1).join(', ')} and ${filtered[filtered.length - 1]}`;
+}
+
+function phraseForCard(cardId) {
+  const text = cardId === undefined || cardId === null ? '' : String(cardId).trim();
+  return text ? `for ${text}` : null;
+}
+
+function phraseForFileIdx(idx) {
+  if (idx === undefined || idx === null || idx === '') return null;
+  return `file no. ${idx}`;
+}
+
+function phraseForFileName(name) {
+  const text = name === undefined || name === null ? '' : String(name).trim();
+  return text ? `file '${text}'` : null;
+}
+
+function phraseForAttachments(count) {
+  if (!Number.isInteger(count) || count <= 0) return 'with no attachments';
+  return `with ${count} attachment${count === 1 ? '' : 's'}`;
+}
+
+function formatMcpLogDetails(toolName, body) {
+  const normalizedToolName = normalizeMcpToolName(toolName);
+  const args = normalizeMcpArgs(body);
+  const parts = [];
+  const cardId = readMcpArg(args, 'card_id', 'cardId');
+
+  switch (normalizedToolName) {
+    case 'inspect.board-runtime-status':
+    case 'discover.source-kinds':
+      break;
+    case 'inspect.card-definition-and-runtime':
+    case 'manage.read-card':
+    case 'manage.upsert-card':
+    case 'manage.remove-card':
+    case 'provide-final-reply-to-user':
+      parts.push(phraseForCard(cardId));
+      break;
+    case 'inspect.chat-messages-on-cards':
+      parts.push(phraseForCard(cardId));
+      parts.push(formatChatHistoryScope(args));
+      break;
+    case 'inspect.file-contents':
+      parts.push(phraseForCard(cardId));
+      parts.push(phraseForFileIdx(readMcpArg(args, 'file_idx', 'fileIdx')));
+      break;
+    case 'manage.upload-card-file':
+      parts.push(phraseForCard(cardId));
+      parts.push(phraseForFileName(readMcpArg(args, 'file_name', 'fileName')));
+      break;
+    case 'stage-ai-response-and-any-attachments': {
+      parts.push(phraseForCard(cardId));
+      const files = readMcpArg(args, 'files');
+      const attachmentCount = Array.isArray(files) ? files.length : 0;
+      parts.push(phraseForAttachments(attachmentCount));
+      break;
+    }
+    default:
+      if (normalizedToolName.startsWith('preflight.')) {
+        parts.push(phraseForCard(cardId));
+      }
+      break;
+  }
+
+  return joinPhrases(parts);
+}
+
+function appendBoardServerLogLine(text) {
+  if (!ENABLE_LOGGING) return;
+  try {
+    fs.mkdirSync(path.dirname(BOARD_SERVER_LOG_FILE), { recursive: true });
+    fs.appendFileSync(BOARD_SERVER_LOG_FILE, `[${formatBoardServerTimestamp()}] ${text}\n`, 'utf8');
+  } catch {
+    // Logging must never block request handling.
+  }
+}
+
+function formatLoggerArgs(args) {
+  return args
+    .map((a) => {
+      if (typeof a === 'string') return a;
+      if (a instanceof Error) return a.stack || a.message;
+      try { return JSON.stringify(a); } catch { return String(a); }
+    })
+    .join(' ');
+}
+
+function logBoardServerLine(text) {
+  appendBoardServerLogLine(text);
+}
+
+function logMcpInvocation(toolName, body) {
+  const semanticName = resolveMcpToolSemanticName(toolName);
+  const details = formatMcpLogDetails(toolName, body);
+  appendBoardServerLogLine(`Invoking '${semanticName}'${details}`);
+}
+
+function logMcpCompletion(toolName, body) {
+  const semanticName = resolveMcpToolSemanticName(toolName);
+  const details = formatMcpLogDetails(toolName, body);
+  appendBoardServerLogLine(`Completed '${semanticName}'${details}`);
+}
+
+const MCP_DEBUG_BODY_MAX = 8000;
+
+function safeStringifyForDebug(value, max = MCP_DEBUG_BODY_MAX) {
+  let text;
+  try {
+    text = typeof value === 'string' ? value : JSON.stringify(value);
+  } catch {
+    text = String(value ?? '');
+  }
+  if (typeof text !== 'string') {
+    text = String(text ?? '');
+  }
+  const oneLine = text.replace(/\r?\n/g, '\\n');
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…(+${oneLine.length - max} chars)` : oneLine;
+}
+
+function captureResponseBodyForDebug(res, onComplete) {
+  const chunks = [];
+  let captured = 0;
+  let delivered = false;
+  const origWrite = res.write.bind(res);
+  const origEnd = res.end.bind(res);
+
+  const remember = (chunk, encoding) => {
+    if (chunk == null || captured >= MCP_DEBUG_BODY_MAX) {
+      return;
+    }
+    try {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8');
+      chunks.push(buf);
+      captured += buf.length;
+    } catch {
+      // ignore capture errors
+    }
+  };
+
+  const deliver = () => {
+    if (delivered) {
+      return;
+    }
+    delivered = true;
+    try {
+      const body = Buffer.concat(chunks).toString('utf8');
+      onComplete(body, res.statusCode);
+    } catch {
+      // never block on logging
+    }
+  };
+
+  res.write = function patchedWrite(chunk, encoding, cb) {
+    remember(chunk, encoding);
+    return origWrite(chunk, encoding, cb);
+  };
+  res.end = function patchedEnd(chunk, encoding, cb) {
+    remember(chunk, encoding);
+    const result = origEnd(chunk, encoding, cb);
+    deliver();
+    return result;
+  };
+  res.once('close', deliver);
+}
+
+function resolveBoardWatchPartyFilesForChatDir(boardId) {
+  const cfg = boardConfigMap.get(boardId);
+  if (!cfg) {
+    return '';
+  }
+
+  try {
+    const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
+    return path.join(boardSetupPaths.setupRoot, configuredWatchpartyConfig.filesForChatDir);
+  } catch {
+    return '';
+  }
+}
+
+function resolveBoardAiWorkspaceRoot(boardId) {
+  const cfg = boardConfigMap.get(boardId);
+  if (!cfg) {
+    return '';
+  }
+
+  try {
+    const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
+    return boardSetupPaths.aiWorkspaceRootPath;
+  } catch {
+    return '';
+  }
+}
+
+function formatWatchpartyToolMessage(phase, toolName, body) {
+  const semanticName = resolveMcpToolSemanticName(toolName);
+  const details = formatMcpLogDetails(toolName, body);
+  return `${phase} '${semanticName}'${details}`;
+}
+
+function appendWatchpartyToolsLog(boardId, logId, phase, toolName, body) {
+  const sanitizedCardId = deriveCardIdFromLogId(logId);
+  if (!sanitizedCardId) {
+    return;
+  }
+
+  const watchPartyFilesForChatDir = resolveBoardWatchPartyFilesForChatDir(boardId);
+  if (!watchPartyFilesForChatDir) {
+    return;
+  }
+
+  const outputPath = resolveCopilotToolsLogFilePath(watchPartyFilesForChatDir, sanitizedCardId);
+  const line = formatWatchpartyToolMessage(phase, toolName, body);
+
+  try {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.appendFileSync(outputPath, `${line}\n`, 'utf8');
+  } catch {
+    // Watchparty tool logging must never block request handling.
+  }
+}
+
+function resolveLiveboardsMcpServerUrl() {
+  const envOverride = typeof process.env.DEMO_BOARDS_MCP_SERVER_URL === 'string'
+    ? process.env.DEMO_BOARDS_MCP_SERVER_URL.trim()
+    : '';
+  const configuredUrl = typeof serverConfig?.mcpServerUrl === 'string'
+    ? serverConfig.mcpServerUrl.trim()
+    : '';
+  return envOverride || configuredUrl || DEFAULT_MCP_SERVER_URL;
+}
+
 const DEFAULT_SETUP_LEAVES = {
   boardRuntime: 'runtime',
   boardOutputsStore: 'board-outputs',
@@ -115,22 +472,26 @@ const DEFAULT_WATCHPARTY_CONFIG = {
   filesForChatDir: 'watchparty-files-for-chat',
 };
 
-function parseCopilotWatchpartyFileName(fileName, watchpartyConfig) {
-  const normalized = String(fileName || '').trim();
+function parseCopilotWatchpartyFileName(relativePath, watchpartyConfig) {
+  const normalized = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   if (!normalized) {
     return null;
   }
 
-  const outputSuffix = `-${watchpartyConfig.outputChannel}.txt`;
-  if (normalized.endsWith(outputSuffix)) {
-    const cardId = normalized.slice(0, -outputSuffix.length).trim();
-    return cardId ? { cardId, channel: watchpartyConfig.outputChannel } : null;
+  const parts = normalized.split('/');
+  if (parts.length !== 2) {
+    return null;
+  }
+  const [cardToken, fileName] = parts;
+  if (!cardToken || !fileName) {
+    return null;
   }
 
-  const toolsSuffix = `-${watchpartyConfig.toolsChannel}.txt`;
-  if (normalized.endsWith(toolsSuffix)) {
-    const cardId = normalized.slice(0, -toolsSuffix.length).trim();
-    return cardId ? { cardId, channel: watchpartyConfig.toolsChannel } : null;
+  if (fileName === `${watchpartyConfig.outputChannel}.txt`) {
+    return { cardId: cardToken, channel: watchpartyConfig.outputChannel };
+  }
+  if (fileName === `${watchpartyConfig.toolsChannel}.txt`) {
+    return { cardId: cardToken, channel: watchpartyConfig.toolsChannel };
   }
 
   return null;
@@ -395,6 +756,9 @@ function createUserTextAwareChatFlowRunner(chatStorage, invokeRef) {
           flowArgs.userText = derivedUserText;
         }
       }
+      if (typeof flowArgs.logId !== 'string' || !flowArgs.logId.trim()) {
+        flowArgs.logId = deriveLogIdFromCardId(flowArgs.cardId);
+      }
       return innerRunner.run(flow, flowArgs, ...rest);
     },
   };
@@ -412,7 +776,7 @@ function resolveInvokeTimeoutMs(flow) {
 
 async function runPrestartCommands(commands) {
   for (const command of commands) {
-    console.log(`[board-server] prestart: ${command}`);
+    logBoardServerLine(`prestart: ${command}`);
     await new Promise((resolve, reject) => {
       const child = spawn(command, {
         cwd: BOARD_ROOT,
@@ -689,6 +1053,182 @@ function createWatchpartyBroker() {
   };
 }
 
+function createChatSseBroker(chatStorage) {
+  const writers = new Map();
+  const subscriptions = new Map();
+  const lastSignatures = new Map();
+  let pollTimer = null;
+
+  function readMessages(cardId) {
+    if (!chatStorage || typeof chatStorage.readAll !== 'function') {
+      return [];
+    }
+    try {
+      const messages = chatStorage.readAll(cardId);
+      if (!Array.isArray(messages)) {
+        return [];
+      }
+      return messages.map((message) => ({
+        ...(message && typeof message === 'object' ? message : {}),
+        role: String(message?.role || 'system'),
+        text: String(message?.text || ''),
+        files: Array.isArray(message?.files) ? message.files : [],
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  function isProcessing(cardId) {
+    if (!chatStorage || typeof chatStorage.isProcessing !== 'function') {
+      return false;
+    }
+    try {
+      return chatStorage.isProcessing(cardId) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  function buildSnapshot(cardId, receiving = true) {
+    const sentAtMs = Date.now();
+    return {
+      kind: 'card_chats',
+      cardId,
+      sentAt: new Date(sentAtMs).toISOString(),
+      sentAtMs,
+      messages: readMessages(cardId),
+      receiving,
+      processing: isProcessing(cardId),
+    };
+  }
+
+  function buildSignature(snapshot) {
+    return JSON.stringify({
+      processing: snapshot.processing === true,
+      messageCount: Array.isArray(snapshot.messages) ? snapshot.messages.length : 0,
+      messages: Array.isArray(snapshot.messages)
+        ? snapshot.messages.map((message) => ({
+          id: typeof message?.id === 'string' ? message.id : '',
+          turn: typeof message?.turn === 'string' ? message.turn : '',
+          updated_at: typeof message?.updated_at === 'string' ? message.updated_at : '',
+          role: String(message?.role || ''),
+          text: String(message?.text || ''),
+          fileCount: Array.isArray(message?.files) ? message.files.length : 0,
+        }))
+        : [],
+    });
+  }
+
+  function stopPollingIfIdle() {
+    if (subscriptions.size > 0) {
+      return;
+    }
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function emitSnapshot(cardId, { force = false, receiving = true } = {}) {
+    const clients = subscriptions.get(cardId);
+    if (!clients?.size) {
+      lastSignatures.delete(cardId);
+      stopPollingIfIdle();
+      return 0;
+    }
+
+    const snapshot = buildSnapshot(cardId, receiving);
+    const signature = buildSignature(snapshot);
+    if (!force && signature === lastSignatures.get(cardId)) {
+      return 0;
+    }
+
+    lastSignatures.set(cardId, signature);
+    const frame = {
+      kind: 'notification-batch',
+      notifications: [snapshot],
+    };
+
+    let sent = 0;
+    for (const clientId of [...clients]) {
+      const writer = writers.get(clientId);
+      if (!writer) {
+        clients.delete(clientId);
+        continue;
+      }
+      try {
+        writer(frame);
+        sent += 1;
+      } catch {
+        writers.delete(clientId);
+        clients.delete(clientId);
+      }
+    }
+
+    if (clients.size === 0) {
+      subscriptions.delete(cardId);
+      lastSignatures.delete(cardId);
+      stopPollingIfIdle();
+    }
+
+    return sent;
+  }
+
+  function ensurePolling() {
+    if (pollTimer) {
+      return;
+    }
+    pollTimer = setInterval(() => {
+      for (const cardId of [...subscriptions.keys()]) {
+        emitSnapshot(cardId, { receiving: true });
+      }
+    }, 100);
+  }
+
+  return {
+    onConnect(clientId, writer) {
+      writers.set(clientId, writer);
+    },
+    onDisconnect(clientId) {
+      writers.delete(clientId);
+      for (const [cardId, clients] of subscriptions) {
+        clients.delete(clientId);
+        if (clients.size === 0) {
+          subscriptions.delete(cardId);
+          lastSignatures.delete(cardId);
+        }
+      }
+      stopPollingIfIdle();
+    },
+    hasClient(clientId) {
+      return writers.has(clientId);
+    },
+    subscribe(clientId, cardId) {
+      if (!subscriptions.has(cardId)) {
+        subscriptions.set(cardId, new Set());
+      }
+      subscriptions.get(cardId).add(clientId);
+      ensurePolling();
+      emitSnapshot(cardId, { force: true, receiving: true });
+      return true;
+    },
+    unsubscribe(clientId, cardId) {
+      const clients = subscriptions.get(cardId);
+      if (!clients) {
+        return false;
+      }
+      clients.delete(clientId);
+      if (clients.size === 0) {
+        subscriptions.delete(cardId);
+        lastSignatures.delete(cardId);
+      }
+      stopPollingIfIdle();
+      return true;
+    },
+  };
+}
+
 function createWatchpartyDirectoryWatcher(broker, watchDir) {
   let watcher = null;
   let scanTimer = null;
@@ -696,53 +1236,57 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
   const lastSnapshots = new Map();
   const filePollers = new Set();
 
-  function clearTimer(fileName) {
-    const existing = timers.get(fileName);
+  function normalizeRelative(relativePath) {
+    return String(relativePath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  }
+
+  function clearTimer(key) {
+    const existing = timers.get(key);
     if (existing) {
       clearTimeout(existing);
-      timers.delete(fileName);
+      timers.delete(key);
     }
   }
 
-  function stopFilePoller(fileName) {
-    if (!filePollers.has(fileName)) {
+  function stopFilePoller(key) {
+    if (!filePollers.has(key)) {
       return;
     }
-    filePollers.delete(fileName);
+    filePollers.delete(key);
     try {
-      fs.unwatchFile(path.join(watchDir, fileName));
+      fs.unwatchFile(path.join(watchDir, key));
     } catch {}
   }
 
-  function ensureFilePoller(fileName) {
-    if (filePollers.has(fileName)) {
+  function ensureFilePoller(key) {
+    if (filePollers.has(key)) {
       return;
     }
-    const filePath = path.join(watchDir, fileName);
+    const filePath = path.join(watchDir, key);
     fs.watchFile(filePath, { interval: 100 }, (curr, prev) => {
       if (
         curr.mtimeMs !== prev.mtimeMs
         || curr.size !== prev.size
         || curr.nlink !== prev.nlink
       ) {
-        emitFileSnapshot(fileName);
+        emitFileSnapshot(key);
         if (curr.nlink === 0) {
-          stopFilePoller(fileName);
+          stopFilePoller(key);
         }
       }
     });
-    filePollers.add(fileName);
+    filePollers.add(key);
   }
 
-  function emitFileSnapshot(fileName) {
-    clearTimer(fileName);
-    const watchpartyMeta = parseCopilotWatchpartyFileName(fileName, configuredWatchpartyConfig);
+  function emitFileSnapshot(key) {
+    clearTimer(key);
+    const watchpartyMeta = parseCopilotWatchpartyFileName(key, configuredWatchpartyConfig);
     if (!watchpartyMeta) {
       return;
     }
     const { cardId, channel } = watchpartyMeta;
 
-    const filePath = path.join(watchDir, fileName);
+    const filePath = path.join(watchDir, key);
     let text = '';
     let clear = false;
     try {
@@ -756,46 +1300,64 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
     }
 
     const snapshotKey = clear ? '__CLEAR__' : text;
-    if (lastSnapshots.get(fileName) === snapshotKey) {
+    if (lastSnapshots.get(key) === snapshotKey) {
       return;
     }
-    lastSnapshots.set(fileName, snapshotKey);
+    lastSnapshots.set(key, snapshotKey);
     if (clear) {
-      stopFilePoller(fileName);
+      stopFilePoller(key);
     }
 
     broker.emit(channel, cardId, clear ? { clear: true } : { replace: true, payload: { text } });
   }
 
-  function scanWatchDir() {
-    const fileNames = new Set(lastSnapshots.keys());
-    const existingWatchedFiles = new Set();
+  function listWatchedRelativePaths() {
+    const out = [];
+    if (!fs.existsSync(watchDir)) return out;
+    let subEntries;
     try {
-      if (fs.existsSync(watchDir)) {
-        for (const entry of fs.readdirSync(watchDir, { withFileTypes: true })) {
-          if (entry.isFile()) {
-            fileNames.add(entry.name);
-          }
-        }
-      }
+      subEntries = fs.readdirSync(watchDir, { withFileTypes: true });
     } catch {
-      return;
+      return out;
     }
-
-    for (const fileName of fileNames) {
-      if (!parseCopilotWatchpartyFileName(fileName, configuredWatchpartyConfig)) {
+    for (const sub of subEntries) {
+      if (!sub.isDirectory()) continue;
+      const subPath = path.join(watchDir, sub.name);
+      let fileEntries;
+      try {
+        fileEntries = fs.readdirSync(subPath, { withFileTypes: true });
+      } catch {
         continue;
       }
-      if (fs.existsSync(path.join(watchDir, fileName))) {
-        existingWatchedFiles.add(fileName);
-        ensureFilePoller(fileName);
+      for (const fileEntry of fileEntries) {
+        if (!fileEntry.isFile()) continue;
+        out.push(`${sub.name}/${fileEntry.name}`);
       }
-      emitFileSnapshot(fileName);
+    }
+    return out;
+  }
+
+  function scanWatchDir() {
+    const keys = new Set(lastSnapshots.keys());
+    const existingWatched = new Set();
+    for (const key of listWatchedRelativePaths()) {
+      keys.add(key);
     }
 
-    for (const fileName of [...filePollers]) {
-      if (!existingWatchedFiles.has(fileName)) {
-        stopFilePoller(fileName);
+    for (const key of keys) {
+      if (!parseCopilotWatchpartyFileName(key, configuredWatchpartyConfig)) {
+        continue;
+      }
+      if (fs.existsSync(path.join(watchDir, key))) {
+        existingWatched.add(key);
+        ensureFilePoller(key);
+      }
+      emitFileSnapshot(key);
+    }
+
+    for (const key of [...filePollers]) {
+      if (!existingWatched.has(key)) {
+        stopFilePoller(key);
       }
     }
   }
@@ -807,19 +1369,19 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
       }
 
       ensureDirectoryExists(watchDir, 'watchparty directory');
-      watcher = fs.watch(watchDir, (eventType, fileNameValue) => {
-        const fileName = typeof fileNameValue === 'string' ? fileNameValue.trim() : '';
-        if (!fileName) {
+      watcher = fs.watch(watchDir, { recursive: true }, (eventType, fileNameValue) => {
+        const key = normalizeRelative(fileNameValue);
+        if (!key) {
           return;
         }
 
-        if (parseCopilotWatchpartyFileName(fileName, configuredWatchpartyConfig)) {
-          ensureFilePoller(fileName);
+        if (parseCopilotWatchpartyFileName(key, configuredWatchpartyConfig)) {
+          ensureFilePoller(key);
         }
 
-        clearTimer(fileName);
-        const timer = setTimeout(() => emitFileSnapshot(fileName), eventType === 'rename' ? 40 : 0);
-        timers.set(fileName, timer);
+        clearTimer(key);
+        const timer = setTimeout(() => emitFileSnapshot(key), eventType === 'rename' ? 40 : 0);
+        timers.set(key, timer);
       });
       watcher.on('error', () => {
         try { watcher?.close(); } catch {}
@@ -829,11 +1391,11 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
       scanWatchDir();
     },
     close() {
-      for (const fileName of timers.keys()) {
-        clearTimer(fileName);
+      for (const key of timers.keys()) {
+        clearTimer(key);
       }
-      for (const fileName of [...filePollers]) {
-        stopFilePoller(fileName);
+      for (const key of [...filePollers]) {
+        stopFilePoller(key);
       }
       if (scanTimer) {
         clearInterval(scanTimer);
@@ -861,6 +1423,37 @@ function readRequestBody(req) {
     });
     req.on('error', reject);
   });
+}
+
+function readRawRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function parseJsonObjectOrEmpty(buffer) {
+  try {
+    const text = Buffer.isBuffer(buffer) ? buffer.toString('utf8') : String(buffer || '');
+    if (!text.trim()) {
+      return {};
+    }
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function createReplayableRequest(req, rawBodyBuffer) {
+  const replayReq = Readable.from(rawBodyBuffer.length > 0 ? [rawBodyBuffer] : []);
+  replayReq.method = req.method;
+  replayReq.url = req.url;
+  replayReq.headers = req.headers;
+  replayReq.httpVersion = req.httpVersion;
+  return replayReq;
 }
 
 function createConfigBackedServerMetaStore(entries) {
@@ -895,7 +1488,11 @@ const serverMetaStore = createConfigBackedServerMetaStore(serverConfig.boards ? 
 const apiBasePath = '/api/boards';
 const invocationAdapter = createNodeSpawnInvocationAdapter();
 const notificationTransport = createNamedPipeNotificationTransport();
-const logger = { info: console.log, warn: console.warn, error: console.error };
+const logger = {
+  info: (...args) => appendBoardServerLogLine(formatLoggerArgs(args)),
+  warn: (...args) => appendBoardServerLogLine(`WARN ${formatLoggerArgs(args)}`),
+  error: (...args) => appendBoardServerLogLine(`ERROR ${formatLoggerArgs(args)}`),
+};
 
 // Map config keys to board entries for the factory
 const boardConfigEntries = serverConfig.boards ? Object.entries(serverConfig.boards) : [];
@@ -1094,6 +1691,7 @@ function parseExecutionStdout(stdout) {
 
 const watchpartyBrokers = new Map(); // boardId → WatchpartyBroker
 const watchpartyDirectoryWatchers = new Map(); // boardId → directory watcher
+const chatSseBrokers = new Map(); // boardId → chat SSE broker
 
 const runtime = createMultiBoardServerRuntime({
   apiBasePath,
@@ -1134,13 +1732,12 @@ const runtime = createMultiBoardServerRuntime({
     const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
     const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
     const scratchStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath });
-    const finalResponseRootDir = path.join(boardSetupPaths.scratchStorePath, 'final-responses');
     const watchPartyFilesForChatDir = path.join(boardSetupPaths.setupRoot, configuredWatchpartyConfig.filesForChatDir);
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
     ensureBoardSetupPaths(boardId, boardSetupPaths);
-    ensureDirectoryExists(finalResponseRootDir, `boards.${boardId}.finalResponseRootDir`);
     ensureDirectoryExists(watchPartyFilesForChatDir, `boards.${boardId}.watchPartyFilesForChatDir`);
     const chatStorage = createFsBoardChatStorage(boardSetupPaths.chatStorePath);
+    const chatSseBroker = createChatSseBroker(chatStorage);
     const flowRunner = createUserTextAwareChatFlowRunner(
       chatStorage,
       (ref, stepArgs, opts) => invokeExecutionRefAsync(ref, stepArgs, {
@@ -1162,7 +1759,6 @@ const runtime = createMultiBoardServerRuntime({
       artifactsStoreRef,
       scratchStore: boardSetupPaths.scratchStore,
       scratchStoreRef,
-      finalResponseRootDir,
       archivalStore: boardSetupPaths.archivalStore,
       projectRoot: BOARD_ROOT,
       chatFlowRoot,
@@ -1183,12 +1779,12 @@ const runtime = createMultiBoardServerRuntime({
       aiWorkspaceRoot,
       baseRef,
       scratchDir: boardSetupPaths.scratchStorePath,
-      finalResponseRootDir,
     });
 
     const broker = createWatchpartyBroker();
     watchpartyBrokers.set(boardId, broker);
     watchpartyDirectoryWatchers.set(boardId, createWatchpartyDirectoryWatcher(broker, watchPartyFilesForChatDir));
+    chatSseBrokers.set(boardId, chatSseBroker);
 
     const singleBoardRuntime = createSingleBoardServerRuntime({
       apiBasePath: `${apiBasePath}/${boardId}`,
@@ -1200,8 +1796,14 @@ const runtime = createMultiBoardServerRuntime({
       notificationTransport,
       logger,
       serverUrl: `http://127.0.0.1:${PORT}`,
-      onSseClientConnected: (clientId, writer) => broker.onConnect(clientId, writer),
-      onSseClientDisconnected: (clientId) => broker.onDisconnect(clientId),
+      onSseClientConnected: (clientId, writer) => {
+        broker.onConnect(clientId, writer);
+        chatSseBroker.onConnect(clientId, writer);
+      },
+      onSseClientDisconnected: (clientId) => {
+        broker.onDisconnect(clientId);
+        chatSseBroker.onDisconnect(clientId);
+      },
       onChannelSubscribed: (clientId, channelName, params) => broker.onSubscribe(clientId, channelName, params),
       onChannelUnsubscribed: (clientId, channelName, params) => broker.onUnsubscribe(clientId, channelName, params),
       executionExtra: {
@@ -1216,7 +1818,6 @@ const runtime = createMultiBoardServerRuntime({
         artifactsStoreRef,
         scratchStore: boardSetupPaths.scratchStore,
         scratchStoreRef,
-        finalResponseRootDir,
         archivalStore: boardSetupPaths.archivalStore,
         projectRoot: BOARD_ROOT,
         chatFlowRoot,
@@ -1242,8 +1843,9 @@ const runtime = createMultiBoardServerRuntime({
 // Host setup — prepares Copilot workspaces under the board setup root.
 // ---------------------------------------------------------------------------
 
-function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot, baseRef, scratchDir, finalResponseRootDir }) {
+function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot, baseRef, scratchDir }) {
   ensureDirectoryExists(boardSetupRoot, `boards.${boardId}.setup.setupRoot`);
+  void baseRef;
 
   const workspaceSetup = Array.isArray(cfg?.['copilot-workdirs-setup'])
     ? cfg['copilot-workdirs-setup'].filter((entry) => entry && typeof entry === 'object')
@@ -1265,6 +1867,7 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
       const hooksTarget = path.join(workspaceRoot, '.github', 'hooks');
       const skillsTarget = path.join(workspaceRoot, '.github', 'skills');
       const scriptsTarget = path.join(workspaceRoot, '.github', 'scripts');
+      const configTarget = path.join(workspaceRoot, 'config.json');
 
       fs.mkdirSync(workspaceRoot, { recursive: true });
       fs.mkdirSync(githubRoot, { recursive: true });
@@ -1274,8 +1877,8 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
       fs.mkdirSync(scriptsTarget, { recursive: true });
 
       const logCopiedFiles = (label, dirPath, copiedCount) => {
-        console.log(
-          `[board-server] copilot workspace "${copilotRoot}" ${label} dir: ${dirPath} (${copiedCount} files copied)`,
+        logBoardServerLine(
+          `copilot workspace "${copilotRoot}" ${label} dir: ${dirPath} (${copiedCount} files copied)`,
         );
       };
 
@@ -1352,17 +1955,16 @@ function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot
             .map((dir) => resolveFromConfig(dir))
             .filter(Boolean)
         : [];
-      console.log(
-        `[board-server] copilot workspace "${copilotRoot}" copyScripts: ${copyScriptDirs.length > 0 ? copyScriptDirs.join(', ') : '(none)'}`,
+      logBoardServerLine(
+        `copilot workspace "${copilotRoot}" copyScripts: ${copyScriptDirs.length > 0 ? copyScriptDirs.join(', ') : '(none)'}`,
       );
       syncFlatFilesIntoDir(scriptsTarget, copyScriptDirs);
       fs.writeFileSync(
-        path.join(scriptsTarget, 'known_constants.json'),
+        configTarget,
         `${JSON.stringify({
-          base_ref: baseRef,
-          yaml_flow_cli_bundled_dir: YAML_FLOW_BUNDLED_CLI_DIR,
+          board_id: boardId,
+          mcp_server_url: resolveLiveboardsMcpServerUrl(),
           scratch_dir: scratchDir,
-          final_response_root_dir: finalResponseRootDir,
         }, null, 2)}\n`,
         'utf8',
       );
@@ -1609,8 +2211,20 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
   const pathname = url.pathname;
   const remoteAddress = req.socket?.remoteAddress || 'unknown';
+  const requestPath = `${pathname}${url.search}`;
+  let completionLogged = false;
 
-  console.log(`[board-server] ${method} ${pathname}${url.search} <- ${remoteAddress}`);
+  const logCompletionOnce = () => {
+    if (completionLogged) {
+      return;
+    }
+    completionLogged = true;
+    logBoardServerLine(`${method} ${requestPath} -> ${res.statusCode}`);
+  };
+
+  res.once('finish', logCompletionOnce);
+
+  logBoardServerLine(`${method} ${requestPath} <- ${remoteAddress}`);
 
   if (method === 'GET' && pathname === '/healthz') {
     jsonReply(res, 200, {
@@ -1759,6 +2373,96 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  const chatSseMatch = pathname.match(/^\/api\/boards\/([^/]+)\/cards\/([^/]+)\/chats\/(subscribe|unsubscribe)-sse$/);
+  if (method === 'POST' && chatSseMatch) {
+    const boardId = decodeURIComponent(chatSseMatch[1] || '').trim();
+    const cardId = decodeURIComponent(chatSseMatch[2] || '').trim();
+    const action = chatSseMatch[3] || '';
+    (async () => {
+      try {
+        const body = await readRequestBody(req);
+        const clientId = typeof body?.clientId === 'string' ? body.clientId.trim() : '';
+        const chatSseBroker = chatSseBrokers.get(boardId);
+        if (!clientId) {
+          jsonReply(res, 400, { error: 'clientId is required' });
+          return;
+        }
+        if (!chatSseBroker) {
+          jsonReply(res, 404, { error: `No chat SSE broker for board: ${boardId}` });
+          return;
+        }
+        if (!chatSseBroker.hasClient(clientId)) {
+          jsonReply(res, 404, { error: `SSE client not connected: ${clientId}` });
+          return;
+        }
+
+        const subscribed = action === 'subscribe';
+        if (subscribed) {
+          chatSseBroker.subscribe(clientId, cardId);
+        } else {
+          chatSseBroker.unsubscribe(clientId, cardId);
+        }
+
+        jsonReply(res, 200, { ok: true, boardId, cardId, clientId, subscribed });
+      } catch (error) {
+        jsonReply(res, 500, { error: String(error?.message || error) });
+      }
+    })();
+    return;
+  }
+
+  const mcpRouteMatch = pathname.match(/^\/api\/boards\/([^/]+)\/(mcp|mcp-raw)$/);
+  if (method === 'POST' && mcpRouteMatch) {
+    (async () => {
+      try {
+        const boardId = decodeURIComponent(mcpRouteMatch[1] || '').trim();
+        const routePath = `/${mcpRouteMatch[2] || 'mcp'}`;
+        const rawBody = await readRawRequestBody(req);
+        const body = parseJsonObjectOrEmpty(rawBody);
+        const { strippedBody, logId } = stripLogIdFromMcpBody(body);
+        const toolName = typeof strippedBody?.tool === 'string' ? strippedBody.tool.trim() : '';
+        const strippedArgs = normalizeMcpArgs(strippedBody);
+        logMcpInvocation(toolName, strippedBody);
+        appendWatchpartyToolsLog(boardId, logId, 'Invoking', toolName, strippedBody);
+
+        const debugTraceId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        logBoardServerLine(
+          `mcp-req trace=${debugTraceId} board=${boardId} route=${routePath} tool=${toolName || '?'} args=${safeStringifyForDebug(strippedArgs)}`
+        );
+        captureResponseBodyForDebug(res, (body, statusCode) => {
+          logBoardServerLine(
+            `mcp-resp trace=${debugTraceId} board=${boardId} tool=${toolName || '?'} status=${statusCode} bytes=${body.length} body=${safeStringifyForDebug(body)}`
+          );
+        });
+
+        let completionLogged = false;
+        const logCompletionOnce = () => {
+          if (completionLogged) {
+            return;
+          }
+          completionLogged = true;
+          logMcpCompletion(toolName, strippedBody);
+          appendWatchpartyToolsLog(boardId, logId, 'Completed', toolName, strippedBody);
+        };
+        res.once('finish', logCompletionOnce);
+        res.once('close', logCompletionOnce);
+
+        const replayBody = Buffer.from(JSON.stringify(strippedBody), 'utf8');
+        const replayReq = createReplayableRequest(req, replayBody);
+        if (replayReq.headers && typeof replayReq.headers === 'object') {
+          replayReq.headers = { ...replayReq.headers, 'content-length': String(replayBody.length) };
+        }
+        const handled = await runtime.handleApi(replayReq, res, url);
+        if (!handled) {
+          jsonReply(res, 404, { error: 'Not found' });
+        }
+      } catch (error) {
+        jsonReply(res, 500, { error: String(error?.message || error) });
+      }
+    })();
+    return;
+  }
+
   // All other /api/boards routes are handled by the platform-free runtime
   runtime.handleApi(req, res, url).then((handled) => {
     if (!handled) {
@@ -1768,23 +2472,23 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[board-server] listening on http://${HOST}:${PORT}`);
-  console.log('[board-server] endpoints:');
-  console.log('  GET  /healthz                               <- process liveness probe');
-  console.log(`  GET  ${apiBasePath}                          <- list boards`);
-  console.log(`  POST ${apiBasePath}  {id, label?}            <- register board`);
-  console.log(`  GET  ${apiBasePath}/:boardId/init-board`);
-  console.log(`  GET  ${apiBasePath}/:boardId/sse`);
-  console.log(`  GET  ${apiBasePath}/:boardId/board-status`);
-  console.log(`  POST ${apiBasePath}/:boardId/reset-runtime-from-seed-cards`);
-  console.log(`  POST ${apiBasePath}/:boardId/reverse-save-runtime-to-seed-cards`);
-  console.log(`  GET  ${apiBasePath}/:boardId/cards/:id`);
-  console.log(`  PATCH ${apiBasePath}/:boardId/cards/:id       <- update card content/data`);
-  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/retrigger <- refresh/restart card`);
-  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/actions   <- card actions, including chat-send`);
-  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/files`);
-  console.log(`  GET  ${apiBasePath}/:boardId/cards/:id/files/:idx`);
-  console.log(`  GET  ${apiBasePath}/:boardId/cards/:id/chats`);
-  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/chats/subscribe-sse`);
-  console.log(`  POST ${apiBasePath}/:boardId/cards/:id/chats/unsubscribe-sse`);
+  logBoardServerLine(`listening on http://${HOST}:${PORT}`);
+  logBoardServerLine('endpoints:');
+  logBoardServerLine('  GET  /healthz                               <- process liveness probe');
+  logBoardServerLine(`  GET  ${apiBasePath}                          <- list boards`);
+  logBoardServerLine(`  POST ${apiBasePath}  {id, label?}            <- register board`);
+  logBoardServerLine(`  GET  ${apiBasePath}/:boardId/init-board`);
+  logBoardServerLine(`  GET  ${apiBasePath}/:boardId/sse`);
+  logBoardServerLine(`  GET  ${apiBasePath}/:boardId/board-status`);
+  logBoardServerLine(`  POST ${apiBasePath}/:boardId/reset-runtime-from-seed-cards`);
+  logBoardServerLine(`  POST ${apiBasePath}/:boardId/reverse-save-runtime-to-seed-cards`);
+  logBoardServerLine(`  GET  ${apiBasePath}/:boardId/cards/:id`);
+  logBoardServerLine(`  PATCH ${apiBasePath}/:boardId/cards/:id       <- update card content/data`);
+  logBoardServerLine(`  POST ${apiBasePath}/:boardId/cards/:id/retrigger <- refresh/restart card`);
+  logBoardServerLine(`  POST ${apiBasePath}/:boardId/cards/:id/actions   <- card actions, including chat-send`);
+  logBoardServerLine(`  POST ${apiBasePath}/:boardId/cards/:id/files`);
+  logBoardServerLine(`  GET  ${apiBasePath}/:boardId/cards/:id/files/:idx`);
+  logBoardServerLine(`  GET  ${apiBasePath}/:boardId/cards/:id/chats`);
+  logBoardServerLine(`  POST ${apiBasePath}/:boardId/cards/:id/chats/subscribe-sse`);
+  logBoardServerLine(`  POST ${apiBasePath}/:boardId/cards/:id/chats/unsubscribe-sse`);
 });

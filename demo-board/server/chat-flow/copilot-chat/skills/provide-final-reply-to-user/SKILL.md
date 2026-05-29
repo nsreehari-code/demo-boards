@@ -1,8 +1,8 @@
 ---
 name: provide-final-reply-to-user
 description: >
-  Stage the single final assistant reply for a card via the staged
-  `provide-response-to-user.js` wrapper.
+  Stage the single final assistant reply for a card through
+  `liveboards.stage-ai-response-and-any-attachments`.
 ---
 
 # Provide Final Reply To User
@@ -12,42 +12,34 @@ description: >
 Use this skill only at the very end of an assistant turn, when the final
 user-visible reply text is ready.
 
-This stages the terminal reply for the current turn. The mediator appends it to
-chat history after your run completes. It is not for internal notes, status
-updates, reasoning traces, tool transcripts, partial drafts, orchestration
-state, or duplicate replies.
+This stages the terminal reply for the current turn. Use only for the final user-visible reply — not for intermediate notes, status, reasoning traces, or duplicate replies.
 
-To read chat history (current card or other cards on the board), use
-`inspect-board-and-card-state`.
+## MCP Surface
 
-## Command Surface
+Use `liveboards.stage-ai-response-and-any-attachments`.
 
-Run from the Copilot workspace root.
-
-```bash
-cat payload.json | node ./.github/scripts/provide-response-to-user.js --card-id <card-id>
-```
-
-Payload:
+Arguments:
 
 ```json
-{ "text": "<final-user-reply>", "files": [] }
+{
+  "board_id": "<boardId>",
+  "log_id": "<logId>",
+  "card_id": "<cardId>",
+  "turn-id": "<turnId>",
+  "text": "<final-user-reply>",
+  "files": []
+}
 ```
 
-`text` is staged as the final reply payload. If `files` are provided, they are
-staged into the same response container with generated file names.
-
-Use the runtime handles passed into the prompt for `cardId`.
+Pass the runtime handles supplied in the prompt: `boardId` as `board_id`,
+`logId` as `log_id` (opaque; forward unchanged), `cardId` as `card_id`, and
+`turnId` as `turn-id`. All four are required.
 
 ## Rules
 
-- Call exactly once per completed assistant turn.
-- `text` must be the final user-visible reply, not a draft.
-- If `files` is provided, treat it as staged side data in the same container.
-- Only `text` is currently consumed by the mediator after the run completes.
-- Do not write partial responses or duplicate replies into the staged final-reply container.
-- Do not use this skill to mutate processing state, config, or session
-  metadata.
+- Call exactly once per turn.
+- `text` is the final user-visible reply, not a draft or status update.
+- If `files` is provided, it is staged as side data on the same assistant message.
 
 ## Handoff
 

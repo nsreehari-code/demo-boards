@@ -3,21 +3,15 @@ name: preflight-card-changes
 description: >
   Validate and repair a candidate card before persisting it live: structure
   validation, lightweight source probe, real source fetch, compute and view
-  materialization, and full-cycle simulation. Wraps the `preflight-*` family.
+  materialization, and full-cycle simulation. Wraps the `liveboards.preflight.*`
+  family.
 ---
 
 # Preflight Card Changes
 
 ## When To Use
 
-Use this skill whenever you create or edit a board card and need a reliable
-correctness loop before treating the card as done.
-
-This is the authoritative correctness skill. A card create / edit / repair task
-is not complete until the relevant checks here have passed for the changed
-card.
-
-Especially required when the change touches:
+Use this skill after creating or editing a card to verify correctness before finishing. Especially valuable when the change touches:
 
 - `source_defs[]`
 - `compute[]`
@@ -34,13 +28,12 @@ not needed.
 - Keep the card's execution order coherent:
   `source_defs[]` -> `fetched_sources.*` -> `compute[]` -> `computed_values.*` -> `view` and `provides[]`.
 - `source_defs` is configuration, not a runtime namespace. Bindings that read
-  fetched data must point at `fetched_sources.*`.
-- `provides[].ref` must resolve from `card_data`, `requires`, `fetched_sources`,
+  fetched data point at `fetched_sources.*`.
+- `provides[].ref` resolves from `card_data`, `requires`, `fetched_sources`,
   or `computed_values`.
 - `requires[]` is a token-name array. Expressions consume them as
   `requires.<key>` or `$lookup(requires, 'my-key')` for hyphenated names.
-- LLM behavior belongs in `source_defs[]`; do not repair by inventing a
-  parallel non-source mechanism.
+- LLM behavior belongs in `source_defs[]`; avoid parallel non-source mechanisms.
 - `projections` on a source may read only from `card_data` and `requires`.
 
 ## Validator Expectations
@@ -54,22 +47,17 @@ not needed.
   within the card.
 - `view.elements` exists and each element kind is valid.
 
-## Command Surface
+## MCP Surface
 
-Run these commands from the Copilot workspace root using the staged CLI in
-`.github/scripts`. All commands are payload-driven and read JSON from stdin
-unless noted.
+Pass the runtime `boardId` as `board_id` and the runtime `logId` as `log_id`
+(opaque; forward unchanged). Add the runtime `cardId` as `card_id` only when
+the tool targets an existing live card.
 
 ### 1. Validate card structure and semantics
 
-```bash
-cat payload.json | node ./.github/scripts/preflight-validate-candidate-card-definition.js
-```
-
-Payload:
-
 ```json
-{ "candidate_card_content": { /* card */ } }
+Tool: liveboards.preflight.validate-candidate-card-definition
+Arguments: { "board_id": "<boardId>", "log_id": "<logId>", "candidate_card_content": { /* card */ } }
 ```
 
 Result:
@@ -80,8 +68,15 @@ Result:
 
 ### 2. Lightweight source readiness probe
 
-```bash
-cat payload.json | node ./.github/scripts/preflight-probe-single-source-in-candidate-card.js --source-idx 0
+```json
+Tool: liveboards.preflight.probe-single-source-in-candidate-card
+Arguments: {
+  "board_id": "<boardId>",
+  "log_id": "<logId>",
+  "candidate_card_content": { /* card */ },
+  "source_idx": 0,
+  "mock_projections": {}
+}
 ```
 
 Use only for readiness / connectivity / configuration probing. Not a proof
@@ -89,20 +84,18 @@ the real fetch works.
 
 ### 3. Real source fetch preflight (authoritative)
 
-```bash
-cat payload.json | node ./.github/scripts/preflight-run-single-source-in-candidate-card.js --source-idx 0
-```
-
-Payload:
-
 ```json
-{
+Tool: liveboards.preflight.run-single-source-in-candidate-card
+Arguments: {
+  "board_id": "<boardId>",
+  "log_id": "<logId>",
   "candidate_card_content": { "id": "...", "source_defs": [ /* ... */ ] },
-  "mock_projections": { /* may be empty */ }
+  "source_idx": 0,
+  "mock_projections": {}
 }
 ```
 
-Required: `--source-idx <n>` (zero-based index in `source_defs[]`). If you
+Required: `source_idx` (zero-based index in `source_defs[]`). If you
 know the source by `bindTo`, resolve it to its index via
 `inspect-board-and-card-state` first.
 
@@ -110,64 +103,72 @@ This runs the selected source's real fetch path end to end. It is not a
 synthetic dry run. Use this as the authoritative source preflight whenever
 the agent must prove the authored source actually works.
 
-### 4. Materialize compute, `provides[]`, and `view`
-
-```bash
-cat payload.json | node ./.github/scripts/preflight-materialize-candidate-card.js
-```
-
-Payload:
+### 4. Real source fetch against an existing live card
 
 ```json
-{
-  "candidate_card_content": { /* card */ },
-  "mock_fetched_sources": { /* may be empty */ },
-  "mock_requires": { /* may be empty */ }
+Tool: liveboards.preflight.run-single-source-in-live-card
+Arguments: {
+  "board_id": "<boardId>",
+  "log_id": "<logId>",
+  "card_id": "<cardId>",
+  "source_idx": 0,
+  "mock_requires": {}
 }
 ```
 
-Returns `computed_values`, `provided_outputs`, and `view_model` together.
+Use this when the source already exists on the live card and you want to test
+that saved definition directly instead of sending `candidate_card_content`.
 
-### 5. Full card-cycle simulation
-
-```bash
-cat payload.json | node ./.github/scripts/preflight-run-one-cycle-with-candidate-card.js
-```
-
-Payload:
+### 5. Materialize compute, `provides[]`, and `view`
 
 ```json
-{
+Tool: liveboards.preflight.materialize-candidate-card
+Arguments: {
+  "board_id": "<boardId>",
+  "log_id": "<logId>",
   "candidate_card_content": { /* card */ },
-  "mock_requires": { /* may be empty */ }
+  "mock_fetched_sources": {},
+  "mock_requires": {}
 }
 ```
 
-Runs validation, projection resolution, source preflight, compute, materialized
-`provides[]`, and `view_model` in one pass. Returns `validation`,
-`projection_errors`, `computed_values`, `compute_errors`, `provided_outputs`,
-`view_model`, and top-level `ok`. Use only when narrower checks are insufficient
-or when a cross-layer inconsistency is suspected.
+Returns `computed_values`, `provides_outputs`, and `rendered_view` together.
+
+### 6. Full card-cycle simulation
+
+```json
+Tool: liveboards.preflight.run-one-cycle-with-candidate-card
+Arguments: {
+  "board_id": "<boardId>",
+  "log_id": "<logId>",
+  "candidate_card_content": { /* card */ },
+  "mock_requires": {}
+}
+```
+
+Runs validation, source preflight, compute, and view materialization in one pass. Returns top-level `ok`, `issues` (flattened from all layers), `provides_outputs`, and `rendered_view`. Use only when narrower checks are insufficient or when a cross-layer inconsistency is suspected.
 
 ## Choosing What To Run
 
 Run only what the change you made actually needs. There is no fixed order.
 
 - **You changed only `compute[]`, `provides[]`, or `view`** — run
-  `preflight-materialize-candidate-card.js`. Source preflight is irrelevant.
+  `liveboards.preflight.materialize-candidate-card`. Source preflight is irrelevant.
 - **You changed one `source_defs[]` entry** — run
-  `preflight-validate-candidate-card-definition.js` (cheap; catches schema and
-  shape mistakes), then `preflight-run-single-source-in-candidate-card.js`
-  with the right `--source-idx`. Skip the materialize step unless `compute[]`,
+  `liveboards.preflight.validate-candidate-card-definition` (cheap; catches schema and
+  shape mistakes), then `liveboards.preflight.run-single-source-in-candidate-card`
+  with the right `source_idx`. Skip the materialize step unless `compute[]`,
   `provides[]`, or `view` also changed.
 - **You only adjusted the source author-fields and want a quick sanity check
   before paying the real fetch cost** — use
-  `preflight-probe-single-source-in-candidate-card.js`. Don't treat that as
+  `liveboards.preflight.probe-single-source-in-candidate-card`. Don't treat that as
   proof the real fetch works.
+- **You changed a saved live card and want to test one source directly on that live card** — use
+  `liveboards.preflight.run-single-source-in-live-card`.
 - **Validation is failing** — repair the card definition first. Nothing
   downstream is meaningful until validation is clean.
 - **Targeted checks pass but the card still looks wrong** — run
-  `preflight-run-one-cycle-with-candidate-card.js` to surface cross-layer
+  `liveboards.preflight.run-one-cycle-with-candidate-card` to surface cross-layer
   inconsistencies. Don't reach for this first.
 - **A repair changes the card itself** — persist through
   `manage-cards-on-live-board` (`upsert-card`) before re-checking.
@@ -200,12 +201,6 @@ Common routing:
 
 ## Payload Construction Rules
 
-- Validation only: `{ "candidate_card_content": <card> }`.
-- Probing a source: `{ "candidate_card_content": <card>, "mock_projections": { /* ... */ } }`.
-- Evaluating compute, `provides[]`, or `view`:
-  `{ "candidate_card_content": <card>, "mock_fetched_sources": { /* ... */ }, "mock_requires": { /* ... */ } }`.
-- Simulating one cycle: `{ "candidate_card_content": <card>, "mock_requires": { /* ... */ } }`
-  with `preflight-run-one-cycle-with-candidate-card.js`.
 - Required top-level fields must be present even when their values are empty
   objects.
 - Use realistic field names but keep payloads as small as possible.
@@ -214,17 +209,11 @@ Common routing:
 
 ## Scope Discipline
 
-- Start with the one card you changed.
-- Never change the `id` of a card.
-- Start with the one source index or compute path you changed.
+- Focus on the one card and the specific source, compute path, or layer you changed.
 - Use minimal mocks, not full board snapshots.
 - Escalate to full-cycle only when narrower checks are insufficient.
-- Repair the card itself, not unrelated board infrastructure.
 
 ## Related Skills
-
-These are not next steps in a pipeline — reach for them when the intent
-shifts:
 
 - `manage-cards-on-live-board` — when a check fails and the card itself needs
   changing.

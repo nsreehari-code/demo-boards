@@ -4,17 +4,58 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { parseRef, serializeRef } from 'yaml-flow/board-worker-adapter';
 import { publishStagedAttachments as publishManagedAiGeneratedAttachments } from './manage-ai-generated-attachments.js';
 
 let CHAT_STORE_CLI = '';
 let CARD_STORE_CLI = '';
 let BOARD_LIVE_CARDS_CLI = '';
+const DEFAULT_MCP_SERVER_URL = 'http://127.0.0.1:7801/mcp';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const BOARD_ROOT = path.resolve(__dirname, '..', '..');
+const SERVER_CONFIG_PATH = path.join(BOARD_ROOT, 'server-config.json');
 const require = createRequire(import.meta.url);
 const YAML_FLOW_BUNDLED_CLI_DIR = path.dirname(require.resolve('yaml-flow/cli-bundled/board-live-cards-cli.mjs'));
 export const FINAL_RESPONSE_FILE_NAME = '001-response.txt';
 const FILE_STAGE_PREFIX = '100-file-';
+
+function loadServerConfig() {
+  if (!fs.existsSync(SERVER_CONFIG_PATH)) {
+    return {};
+  }
+  try {
+    const raw = fs.readFileSync(SERVER_CONFIG_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const serverConfig = loadServerConfig();
+
+export function resolveAssistantDebugEnabled() {
+  return serverConfig?.ENABLE_ASSISTANT_DEBUG === true;
+}
+
+export function resolveAssistantDebugFile() {
+  const value = typeof serverConfig?.DEBUG_ASSISTANT_FILE === 'string'
+    ? serverConfig.DEBUG_ASSISTANT_FILE.trim()
+    : '';
+  return value;
+}
+
+function resolveLiveboardsMcpServerUrl() {
+  const envOverride = typeof process.env.DEMO_BOARDS_MCP_SERVER_URL === 'string'
+    ? process.env.DEMO_BOARDS_MCP_SERVER_URL.trim()
+    : '';
+  const configuredUrl = typeof serverConfig?.mcpServerUrl === 'string'
+    ? serverConfig.mcpServerUrl.trim()
+    : '';
+  return envOverride || configuredUrl || DEFAULT_MCP_SERVER_URL;
+}
 
 function resolveFsPathRef(ref, fieldName) {
   requireNonEmptyString(ref, fieldName);
@@ -56,6 +97,109 @@ export function requireRequiredStrings(fields, contextLabel = 'handler') {
   for (const [fieldName, value] of Object.entries(fields)) {
     requireNonEmptyString(value, fieldName, contextLabel);
   }
+}
+
+function appendRequiredLogId(args, logId, contextLabel) {
+  requireNonEmptyString(logId, 'logId', contextLabel);
+  return {
+    ...args,
+    log_id: logId.trim(),
+  };
+}
+
+export async function callLiveboardsTool(toolName, args = {}) {
+  const transport = new StreamableHTTPClientTransport(new URL(resolveLiveboardsMcpServerUrl()));
+  const client = new Client({ name: 'demo-board-chat-flow', version: '0.1.0' }, { capabilities: {} });
+
+  try {
+    await client.connect(transport);
+    const result = await client.callTool({ name: toolName, arguments: args });
+    if (result?.isError) {
+      const errorText = Array.isArray(result?.content)
+        ? result.content.map((entry) => (typeof entry?.text === 'string' ? entry.text : '')).join('')
+        : '';
+      throw new Error(errorText || `${toolName} failed`);
+    }
+
+    if (result && Object.prototype.hasOwnProperty.call(result, 'structuredContent')) {
+      return result.structuredContent;
+    }
+
+    const text = Array.isArray(result?.content)
+      ? result.content.map((entry) => (typeof entry?.text === 'string' ? entry.text : '')).join('')
+      : '';
+    if (!text) {
+      return null;
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  } finally {
+    try { await client.close(); } catch {}
+    try { await transport.close(); } catch {}
+  }
+}
+
+export async function readChatMessagesViaMcp(boardId, cardId, options = {}) {
+  requireRequiredStrings({ boardId, cardId }, 'liveboards chat read');
+  const args = appendRequiredLogId({
+    board_id: boardId,
+    card_id: cardId,
+    ...(options?.tailTurns !== undefined && options?.tailTurns !== null ? { 'tail-turns': options.tailTurns } : {}),
+    ...(options?.tail !== undefined && options?.tail !== null ? { tail: options.tail } : {}),
+    ...(typeof options?.turnId === 'string' && options.turnId.trim() ? { 'turn-id': options.turnId.trim() } : {}),
+    ...(options?.allTurns === true ? { 'all-turns': true } : {}),
+    ...(typeof options?.tailTurnsBeforeId === 'string' && options.tailTurnsBeforeId.trim()
+      ? { 'tail-turns-before-id': options.tailTurnsBeforeId.trim() }
+      : {}),
+  }, options?.logId, 'liveboards chat read');
+  const result = await callLiveboardsTool('liveboards.inspect.chat-messages-on-cards', args);
+  if (result?.status !== 'success') {
+    throw new Error(`liveboards.inspect.chat-messages-on-cards returned unexpected payload: ${JSON.stringify(result)}`);
+  }
+  return Array.isArray(result?.data?.messages) ? result.data.messages : [];
+}
+
+export async function readAttachmentTextViaMcp(boardId, cardId, fileIndex, options = {}) {
+  requireRequiredStrings({ boardId, cardId }, 'liveboards attachment read');
+  if (!Number.isInteger(fileIndex) || fileIndex < 0) {
+    throw new Error('liveboards attachment read requires a non-negative file index');
+  }
+
+  const result = await callLiveboardsTool('liveboards.inspect.file-contents', appendRequiredLogId({
+    board_id: boardId,
+    card_id: cardId,
+    file_idx: fileIndex,
+  }, options?.logId, 'liveboards attachment read'));
+  const resource = Array.isArray(result)
+    ? result.find((entry) => entry?.type === 'resource' && typeof entry?.resource?.blob === 'string')
+    : null;
+  if (!resource?.resource?.blob) {
+    return '';
+  }
+
+  try {
+    return Buffer.from(resource.resource.blob, 'base64').toString('utf-8');
+  } catch {
+    return '';
+  }
+}
+
+export async function stageAssistantReplyViaMcp(boardId, cardId, turnId, text, files = [], options = {}) {
+  requireRequiredStrings({ boardId, cardId, turnId }, 'liveboards assistant reply stage');
+  const result = await callLiveboardsTool('liveboards.stage-ai-response-and-any-attachments', appendRequiredLogId({
+    board_id: boardId,
+    card_id: cardId,
+    'turn-id': turnId,
+    text,
+    files: Array.isArray(files) ? files : [],
+  }, options?.logId, 'liveboards assistant reply stage'));
+  if (result?.status !== 'success') {
+    throw new Error(`liveboards.stage-ai-response-and-any-attachments returned unexpected payload: ${JSON.stringify(result)}`);
+  }
+  return result.data;
 }
 
 function requireConfiguredCliPath(cliPath, cliLabel) {
@@ -145,10 +289,23 @@ function sleepMs(ms) {
 }
 
 function readChatRecordsOnce(chatStoreRef, cardId, timeoutMs = 30000, options = {}) {
-  const { lastUserTurns = null } = options ?? {};
-  const command = lastUserTurns === null
-    ? { command: 'read-all' }
-    : { command: 'read-all', lastUserTurns };
+  const {
+    lastUserTurns = null,
+    tailTurns = null,
+    turnId = '',
+    allTurns = false,
+    tailTurnsBeforeId = '',
+  } = options ?? {};
+  const command = {
+    command: 'read-all',
+    ...(tailTurns === null && lastUserTurns !== null ? { lastUserTurns } : {}),
+    ...(tailTurns !== null ? { tailTurns } : {}),
+    ...(typeof turnId === 'string' && turnId.trim() ? { turnId: turnId.trim() } : {}),
+    ...(allTurns === true ? { allTurns: true } : {}),
+    ...(typeof tailTurnsBeforeId === 'string' && tailTurnsBeforeId.trim()
+      ? { tailTurnsBeforeId: tailTurnsBeforeId.trim() }
+      : {}),
+  };
   const parsed = runChatStoreCommands(
     chatStoreRef,
     cardId,
@@ -258,7 +415,7 @@ function enhanceChatMessageWithAttachmentHint(message, cardId, attachments) {
     const fileIndex = parseSystemMessageFileIndex(messageText);
     const hasAttachment = fileIndex !== null && attachments.some((attachment) => attachment.idx === fileIndex);
     if (hasAttachment) {
-      const retrievalHint = `Retrieve using inspect-file-contents.js --card-id ${cardId} --file-idx ${fileIndex}`;
+      const retrievalHint = `Retrieve using liveboards.inspect.file-contents with current boardId, card_id ${cardId}, file_idx ${fileIndex}`;
       enhanced.retrieval_hint = retrievalHint;
       if (message?.payload && typeof message?.role !== 'string') {
         enhanced.payload = {
@@ -324,11 +481,11 @@ export function readLastChatMessage(chatStoreRef, cardId, timeoutMs = 30000) {
   return null;
 }
 
-export function appendAssistantReply(chatStoreRef, cardId, replyText, timeoutMs = 30000) {
+export function appendAssistantReply(chatStoreRef, cardId, replyText, timeoutMs = 30000, turnId = '') {
   const parsed = runChatStoreCommands(
     chatStoreRef,
     cardId,
-    [{ command: 'append', role: 'assistant', text: replyText, files: [] }],
+    [{ command: 'append', role: 'assistant', text: replyText, files: [], ...(turnId ? { turn: turnId } : {}) }],
     timeoutMs,
   );
 
@@ -344,11 +501,11 @@ export function appendAssistantReply(chatStoreRef, cardId, replyText, timeoutMs 
   return replyId;
 }
 
-export function appendSystemMessage(chatStoreRef, cardId, messageText, timeoutMs = 30000) {
+export function appendSystemMessage(chatStoreRef, cardId, messageText, timeoutMs = 30000, turnId = '') {
   const parsed = runChatStoreCommands(
     chatStoreRef,
     cardId,
-    [{ command: 'append', role: 'system', text: messageText, files: [] }],
+    [{ command: 'append', role: 'system', text: messageText, files: [], ...(turnId ? { turn: turnId } : {}) }],
     timeoutMs,
   );
 
@@ -427,6 +584,7 @@ function publishStagedAttachments({
   chatStoreRef = '',
   cardStoreRef = '',
   artifactsStoreRef = '',
+  turnId = '',
 }) {
   const stagedFiles = listStagedAttachmentFiles(containerDir);
   if (stagedFiles.length === 0) {
@@ -440,6 +598,7 @@ function publishStagedAttachments({
     chatStoreRef,
     cardStoreRef,
     artifactsStoreRef,
+    turnId,
   });
 }
 
@@ -447,16 +606,6 @@ export function createFinalResponseContainer(scratchStoreRef, cardId, scopeName 
   requireRequiredStrings({ scratchStoreRef, cardId }, 'final response container');
   const scratchDir = resolveStoreDir(scratchStoreRef, 'scratchStoreRef');
   const containerDir = path.join(scratchDir, scopeName, cardId, randomUUID());
-  fs.mkdirSync(containerDir, { recursive: true });
-  return {
-    containerDir,
-    responseFilePath: path.join(containerDir, FINAL_RESPONSE_FILE_NAME),
-  };
-}
-
-export function createFinalResponseContainerFromRoot(finalResponseRootDir, cardId) {
-  requireRequiredStrings({ finalResponseRootDir, cardId }, 'final response container');
-  const containerDir = path.join(finalResponseRootDir, cardId);
   fs.mkdirSync(containerDir, { recursive: true });
   return {
     containerDir,
@@ -525,6 +674,7 @@ export function publishFinalResponseFromContainer({
   containerDir = '',
   replyText = '',
   timeoutMs = 30000,
+  turnId = '',
 } = {}) {
   requireRequiredStrings({ chatStoreRef, cardId, containerDir, replyText }, 'final response publish');
 
@@ -537,10 +687,11 @@ export function publishFinalResponseFromContainer({
       chatStoreRef,
       cardStoreRef,
       artifactsStoreRef,
+      turnId,
     })
     : null;
 
-  appendAssistantReply(chatStoreRef, cardId, replyText, timeoutMs);
+  appendAssistantReply(chatStoreRef, cardId, replyText, timeoutMs, turnId);
   clearFinalResponseContainer(containerDir);
 
   return {

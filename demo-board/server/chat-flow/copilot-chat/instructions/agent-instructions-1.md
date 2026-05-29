@@ -134,7 +134,7 @@ Consequences for you:
 
 ## Skill Surface (Use Skills First)
 
-Five generic skills cover the verb shapes you have on the board. They are
+These generic skills cover the verb shapes you have on the board. They are
 the same verbs at card scope and at board scope. Pick by intent:
 
 | Intent | Skill |
@@ -157,16 +157,15 @@ true when you stop":
   `preflight-card-changes` passes for the changed card.** When that gate
   passes is up to you; that it passes before you declare done is not.
 - **The final user-visible reply goes through `provide-final-reply-to-user`,
-  exactly once per turn.** That skill stages the terminal reply, and the
-  mediator appends it to chat history after the run completes.
+  exactly once per turn.** That skill calls the liveboards MCP surface to
+  stage the terminal reply directly onto the current card chat.
 - **Durable cross-card lore** is set through the `lore.*` MCP tools
   (`lore.get`, `lore.get_all`, `lore.list_scopes`, `lore.set`, `lore.append`,
   `lore.deprecate`) or delegated to the `lore-keeper` agent. Use scope
   `board/<boardId>` for board lore and `global` for cross-board user lore.
 
-Skills route through staged wrapper commands in `.github/scripts`
-(`discover-*`, `inspect-*`, `preflight-*`, `manage-*`, `provide-*`). Do not
-invoke the bundled `*-cli.mjs` libraries directly from skill workflows.
+Skills route through the `liveboards.*` MCP tools. Do not invoke retired
+wrapper scripts or bundled `*-cli.mjs` libraries from skill workflows.
 
 ## The Card As A Reactive Node
 

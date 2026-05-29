@@ -25,9 +25,13 @@
           "board_id": {
             "type": "string",
             "description": "Board ID to target via board-server."
+          },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
           }
         },
-        "required": ["board_id"],
+        "required": ["board_id", "log_id"],
         "additionalProperties": false
       }
     },
@@ -46,9 +50,13 @@
           "board_id": {
             "type": "string",
             "description": "Board ID to inspect."
+          },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
           }
         },
-        "required": ["board_id"],
+        "required": ["board_id", "log_id"],
         "additionalProperties": false
       }
     },
@@ -68,12 +76,16 @@
             "type": "string",
             "description": "Board ID to inspect."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "card_id": {
             "type": "string",
             "description": "Card ID to inspect."
           }
         },
-        "required": ["board_id", "card_id"],
+        "required": ["board_id", "log_id", "card_id"],
         "additionalProperties": false
       }
     },
@@ -93,6 +105,10 @@
             "type": "string",
             "description": "Board ID to inspect."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "card_id": {
             "type": "string",
             "description": "Card ID whose chat history should be read."
@@ -106,10 +122,6 @@
             "minimum": 0,
             "description": "Last N individual messages."
           },
-          "all-turns": {
-            "type": "boolean",
-            "description": "Return all turns (ignores tail-turns)."
-          },
           "tail-turns": {
             "type": "integer",
             "minimum": 0,
@@ -120,7 +132,7 @@
             "description": "Requires tail-turns; messages before the given turn id."
           }
         },
-        "required": ["board_id", "card_id"],
+        "required": ["board_id", "log_id", "card_id"],
         "additionalProperties": false
       }
     },
@@ -140,6 +152,10 @@
             "type": "string",
             "description": "Board ID to inspect."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "card_id": {
             "type": "string",
             "description": "Card ID owning the attachment."
@@ -150,7 +166,7 @@
             "description": "Zero-based attachment index."
           }
         },
-        "required": ["board_id", "card_id", "file_idx"],
+        "required": ["board_id", "log_id", "card_id", "file_idx"],
         "additionalProperties": false
       }
     },
@@ -170,12 +186,16 @@
             "type": "string",
             "description": "Board ID to target."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "candidate_card_content": {
             "type": "object",
             "description": "Candidate card content to validate."
           }
         },
-        "required": ["board_id", "candidate_card_content"],
+        "required": ["board_id", "log_id", "candidate_card_content"],
         "additionalProperties": false
       }
     },
@@ -195,6 +215,10 @@
             "type": "string",
             "description": "Board ID to target."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "candidate_card_content": {
             "type": "object",
             "description": "Candidate card content to materialize."
@@ -208,7 +232,7 @@
             "description": "Optional mocked requires values."
           }
         },
-        "required": ["board_id", "candidate_card_content", "mock_fetched_sources", "mock_requires"],
+        "required": ["board_id", "log_id", "candidate_card_content", "mock_fetched_sources", "mock_requires"],
         "additionalProperties": false
       }
     },
@@ -228,6 +252,10 @@
             "type": "string",
             "description": "Board ID to target."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "source_idx": {
             "type": "integer",
             "minimum": 0,
@@ -242,7 +270,7 @@
             "description": "Projection input values used for probing."
           }
         },
-        "required": ["board_id", "source_idx", "candidate_card_content", "mock_projections"],
+        "required": ["board_id", "log_id", "source_idx", "candidate_card_content", "mock_projections"],
         "additionalProperties": false
       }
     },
@@ -262,6 +290,10 @@
             "type": "string",
             "description": "Board ID to target."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "source_idx": {
             "type": "integer",
             "minimum": 0,
@@ -276,7 +308,7 @@
             "description": "Projection input values used for the source run."
           }
         },
-        "required": ["board_id", "source_idx", "candidate_card_content", "mock_projections"],
+        "required": ["board_id", "log_id", "source_idx", "candidate_card_content", "mock_projections"],
         "additionalProperties": false
       }
     },
@@ -296,6 +328,10 @@
             "type": "string",
             "description": "Board ID to target."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "card_id": {
             "type": "string",
             "description": "ID of an existing live card."
@@ -310,7 +346,7 @@
             "description": "Mock values for requires keys."
           }
         },
-        "required": ["board_id", "card_id", "source_idx", "mock_requires"],
+        "required": ["board_id", "log_id", "card_id", "source_idx", "mock_requires"],
         "additionalProperties": false
       }
     },
@@ -330,6 +366,10 @@
             "type": "string",
             "description": "Board ID to target."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "candidate_card_content": {
             "type": "object",
             "description": "Candidate card content to simulate."
@@ -339,7 +379,7 @@
             "description": "Requires values used during the simulated run."
           }
         },
-        "required": ["board_id", "candidate_card_content", "mock_requires"],
+        "required": ["board_id", "log_id", "candidate_card_content", "mock_requires"],
         "additionalProperties": false
       }
     },
@@ -359,12 +399,16 @@
             "type": "string",
             "description": "Board ID to target."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "card_id": {
             "type": "string",
             "description": "Card ID to read."
           }
         },
-        "required": ["board_id", "card_id"],
+        "required": ["board_id", "log_id", "card_id"],
         "additionalProperties": false
       }
     },
@@ -384,6 +428,10 @@
             "type": "string",
             "description": "Board ID to target."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "card_id": {
             "type": "string",
             "description": "Card ID to upsert."
@@ -393,17 +441,17 @@
             "description": "Full candidate card content to persist."
           }
         },
-        "required": ["board_id", "card_id", "candidate_card_content"],
+        "required": ["board_id", "log_id", "card_id", "candidate_card_content"],
         "additionalProperties": false
       }
     },
     {
-      "name": "liveboards.manage.deprecate",
-      "title": "Live Boards Manage Deprecate",
-      "description": "Remove a card from the live board.",
+      "name": "liveboards.manage.remove-card",
+      "title": "Live Boards Manage Remove Card",
+      "description": "Remove a card from the live board runtime and storage.",
       "handler": "liveboards.mcp",
       "config": {
-        "remoteTool": "manage.deprecate",
+        "remoteTool": "manage.remove-card",
         "configPath": "../liveboards.config.json"
       },
       "inputSchema": {
@@ -413,12 +461,16 @@
             "type": "string",
             "description": "Board ID to target."
           },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
+          },
           "card_id": {
             "type": "string",
             "description": "Card ID to remove."
           }
         },
-        "required": ["board_id", "card_id"],
+        "required": ["board_id", "log_id", "card_id"],
         "additionalProperties": false
       }
     },
@@ -437,6 +489,10 @@
           "board_id": {
             "type": "string",
             "description": "Board ID to target."
+          },
+          "log_id": {
+            "type": "string",
+            "description": "Opaque routing token. Pass through unchanged from the runtime handles."
           },
           "card_id": {
             "type": "string",
@@ -458,7 +514,7 @@
             }
           }
         },
-        "required": ["board_id", "card_id", "text"],
+        "required": ["board_id", "log_id", "card_id", "text", "turn-id"],
         "additionalProperties": false
       }
     }

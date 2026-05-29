@@ -28,6 +28,36 @@ function toJsonToolResult(result) {
   };
 }
 
+function classifyMimeType(mimeType) {
+  const baseType = String(mimeType || '').split(';')[0].trim().toLowerCase();
+  if (!baseType) return 'binary';
+  if (baseType.startsWith('text/')) return 'text';
+  if (baseType.startsWith('image/')) return 'image';
+  if (baseType.startsWith('audio/')) return 'audio';
+  if (
+    baseType === 'application/json'
+    || baseType === 'application/xml'
+    || baseType === 'application/javascript'
+    || baseType === 'application/x-yaml'
+    || baseType === 'application/yaml'
+    || baseType.endsWith('+json')
+    || baseType.endsWith('+xml')
+  ) {
+    return 'text';
+  }
+  return 'binary';
+}
+
+function decodeTextual(bodyBytes, mimeType) {
+  try {
+    const charsetMatch = /charset=([^;]+)/i.exec(String(mimeType || ''));
+    const encoding = (charsetMatch?.[1] || 'utf8').trim().toLowerCase().replace(/^utf-/, 'utf');
+    return Buffer.from(bodyBytes).toString(Buffer.isEncoding(encoding) ? encoding : 'utf8');
+  } catch {
+    return Buffer.from(bodyBytes).toString('utf8');
+  }
+}
+
 function toRawToolResult(toolName, boardId, args, response) {
   const cardId = typeof args?.card_id === 'string' && args.card_id.trim()
     ? args.card_id.trim()
@@ -38,21 +68,50 @@ function toRawToolResult(toolName, boardId, args, response) {
   const resourceName = Number.isInteger(fileIdx)
     ? `${cardId}/attachments/${fileIdx}`
     : `${cardId}/attachments/raw`;
+  const resourceUri = `liveboards://${encodeURIComponent(boardId)}/${resourceName}`;
+  const mimeType = response.headers.get('content-type') || 'application/octet-stream';
+  const kind = classifyMimeType(mimeType);
+  const meta = {
+    'liveboards/raw-tool': toolName,
+    'liveboards/mime-type': mimeType,
+    'liveboards/resource-uri': resourceUri,
+  };
+
+  if (kind === 'text') {
+    return {
+      content: [{ type: 'text', text: decodeTextual(response.bodyBytes, mimeType) }],
+      _meta: meta,
+    };
+  }
+
+  const base64 = Buffer.from(response.bodyBytes).toString('base64');
+
+  if (kind === 'image') {
+    return {
+      content: [{ type: 'image', data: base64, mimeType }],
+      _meta: meta,
+    };
+  }
+
+  if (kind === 'audio') {
+    return {
+      content: [{ type: 'audio', data: base64, mimeType }],
+      _meta: meta,
+    };
+  }
 
   return {
     content: [
       {
         type: 'resource',
         resource: {
-          uri: `liveboards://${encodeURIComponent(boardId)}/${resourceName}`,
-          mimeType: response.headers.get('content-type') || 'application/octet-stream',
-          blob: Buffer.from(response.bodyBytes).toString('base64'),
+          uri: resourceUri,
+          mimeType,
+          blob: base64,
         },
       },
     ],
-    _meta: {
-      'liveboards/raw-tool': toolName,
-    },
+    _meta: meta,
   };
 }
 
@@ -90,9 +149,14 @@ function loadLiveboardsConfig(tool) {
     }
   }
 
-  const boardServerUrl = typeof config.boardServerUrl === 'string' && config.boardServerUrl.trim()
-    ? config.boardServerUrl.trim()
-    : DEFAULT_BOARD_SERVER_URL;
+  const envOverride = typeof process.env.DEMO_BOARD_SERVER_URL === 'string' && process.env.DEMO_BOARD_SERVER_URL.trim()
+    ? process.env.DEMO_BOARD_SERVER_URL.trim()
+    : null;
+
+  const boardServerUrl = envOverride
+    ?? (typeof config.boardServerUrl === 'string' && config.boardServerUrl.trim()
+      ? config.boardServerUrl.trim()
+      : DEFAULT_BOARD_SERVER_URL);
 
   return {
     boardServerUrl,

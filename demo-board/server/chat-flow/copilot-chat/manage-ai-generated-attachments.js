@@ -139,15 +139,19 @@ function uploadArtifact(artifactsStoreRef, artifactKey, filePath, mimeType) {
   return runJsonScript(artifactsStoreCliPath, args);
 }
 
-function appendSystemMessage(chatStoreRef, cardId, messageText) {
-  const raw = runTextScript(chatStoreCliPath, [
+function appendSystemMessage(chatStoreRef, cardId, messageText, turnId = '') {
+  const args = [
     'append',
     '--store-ref', chatStoreRef,
     '--card-id', cardId,
     '--role', 'system',
     '--text', messageText,
     '--files-json', '[]',
-  ]);
+  ];
+  if (typeof turnId === 'string' && turnId.trim()) {
+    args.push('--turn', turnId.trim());
+  }
+  const raw = runTextScript(chatStoreCliPath, args);
   return raw ? JSON.parse(raw) : null;
 }
 
@@ -169,6 +173,7 @@ export function publishStagedAttachments({
   attachmentsContainerDir,
   chatStoreRef: explicitChatStoreRef = '',
   artifactsStoreRef: explicitArtifactsStoreRef = '',
+  turnId = '',
 }) {
   const chatStoreRef = explicitChatStoreRef || readStoreRef(baseRef, 'get-chat-store-ref', 'get-chat-store-ref');
   const artifactsStoreRef = explicitArtifactsStoreRef || readStoreRef(baseRef, 'get-artifacts-store-ref', 'get-artifacts-store-ref');
@@ -226,7 +231,7 @@ export function publishStagedAttachments({
       : (typeof entry.stored_name === 'string' ? entry.stored_name : 'attachment');
     return {
       file: typeof entry.stored_name === 'string' ? entry.stored_name : displayName,
-      message: appendSystemMessage(chatStoreRef, cardId, `AI generated: ${displayName} #${idx}`),
+      message: appendSystemMessage(chatStoreRef, cardId, `AI generated: ${displayName} #${idx}`, turnId),
     };
   });
 

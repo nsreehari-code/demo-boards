@@ -2,7 +2,8 @@
 name: inspect-board-and-card-state
 description: >
   Read-only inspection of a live board: runtime status and a full card view
-  (definition + runtime outputs + computed values + file refs).
+  (definition + runtime outputs + computed values + file refs) through
+  `liveboards.inspect.*` and `liveboards.manage.read-card`.
 ---
 
 # Inspect Board And Card State
@@ -19,19 +20,19 @@ Typical questions this skill answers:
 - What did this card publish or compute?
 - What does this card's definition look like?
 
-Don't use this skill to change a card, save anything, or send the final
-user-visible reply. Use `inspect-card-chat-history` when you need chat
-history, and `inspect-attachments-file-contents` when you need the contents of
-an attachment.
+All commands here are read-only.
 
-## Command Surface
+## MCP Surface
 
-Run these from the Copilot workspace root.
+Pass the runtime `boardId` as `board_id` and the runtime `logId` as `log_id`
+(opaque; forward unchanged). Add the runtime `cardId` as `card_id` when the
+tool targets a single card.
 
 ### Board runtime status
 
-```bash
-node ./.github/scripts/inspect-board-runtime-status.js read-status
+```json
+Tool: liveboards.inspect.board-runtime-status
+Arguments: { "board_id": "<boardId>", "log_id": "<logId>" }
 ```
 
 Returns a compact board-status shape:
@@ -46,13 +47,11 @@ Returns a compact board-status shape:
 }
 ```
 
-Use this when you need to know whether cards are completed, failed, pending,
-blocked, unresolved, or in progress.
-
 ### Full card view (definition + runtime + file refs)
 
-```bash
-node ./.github/scripts/inspect-card-definition-and-runtime.js --card-id <card-id>
+```json
+Tool: liveboards.inspect.card-definition-and-runtime
+Arguments: { "board_id": "<boardId>", "log_id": "<logId>", "card_id": "<cardId>" }
 ```
 
 Returns everything you usually need to reason about a single card — its
@@ -65,42 +64,31 @@ computed values, the rendered `view_model`, and any attached file refs:
   "card_status_in_board": { /* exact raw card object from board status */ },
   "card_definition_and_static_data": { /* exact stored card object */ },
   "refs-for-attached-files": [ { "index": 0, "file_ref": "..." } ],
-  "refs_for_fetched_sources_files": { "<outputFile>": "b64:..." },
+  "refs_for_fetched_source_files": { "<outputFile>": "sha256:..." },
   "runtime_data": {
     "requires": { "<token>": {} },
     "provides": { "<output-key>": {} },
     "computed_values": {},
-    "view_model": {}
+    "rendered_view": {
+      "layout": "...",
+      "features": {},
+      "elements": [ { "id": "...", "kind": "...", "label": "...", "visible": true, "resolved": "..." } ]
+    }
   }
 }
 ```
 
-This command does not run preflight, simulation, or compute evaluation. It just provides the current snapshot. Use it when you need to investigate or understand the card's current state for answering any queries or taking any actions, etc.
+This is a snapshot only — no preflight, simulation, or compute evaluation.
 
 ### Exact stored card JSON (use before repairing a card)
 
-```bash
-node ./.github/scripts/manage-live-board-card.js read-card --card-id <card-id>
+```json
+Tool: liveboards.manage.read-card
+Arguments: { "board_id": "<boardId>", "log_id": "<logId>", "card_id": "<cardId>" }
 ```
 
 Use this when you're about to edit a card and need its exact current shape
 as the starting point, without any runtime data mixed in.
-
-## Command Rules
-
-- Every command here is read-only. Don't change cards, runtime, or chat.
-- Reach for the full card view when you want both the card's definition and
-  what it has produced (outputs, computed values, view) in a single read.
-- Reach for `read-card` only when you're about to repair the card and need
-  its exact current shape.
-- Use `inspect-card-chat-history` when you need to inspect what was said on a
-  card or extract chat-level attachment refs.
-- Use `inspect-attachments-file-contents` when you already have a `file_ref`
-  and need the contents of an attachment.
-- If the task turns into changing a card or board membership, switch to
-  `manage-cards-on-live-board`.
-- If the task turns into checking that a card would actually work, switch to
-  `preflight-card-changes`.
 
 ## Choosing What To Read
 
@@ -108,19 +96,16 @@ Read only what the question needs. There is no fixed sequence — jump straight
 to the right command.
 
 - *"Why is this card stale / blocked / why hasn't this finished?"* —
-  `inspect-board-runtime-status.js read-status` for the board-wide picture.
+  `liveboards.inspect.board-runtime-status` for the board-wide picture.
 - *"What does this card show / what did it publish / how is it computed?"* —
-  `inspect-card-definition-and-runtime.js` for the full card view in one read.
+  `liveboards.inspect.card-definition-and-runtime` for the full card view in one read.
 - *"What did the user say about this card / what did we agree?"* — use
   `inspect-card-chat-history`.
 - *"I'm about to repair this card and need its exact current shape."* —
-  `manage-live-board-card.js read-card`. (Use the full card view instead if
+  `liveboards.manage.read-card`. (Use the full card view instead if
   you also need runtime context.)
 
 ## Related Skills
-
-These are not next steps in a pipeline — reach for them when the intent
-shifts:
 
 - `inspect-attachments-file-contents` — when you already have a `file_ref`
   and need the contents of an attached file.

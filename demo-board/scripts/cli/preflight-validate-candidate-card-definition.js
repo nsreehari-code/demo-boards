@@ -1,3 +1,0 @@
-#!/usr/bin/env node
-import{log_it as n}from"./shared_helpers.js";import{isHelpRequested as s,parseArgs as d,printJson as o,printUsage as c,readCandidateCardPayload as p,runBoardLiveCardsCli as l}from"./preflight-candidate-card-common.js";const e=["Usage:","  cat payload.json | node preflight-validate-candidate-card-definition.js","","Required payload shape:",'  { "candidate_card_content": <card> }'];function g(){const a=process.argv.slice(2);n("preflight-validate-candidate-card-definition.js",a.join(" "));const r=d(a);s(r)&&c(e,0);const i=p(e),t=l("validate-card-preflight",[],i);o(t)}try{g()}catch(a){process.stderr.write(`${a instanceof Error?a.message:String(a)}
-`),process.exit(1)}

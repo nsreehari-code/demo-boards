@@ -1,3 +1,0 @@
-#!/usr/bin/env node
-import{log_it as t}from"./shared_helpers.js";import{isHelpRequested as c,parseArgs as i,printJson as n,printUsage as d,readCandidateCardPayload as p,runBoardLiveCardsCli as l}from"./preflight-candidate-card-common.js";const r=["Usage:","  cat payload.json | node preflight-materialize-candidate-card.js","","Required payload shape:",'  { "candidate_card_content": <card>, "mock_requires": {...}, "mock_fetched_sources": {...} }'];function m(){const e=process.argv.slice(2);t("preflight-materialize-candidate-card.js",e.join(" "));const a=i(e);c(a)&&d(r,0);const s=p(r,["mock_requires","mock_fetched_sources"]),o=l("eval-card-compute",[],s);n(o)}try{m()}catch(e){process.stderr.write(`${e instanceof Error?e.message:String(e)}
-`),process.exit(1)}

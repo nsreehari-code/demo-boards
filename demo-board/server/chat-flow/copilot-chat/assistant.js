@@ -5,52 +5,36 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import {
-  appendAssistantReply,
-  clearFinalResponseContainer,
-  configureWorkspaceCliScripts,
-  createFinalResponseContainerFromRoot,
-  publishFinalResponseFromContainer,
+  readChatMessagesViaMcp,
   readEnhancedChatMessages,
-  readStagedFinalResponse,
+  configureWorkspaceCliScripts,
   readJsonStdin,
   requireRequiredStrings,
+  resolveAssistantDebugEnabled,
+  resolveAssistantDebugFile,
   resolveCopilotWorkspaceDir,
   resolveStoreDir,
+  stageAssistantReplyViaMcp,
 } from './shared.js';
+import {
+  resolveCopilotOutputFilePath,
+  resolveCopilotWatchpartyCardDir,
+} from './watchparty.js';
 
 const COPILOT_MODEL = 'gpt-5.4';
-const PROMPT_LAST_USER_TURNS = 4;
-
-function sanitizeWatchpartyToken(value) {
-  return String(value || '')
-    .trim()
-    .replace(/[^a-zA-Z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'unknown';
-}
-
-function getCopilotOutputFileName(cardId) {
-  return `${sanitizeWatchpartyToken(cardId)}-copilot-output.txt`;
-}
-
-function resolveCopilotOutputFilePath(dirPath, cId) {
-  return path.join(dirPath, getCopilotOutputFileName(cId));
-}
-
-function resolveCopilotToolsLogFilePath(dirPath, cId) {
-  return path.join(dirPath, `${sanitizeWatchpartyToken(cId)}-copilot-tools.txt`);
-}
 
 const extra = readJsonStdin();
 const {
   boardId = '',
   cardId = '',
+  logId = '',
+  turnId = '',
   baseRef = '',
   aiWorkspaceRoot = '',
   cardStoreRef = '',
   chatStoreRef = '',
   artifactsStoreRef = '',
   scratchStoreRef = '',
-  finalResponseRootDir = '',
   watchPartyFilesForChatDir = '',
   chatCopilotTimeoutMs: rawChatCopilotTimeoutMs = 300000,
 } = extra;
@@ -62,10 +46,14 @@ const bypassCopilotForTest = process.env.DEMO_T3A_BYPASS === '1';
 const ENABLE_DEBUG_LOGGING = typeof process.env.ENABLE_DEBUG_LOGGING === 'string' ? process.env.ENABLE_DEBUG_LOGGING.trim() : '';
 const DEBUG_LOG_PATH = ENABLE_DEBUG_LOGGING || path.join(os.tmpdir(), 'demo-board-t3a-assistant-debug.log');
 
+const DEBUG_FLAG = resolveAssistantDebugEnabled();
+const DEBUG_FILE_OVERRIDE = resolveAssistantDebugFile();
+
 const scratchDir = scratchStoreRef ? resolveStoreDir(scratchStoreRef, 'scratchStoreRef') : '';
-const DEBUG_LOG_FILE = scratchDir ? path.join(scratchDir, 'assistant-debug.jsonl') : '';
+const DEBUG_LOG_FILE = DEBUG_FILE_OVERRIDE
+  || (scratchDir ? path.join(scratchDir, 'assistant-debug.jsonl') : '');
 const copilotOutputFile = watchPartyFilesForChatDir ? resolveCopilotOutputFilePath(watchPartyFilesForChatDir, cardId) : '';
-const chatCardWatchPartyFile = watchPartyFilesForChatDir ? resolveCopilotToolsLogFilePath(watchPartyFilesForChatDir, cardId) : '';
+const copilotWatchpartyCardDir = watchPartyFilesForChatDir ? resolveCopilotWatchpartyCardDir(watchPartyFilesForChatDir, cardId) : '';
 
 function DBG_LOG(stage, details = {}) {
   if (!ENABLE_DEBUG_LOGGING) {
@@ -89,7 +77,7 @@ function DBG_LOG(stage, details = {}) {
 }
 
 function appendDebug(stage, details = {}) {
-  if (!DEBUG_LOG_FILE) {
+  if (!DEBUG_FLAG || !DEBUG_LOG_FILE) {
     return;
   }
 
@@ -108,24 +96,23 @@ function appendDebug(stage, details = {}) {
   } catch {}
 }
 
-function buildPrompt(cId, historyDump) {
+function buildPrompt(cId, currentLogId, turnTranscript) {
   const instructionsBlock = [
-    'You are the responder in a three way orchestration.',
-    'I am only a mediator passing the runtime context and the user query to you.',
-    'The user only sees rendered card data (card definitions from card-store-cli and runtime outputs from board-live-cards-cli)  and exposed board status and the chat messages/attachments.',
-    'If you need more history or other runtime context (user attached files, chat histories, card definitions, runtime outputs, board status), hill-climb and side-walk conservatively: fetch the minimum additional context needed using the existing CLI surfaces, runtime handles, and appropriate skills.',
-    'Use the runtime handles below directly when you need operational context.',
-    `If you need to inspect the file attachment contents, run: "node inspect-file-contents.js --card-id <cardId> --file-idx <fileIndex>"`,
-    'IF you have the required response, then immediately Use the provide-final-reply-to-user skill exactly once to stage the final user-visible assistant reply and any generated attachments.',
-    'Do not expose internal orchestration details, logs, handles, refs, paths, directory names, or implementation notes.',
-    'Do not include markdown fences. No Fluff.',
-    'After completing the main task, use the `lore-keeper` agent when the interaction could potentially have durable board-level, user-level, identity, or decision knowledge that should persist across future tasks.',
+    'You are responding for one live board chat turn.',
+    'Use the available agent instructions, skills, and MCP tools to discover what you need. Prefer the smallest additional read or tool call that resolves the current turn.',
+    'Treat the runtime handles below as authoritative. Every liveboards.* MCP tool call must include the provided opaque log_id exactly as given. Do not derive, alter, or omit it.',
+    'Stay grounded in the current turn context — the current-turn user message, any current-turn system messages (including attachments referenced by them), and the contents of files those attachments point to. Read referenced attachment contents before reasoning. Reach into nearby board state or prior chat history only when the user intent clearly requires it; never use prior chat history to guess the current turn\u2019s answer.',
+    'When the final user-visible reply is ready, use the provide-final-reply-to-user skill exactly once.',
+    'Do not expose internal orchestration details, logs, refs, paths, directory names, or implementation notes.',
+    'Do not include markdown fences. No fluff.',
   ].join(' ');
 
   const runtimeHandlesBlock = [
     'Runtime handles:',
     `- boardId: \"${boardId || '(not provided)'}\"`,
     `- cardId / card-id: \"${cId}\"`,
+    `- logId / log_id: \"${currentLogId || '(not provided)'}\"`,
+    `- turnId: \"${turnId}\"`,
   ].join('\n');
 
   return [
@@ -133,27 +120,56 @@ function buildPrompt(cId, historyDump) {
     '',
     runtimeHandlesBlock,
     '',
-    `Recent chat context and the current user Query towards the end:`,
-    historyDump,
+    turnTranscript,
   ].join('\n');
 }
 
-function parseSystemMessageFileIndex(messageText) {
+function parseSystemMessageFileRef(messageText) {
   if (typeof messageText !== 'string' || !messageText.trim()) {
     return null;
   }
 
-  const match = /^(file uploaded|AI generated|AI geneterated):\s*.*?#(\d+)\s*$/i.exec(messageText.trim());
+  const match = /^(file uploaded|AI generated|AI geneterated):\s*(\S+?)(?:\s+as\s+\S+)?\s*#(\d+)\s*$/i.exec(messageText.trim());
   if (!match) {
     return null;
   }
 
-  const fileIndex = Number.parseInt(match[2], 10);
+  const kindRaw = match[1].toLowerCase();
+  const kind = kindRaw.startsWith('file') ? 'user-uploaded' : 'ai-generated';
+  const fileName = match[2];
+  const fileIndex = Number.parseInt(match[3], 10);
   if (!Number.isInteger(fileIndex) || fileIndex < 0) {
     return null;
   }
 
-  return fileIndex;
+  return { kind, fileName, fileIndex };
+}
+
+function parseSystemMessageFileIndex(messageText) {
+  const ref = parseSystemMessageFileRef(messageText);
+  return ref ? ref.fileIndex : null;
+}
+
+function extractVisibleMessageText(role, text) {
+  if (typeof text !== 'string') {
+    return '(no text)';
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return '(no text)';
+  }
+
+  if (role === 'user') {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && typeof parsed.prompt === 'string' && parsed.prompt.trim()) {
+        return parsed.prompt.trim();
+      }
+    } catch {}
+  }
+
+  return trimmed;
 }
 
 function formatTranscriptMessage(message, currentCardId) {
@@ -171,38 +187,92 @@ function formatTranscriptMessage(message, currentCardId) {
       : role === 'assistant'
         ? 'Assistant'
         : 'Message';
-  const text = typeof message.text === 'string' && message.text.trim()
-    ? message.text.trim()
-    : '(no text)';
+  const text = extractVisibleMessageText(role, message.text);
   const lines = [`${roleLabel}:`, text];
 
-  if (role === 'system') {
-    const fileIndex = parseSystemMessageFileIndex(text);
-    if (fileIndex !== null) {
-      lines.push(`card-id:${currentCardId} file-index:${fileIndex}`);
-    }
+  const retrievalHint = typeof message?.retrieval_hint === 'string' && message.retrieval_hint.trim()
+    ? message.retrieval_hint.trim()
+    : typeof message?.payload?.retrieval_hint === 'string' && message.payload.retrieval_hint.trim()
+      ? message.payload.retrieval_hint.trim()
+      : '';
+  if (retrievalHint) {
+    lines.push(retrievalHint);
   }
 
   return lines.join('\n');
 }
 
-function formatChatTranscript(messages, currentCardId) {
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return 'No recent chat messages.';
-  }
-
-  return messages
-    .map((message) => formatTranscriptMessage(message, currentCardId))
-    .filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
-    .join('\n\n');
+function formatAttachmentRefLine(ref) {
+  const label = ref.kind === 'ai-generated' ? 'AI-generated attachment' : 'uploaded attachment';
+  return `[${label} name: ${ref.fileName}. file-index: ${ref.fileIndex}]`;
 }
 
-function findNewAssistantMessage(messages, priorCount) {
-  if (!Array.isArray(messages) || !Number.isInteger(priorCount) || priorCount < 0) {
+function formatChatTranscript(messages, currentCardId) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return 'No current turn chat messages.';
+  }
+
+  const blocks = [];
+  let pendingAttachmentRefs = [];
+
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    const role = typeof message.role === 'string' ? message.role.trim().toLowerCase() : '';
+    if (role !== 'system' && role !== 'user') continue;
+    const text = extractVisibleMessageText(role, message.text);
+
+    if (role === 'system') {
+      const ref = parseSystemMessageFileRef(text);
+      if (ref) {
+        pendingAttachmentRefs.push(ref);
+        continue;
+      }
+      const rendered = formatTranscriptMessage(message, currentCardId);
+      if (rendered) blocks.push(rendered);
+      continue;
+    }
+
+    const lines = ["User's Question/Request:"];
+    for (const ref of pendingAttachmentRefs) {
+      lines.push(formatAttachmentRefLine(ref));
+    }
+    pendingAttachmentRefs = [];
+    lines.push(text);
+    blocks.push(lines.join('\n'));
+  }
+
+  if (pendingAttachmentRefs.length > 0) {
+    const lines = ['Attachments on this card (no user message yet):'];
+    for (const ref of pendingAttachmentRefs) {
+      lines.push(formatAttachmentRefLine(ref));
+    }
+    blocks.push(lines.join('\n'));
+  }
+
+  return blocks.join('\n\n');
+}
+
+async function loadPromptChatMessages(currentCardId) {
+  const turnScopedMessages = readEnhancedChatMessages(baseRef, chatStoreRef, currentCardId, 30000, {
+    turnId,
+  });
+
+  if (Array.isArray(turnScopedMessages) && turnScopedMessages.length > 0) {
+    return turnScopedMessages;
+  }
+
+  return readChatMessagesViaMcp(boardId, currentCardId, {
+    logId,
+    turnId,
+  });
+}
+
+function findAssistantMessage(messages) {
+  if (!Array.isArray(messages)) {
     return null;
   }
 
-  for (let index = messages.length - 1; index >= priorCount; index -= 1) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message?.role === 'assistant' && typeof message.text === 'string' && message.text.trim().length > 0) {
       return message;
@@ -215,19 +285,20 @@ function findNewAssistantMessage(messages, priorCount) {
 function buildCombinedRepairPrompt(cardIdValue) {
   return [
     'The previous attempt did not produce an acceptable result. Fix the issues below before completing.',
-    'No staged final reply was written through provide-final-reply-to-user.',
-    `Write the final user-visible reply using cardId: ${cardIdValue}.`,
+    'No final assistant reply was observed through provide-final-reply-to-user.',
+    `Write the final user-visible reply using cardId: ${cardIdValue} and the runtime turnId.`,
+    'Use provide-final-reply-to-user exactly once.',
     'Do not return reply text through stdout or any other response channel.'
   ].join('\n');
 }
 
 function runCopilot(prompt, workingDir, options = {}) {
-  const { continueSession = false } = options;
+  const { continueSession = false, onCleanupDeferred = null } = options;
   const ts = Date.now();
   const tempRoot = scratchDir;
   const outFile = copilotOutputFile || path.join(tempRoot, `asst-out-${ts}.txt`);
   const errFile = path.join(tempRoot, `asst-err-${ts}.txt`);
-  const cleanupFiles = [outFile, chatCardWatchPartyFile].filter((filePath) => typeof filePath === 'string' && filePath.trim().length > 0);
+  const cleanupFiles = [outFile].filter((filePath) => typeof filePath === 'string' && filePath.trim().length > 0);
 
   function cleanupWatchpartyFiles() {
     for (const filePath of cleanupFiles) {
@@ -240,9 +311,18 @@ function runCopilot(prompt, workingDir, options = {}) {
         fs.unlinkSync(filePath);
       } catch {}
     }
+    if (copilotWatchpartyCardDir) {
+      try {
+        fs.rmSync(copilotWatchpartyCardDir, { recursive: true, force: true });
+      } catch {}
+    }
   }
 
   cleanupWatchpartyFiles();
+
+  if (typeof onCleanupDeferred === 'function') {
+    onCleanupDeferred(cleanupWatchpartyFiles);
+  }
 
   return new Promise((resolve, reject) => {
   const copilotArgs = [
@@ -259,9 +339,6 @@ function runCopilot(prompt, workingDir, options = {}) {
   const execArgs = process.platform === 'win32'
     ? ['/d', '/c', 'copilot', ...copilotArgs]
     : copilotArgs;
-  const childEnv = chatCardWatchPartyFile
-    ? { ...process.env, CHAT_CARD_WATCH_PARTY_FILE: chatCardWatchPartyFile }
-    : process.env;
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.mkdirSync(path.dirname(errFile), { recursive: true });
   const outStream = fs.createWriteStream(outFile, { flags: 'w' });
@@ -288,7 +365,7 @@ function runCopilot(prompt, workingDir, options = {}) {
     const child = spawn(execCommand, execArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
-      env: childEnv,
+      env: process.env,
     });
 
     child.stdout.on('data', (chunk) => {
@@ -342,53 +419,64 @@ function runCopilot(prompt, workingDir, options = {}) {
     });
   }
   }).finally(() => {
-    cleanupWatchpartyFiles();
     try { fs.unlinkSync(errFile); } catch {}
   });
 }
 
-async function runCopilotWithValidationRetries(prompt, workingDir, cardIdValue, responseFilePath) {
+async function readAssistantMessageForTurn(cardIdValue) {
+  const turnMessages = await readChatMessagesViaMcp(boardId, cardIdValue, {
+    logId,
+    turnId,
+  });
+  return findAssistantMessage(turnMessages);
+}
+
+async function runCopilotWithValidationRetries(prompt, workingDir, cardIdValue) {
   const maxRetries = 3;
   let attempt = 0;
-  let stagedFinalReply = '';
+  let assistantMessage = null;
 
   while (attempt <= maxRetries) {
+    let cleanupAfterRead = () => {};
     await runCopilot(
       attempt === 0 ? prompt : buildCombinedRepairPrompt(cardIdValue),
       workingDir,
-      { continueSession: attempt > 0 },
+      {
+        continueSession: attempt > 0,
+        onCleanupDeferred: (fn) => { cleanupAfterRead = fn; },
+      },
     );
-    stagedFinalReply = readStagedFinalResponse(responseFilePath);
-
-    if (stagedFinalReply) {
+    assistantMessage = await readAssistantMessageForTurn(cardIdValue);
+    try { cleanupAfterRead(); } catch {}
+    if (assistantMessage) {
       break;
     }
 
     attempt += 1;
   }
 
-  if (!stagedFinalReply) {
+  if (!assistantMessage) {
     throw new Error("copilot couldn't produce a valid response");
   }
 
-  return {
-    stagedFinalReply,
-  };
+  return assistantMessage;
 }
 
 requireRequiredStrings({
   baseRef,
   cardId,
+  logId,
+  turnId,
   aiWorkspaceRoot,
   cardStoreRef,
   chatStoreRef,
   scratchStoreRef,
-  finalResponseRootDir,
 }, 'assistant');
 
 appendDebug('assistant:start', {
   boardId,
   cardId,
+  turnId,
   baseRef,
   aiWorkspaceRoot,
   cardStoreRef,
@@ -401,6 +489,7 @@ appendDebug('assistant:start', {
 DBG_LOG('assistant:start', {
   boardId,
   cardId,
+  turnId,
   chatStoreRef,
   scratchStoreRef,
   aiWorkspaceRoot,
@@ -409,63 +498,45 @@ DBG_LOG('assistant:start', {
 
 const workingDir = resolveCopilotWorkspaceDir(aiWorkspaceRoot, cardStoreRef, cardId, 'assistant');
 configureWorkspaceCliScripts(workingDir, 'assistant');
-const chatMessages = readEnhancedChatMessages(
-  baseRef,
-  chatStoreRef,
-  cardId,
-  Math.min(chatCopilotTimeoutMs, 30000),
-  { lastUserTurns: PROMPT_LAST_USER_TURNS },
-);
-const historyDump = formatChatTranscript(chatMessages, cardId);
-const finalResponseContainer = createFinalResponseContainerFromRoot(finalResponseRootDir, cardId);
-clearFinalResponseContainer(finalResponseContainer.containerDir);
-const prompt = buildPrompt(cardId, historyDump);
+const promptChatMessages = await loadPromptChatMessages(cardId);
+const turnTranscript = formatChatTranscript(promptChatMessages, cardId);
+const prompt = buildPrompt(cardId, logId, turnTranscript);
 appendDebug('assistant:promptBuilt', {
   workingDir,
-  historyDumpLength: historyDump.length,
+  promptMessageCount: Array.isArray(promptChatMessages) ? promptChatMessages.length : 0,
+  historyDumpLength: turnTranscript.length,
   promptLength: prompt.length,
   prompt,
 });
 
 try {
   if (bypassCopilotForTest) {
-    // User-visible assistant text must be written through chat store only.
+    // Keep the bypass on the same final-reply MCP path as the real assistant flow.
     appendDebug('assistant:testBypass', {
       replyText: 'paris',
     });
-    appendAssistantReply(chatStoreRef, cardId, 'paris', Math.min(chatCopilotTimeoutMs, 30000));
+    await stageAssistantReplyViaMcp(boardId, cardId, turnId, 'paris', [], { logId });
     process.stdout.write(JSON.stringify({ assistantHandled: true, bypassed: true }));
     process.exit(0);
   }
 
-  const runResult = await runCopilotWithValidationRetries(
+  const assistantMessage = await runCopilotWithValidationRetries(
     prompt,
     workingDir,
     cardId,
-    finalResponseContainer.responseFilePath
   );
-  const stagedFinalReply = runResult.stagedFinalReply;
-
-  if (!stagedFinalReply) {
-    throw new Error("copilot couldn't produce a valid response");
-  }
-  const publishResult = publishFinalResponseFromContainer({
-    baseRef,
-    chatStoreRef,
-    cardStoreRef,
-    artifactsStoreRef,
-    cardId,
-    containerDir: finalResponseContainer.containerDir,
-    replyText: stagedFinalReply,
-    timeoutMs: Math.min(chatCopilotTimeoutMs, 30000),
-  });
+  const assistantResponseText = typeof assistantMessage?.text === 'string'
+    ? assistantMessage.text
+    : '';
   appendDebug('assistant:success', {
-    usedFallbackAppend: false,
-    publishedAttachmentCount: publishResult.publishedAttachmentCount,
+    publishedAttachmentCount: Array.isArray(assistantMessage?.files) ? assistantMessage.files.length : 0,
+    assistantResponseText,
+    turnId,
   });
   DBG_LOG('assistant:success', {
-    usedFallbackAppend: false,
-    publishedAttachmentCount: publishResult.publishedAttachmentCount,
+    publishedAttachmentCount: Array.isArray(assistantMessage?.files) ? assistantMessage.files.length : 0,
+    assistantResponseText,
+    turnId,
   });
   // The flow only consumes success or error from this process. Reply text must not be returned here.
   process.stdout.write(JSON.stringify({ assistantHandled: true }));

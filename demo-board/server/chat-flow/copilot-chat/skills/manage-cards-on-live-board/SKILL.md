@@ -2,8 +2,8 @@
 name: manage-cards-on-live-board
 description: >
   Author a new card, edit an existing card, or change live board membership
-  through staged management wrappers. Covers the full create / edit / read /
-  upsert / deprecate lifecycle on the live runtime graph.
+  through `liveboards.manage.*`. Covers the full create / edit / read /
+  upsert / remove lifecycle on the live runtime graph.
 ---
 
 # Manage Cards On The Live Board
@@ -16,21 +16,11 @@ Use this skill whenever the task changes a card or board membership:
 - edit / fix / repair an existing card
 - read the exact stored card before changing it
 - upsert a candidate card into the live board runtime
-- deprecate (remove) a card from the live board runtime
+- remove a card from the live board runtime and storage
 
 This skill is the single home for the create-or-mutate side of cards. For
 reading state without changes, use `inspect-board-and-card-state`. For
 correctness checks before persisting changes, use `preflight-card-changes`.
-
-## What A Board Is
-
-- A board is a live runtime graph of cards and token dependencies.
-- Cards are declarative; they do not call each other directly.
-- The runtime owns reactivity, dependency ordering, and downstream retriggers.
-- A card participates in the board by declaring `requires[]` and `provides[]`.
-
-Adding a card to the board adds a node to the live dependency graph, not just a
-JSON record. Removing a card removes its node and its published tokens.
 
 ## Card Shape
 
@@ -56,7 +46,7 @@ Start authoring from the smallest viable shape and add only what the card needs:
 }
 ```
 
-## Core Dataflow Rules
+## Core Dataflow
 
 - One execution order:
   `source_defs[]` -> `fetched_sources.*` -> `compute[]` -> `computed_values.*` -> `view` and `provides[]`.
@@ -70,68 +60,65 @@ Start authoring from the smallest viable shape and add only what the card needs:
 - `projections` on a source may read only from `card_data` and `requires`.
 - For hyphenated required-token names, use `$lookup(requires, 'my-key')`.
 
-## Source Authoring Rules
+## Source Authoring
 
 - Every source entry has unique `bindTo` and `outputFile` within the card.
-- Fields beyond the shared `commonSourceDefFields` are kind-specific — query
+- Fields beyond the shared `commonSourceFields` are kind-specific — query
   them via `discover-board-capabilities` instead of guessing from neighbors.
 - If completion should not be blocked by a source, set
   `optionalForCompletionGating: true` on that source.
-- All LLM behavior belongs in `source_defs[]`. Do not invent a non-source
-  mechanism for LLM work.
+- LLM behavior belongs in `source_defs[]`; avoid inventing parallel non-source mechanisms.
 
-## Command Surface
+## MCP Surface
 
-Run these from the Copilot workspace root using the staged CLI in
-`.github/scripts`.
+Pass the runtime `boardId` as `board_id`, the runtime `logId` as `log_id`
+(opaque; forward unchanged), and the runtime `cardId` as `card_id`.
 
 ### Read the exact stored card
 
-```bash
-node ./.github/scripts/manage-live-board-card.js read-card --card-id <card-id>
+```json
+Tool: liveboards.manage.read-card
+Arguments: { "board_id": "<boardId>", "log_id": "<logId>", "card_id": "<cardId>" }
 ```
 
 Use this when you need the raw stored card as the basis for a precise repair.
 
 ### Upsert a card into the live board
 
-```bash
-cat payload.json | node ./.github/scripts/manage-live-board-card.js upsert-card --card-id <card-id>
-```
-
-Payload:
-
 ```json
-{ "candidate_card_content": { "id": "<card-id>" /* full card */ } }
+Tool: liveboards.manage.upsert-card
+Arguments:
+{
+  "board_id": "<boardId>",
+  "log_id": "<logId>",
+  "card_id": "<cardId>",
+  "candidate_card_content": { "id": "<cardId>", ... /* full card */ }
+}
 ```
 
 `upsert-card` validates the candidate, persists it, and syncs it into the live
-graph in one step. The candidate's `id` must match `--card-id`.
+graph in one step. The candidate's `id` must match `card_id`.
 
-This is the default persistence path after authoring or editing.
+### Remove a card from the live board
 
-### Deprecate (remove) a card from the live board
-
-```bash
-node ./.github/scripts/manage-live-board-card.js deprecate --card-id <card-id>
+```json
+Tool: liveboards.manage.remove-card
+Arguments: { "board_id": "<boardId>", "log_id": "<logId>", "card_id": "<cardId>" }
 ```
 
-Removes the card's node and its published tokens from the live graph. Be
-mindful: downstream consumers may then be left waiting on missing tokens.
+Removes the card from both the live board runtime and persistent storage. Downstream cards waiting on its published tokens will stall. Re-upserting a card with the same `card_id` after removal creates a fresh card with no prior state.
 
 ## Create A New Card
 
 Use this playbook when the task is to introduce a new live-board card.
 
-### Discipline
+### Guidance
 
 - Start from the minimum card shape above.
-- Choose a stable `id`; never rename it later.
-- Reuse shapes from nearby cards when they already solve the same problem; do
-  not copy fields blindly.
-- One responsibility per card; do not bundle unrelated workflows.
-- It is acceptable to author `card_data` here — authoring defines the initial
-  user-facing data shape.
+- Choose a stable `id`; renaming it later breaks board references.
+- Reuse shapes from nearby cards when they already solve the same problem; avoid copying fields blindly.
+- Aim for one responsibility per card.
+- Author `card_data` to define the initial user-facing data shape.
 
 ### Choosing What To Do First
 
@@ -139,16 +126,14 @@ There is no fixed order. Pick by what's actually missing or unclear:
 
 - *"Make me a card that tracks X"* and a similar card already exists on the
   board — inspect it once via `inspect-board-and-card-state` so the new
-  card follows the same shape. If you already know the shape, skip this.
+  card follows the same shape.
 - *"I'm not sure how to author the source for this"* — use
-  `discover-board-capabilities` for the kind and its `inputSchema`. If you
-  already know the source kind well, skip this.
+  `discover-board-capabilities` for the kind and its `inputSchema`.
 - *"There were decisions in another card's chat that matter"* — read that
   chat through `inspect-board-and-card-state`.
 - *Otherwise* — author the card from the minimum shape above and `upsert-card`.
 
-Before declaring the new card done: if it has `source_defs[]`, `compute[]`,
-`provides[]`, or non-trivial `view` bindings, run `preflight-card-changes`.
+If the card has `source_defs[]`, `compute[]`, `provides[]`, or non-trivial `view` bindings, run `preflight-card-changes` before finishing.
 
 ### Starter patterns
 
@@ -170,36 +155,24 @@ Before declaring the new card done: if it has `source_defs[]`, `compute[]`,
   state, upstream data, or an LLM-provided `_view` hint. Keep `_view.kind`
   inside the supported renderer set and `_view.data` minimal.
 
-See [agent-instructions-2-cardlayout.md](../../instructions/agent-instructions-2-cardlayout.md)
-for the per-kind data-shape contracts and chart authoring rules.
 
 ## Edit An Existing Card
 
 Use this playbook when the task is to change an existing card rather than
 create one.
 
-### Discipline
+### Guidance
 
 - Read the exact stored card first via `read-card`.
 - Keep the edit as narrow as possible — one layout slice, one source, one
   compute path, or one data section at a time.
-- Never change an existing card's `id`.
+- Avoid changing an existing card's `id`; it breaks board references.
 - Preserve fields and behavior outside the requested change.
 - Preserve existing naming, `bindTo`, `outputFile`, `requires`, `provides`
   entries unless they are part of the requested repair.
-- Treat `card_data` as protected user content. Only touch it for narrow syntax
-  / formatting / structural repairs — not as a routine authoring surface.
+- Treat `card_data` as user content; limit changes to narrow structural or formatting repairs.
 - If the card already contains a working pattern for the same kind of field,
   follow that pattern rather than inventing a new shape.
-
-### Contract repairs
-
-- `requires[]` and `provides[]` are editable when the task is fixing a broken
-  token contract.
-- If the task changes `source_defs[]` shape or fields, confirm valid kinds and
-  fields via `discover-board-capabilities` before editing.
-- Keep `projections` limited to `card_data` and `requires`.
-- LLM behavior stays inside `source_defs[]`.
 
 ### Choosing What To Do First
 
@@ -211,37 +184,16 @@ There is no fixed order. Pick by what the edit actually needs:
 - *"Change a `source_defs[]` field"* and you're not sure the field is even
   valid for that source kind — `discover-board-capabilities`. Skip if you
   already know.
-- *"The user attached a file that matters for the fix"* — surface it via
-  `inspect-board-and-card-state` (usually chat system messages with `#<idx>`
-  suffixes), then `inspect-file-contents.js --card-id <card-id> --file-idx <idx>`.
+- *"The user attached a file that matters for the fix"* — use
+  `inspect-card-chat-history` to find the chat system message with the
+  `#<idx>` suffix, then `inspect-attachments-file-contents` to read it.
 - *Otherwise* — make the smallest edit that addresses the request and
   `upsert-card` the repaired card.
 
-Before declaring the edit done: if the change touches `source_defs[]`,
-`compute[]`, `requires[]`, `provides[]`, or `view`, run
-`preflight-card-changes`. Stop after the requested card is correct; do not
-expand into unrelated cleanup.
-
-## Command Rules
-
-- Use `read-card` when you need the exact stored card as the basis for a
-  repair. Use `inspect-card-definition-and-runtime.js`
-  (`inspect-board-and-card-state`) when you also need live runtime context.
-- Use `upsert-card` for both new cards and edits — it is the one full-card
-  persistence path.
-- Use `deprecate` for live removal; do not invent a storage deletion path.
-- The candidate `id` must match `--card-id` on `upsert-card`.
-- Do not route persistence through raw bundled store CLIs; this skill's staged
-  wrappers are the only authoring surface.
+If the change touches `source_defs[]`, `compute[]`, `requires[]`, `provides[]`, or `view`, run `preflight-card-changes`. Stop at the requested card; avoid expanding into unrelated cleanup.
 
 ## Related Skills
 
-These are not next steps in a pipeline — reach for them when the intent
-shifts:
-
-- `preflight-card-changes` is the correctness gate. If your change can affect
-  behavior, the task is not done until preflight passes for the changed card.
-- `discover-board-capabilities` answers "is this source field valid?" / "what
-  source kinds are available?".
-- `provide-final-reply-to-user` is the terminal write when the turn ends with
-  a user-visible answer.
+- `preflight-card-changes` — correctness gate; run after any change to `source_defs[]`, `compute[]`, `provides[]`, or `view`.
+- `discover-board-capabilities` — source kind lookup and `inputSchema` before authoring or editing sources.
+- `provide-final-reply-to-user` — terminal write when the turn ends with a user-visible answer.

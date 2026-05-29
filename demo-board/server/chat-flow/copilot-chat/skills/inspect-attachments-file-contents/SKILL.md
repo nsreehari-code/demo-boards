@@ -2,59 +2,37 @@
 name: inspect-attachments-file-contents
 description: >
   Read the contents of an attached file on a live board using card id and
-  merged file index.
+  merged file index through `liveboards.inspect.file-contents`.
 ---
 
 # Inspect Attachments File Contents
 
 ## When To Use
 
-Use this skill when you know the target card id and file index for an
-attachment and need to read the file contents without changing anything.
+Use this skill to read an attached file's contents when you already have the card id and merged file index. To discover which files exist or find the right index, use `inspect-board-and-card-state` first.
 
-Typical questions this skill answers:
+## MCP Surface
 
-- What is inside this attached file?
-- Did the user-uploaded file contain the expected text or payload?
-- What does a card-level or chat-level attachment actually contain?
-
-Don't use this skill to discover which files exist on a card. Use
-`inspect-board-and-card-state` first when you need to find the right card and
-merged file index from chat history or card state.
-
-## Command Surface
-
-Run this from the Copilot workspace root.
+Pass the runtime `boardId` as `board_id`, the runtime `logId` as `log_id`
+(opaque; forward unchanged), and the runtime `cardId` as `card_id`.
 
 ### Attached file contents
 
-```bash
-node ./.github/scripts/inspect-file-contents.js --card-id <card-id> --file-idx <idx>
+```json
+Tool: liveboards.inspect.file-contents
+Arguments: { "board_id": "<boardId>", "log_id": "<logId>", "card_id": "<cardId>", "file_idx": <idx> }
 ```
 
 Use the card id and merged file index from the relevant system message, such as
 `file uploaded: ... #1` or `AI generated: ... #0`.
 
-The command returns the stored attachment contents for that card attachment.
-
-## Command Rules
-
-- This command is read-only. Don't change cards, runtime, or chat.
-- Use this only after you already know the right card id and merged file index.
-- If you still need to discover which files are attached, switch to
-  `inspect-board-and-card-state` first.
-- If the task turns into modifying a card or validating whether a repair would
-  run correctly, switch to the more appropriate skill instead of extending this
-  one.
+This tool returns the raw attachment payload from the board server. Treat text
+payloads as file contents; treat non-text payloads as binary attachment data.
 
 ## Choosing What To Read
 
-- *"What was in that file the user attached?"* — run
-  `inspect-file-contents.js --card-id <card-id> --file-idx <idx>`.
-- *"What is inside this attachment mentioned in chat?"* — use the `#<idx>`
-  suffix from the system message, then run `inspect-file-contents.js`.
-- *"I do not know the right file index yet."* — use `inspect-board-and-card-state`
-  first to inspect the chat messages and find the right index.
+- *"Read this attachment"* — call `liveboards.inspect.file-contents` with the card id and the `#<idx>` file index from the relevant system message.
+- *"I don't know the file index yet"* — use `inspect-board-and-card-state` to find it first.
 
 ## Related Skills
 

@@ -3,22 +3,25 @@
  * demo-http-test.js
  *
  * Smoke test for demo-board/server/board-server.js over HTTP + SSE.
- * Targets the 'live' board with --cards-pattern cardT* to load only the 3
- * test cards (cardT-portfolio, cardT-market-prices, cardT-portfolio-value).
+ * Targets a named board on the configured board server.
  *
- * T0: init-board → SSE initial payload → wait for all cards to complete
+ * Prerequisites:
+ *   - Board server running at port 7799 (or --port override)
+ *   - MCP server running at port 7801 (or DEMO_BOARDS_MCP_SERVER_URL override)
+ *   The test attaches to the running servers — it does NOT spawn its own.
+ *
+ * T0: cleanup → bootstrap/init → SSE initial payload → wait for all cards to complete
  * T1: PATCH holdings (+1 row) → verify recomputation (holdings +1, positions +1)
  *
  * Usage:
- *   node test/server-http-test.js [--port 7799]
+ *   node test/server-http-test.js [--board-id live-test] [--port 7799] [--run-tests T1,T2]
  */
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import http from 'node:http';
-import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
 
@@ -34,84 +37,136 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const cliArgs = process.argv.slice(2);
+function readCliOptionValue(args, optionName) {
+  const optionIndex = args.indexOf(optionName);
+  if (optionIndex === -1) return '';
+  return String(args[optionIndex + 1] || '').trim();
+}
+
+function parseRequestedTests(rawValue) {
+  if (!rawValue) return null;
+  const requested = new Set(
+    rawValue
+      .split(',')
+      .map((value) => value.trim().toUpperCase())
+      .filter(Boolean),
+  );
+  if (requested.size === 0) {
+    throw new Error('--run-tests requires at least one test id');
+  }
+  return requested;
+}
+
+const requestedTests = parseRequestedTests(readCliOptionValue(cliArgs, '--run-tests'));
+function isTestSelected(testId) {
+  return !requestedTests || requestedTests.has(String(testId || '').trim().toUpperCase());
+}
+
+function isAnyTestSelected(testIds) {
+  return !requestedTests || testIds.some((testId) => isTestSelected(testId));
+}
+
 const portArg = cliArgs.indexOf('--port');
 const cliPort = portArg !== -1 ? parseInt(cliArgs[portArg + 1], 10) : NaN;
-const serverConfigArg = cliArgs.indexOf('--server-config');
-const cliServerConfig = serverConfigArg !== -1 ? String(cliArgs[serverConfigArg + 1] || '').trim() : '';
-const skipT1 = cliArgs.includes('--skip-t1');
-const skipT2 = cliArgs.includes('--skip-t2');
-const skipT3 = cliArgs.includes('--skip-t3');
+const boardIdArg = cliArgs.indexOf('--board-id');
+const cliBoardId = boardIdArg !== -1 ? String(cliArgs[boardIdArg + 1] || '').trim() : '';
+const skipT1 = cliArgs.includes('--skip-t1') || !isTestSelected('T1');
+const skipT2 = cliArgs.includes('--skip-t2') || !isTestSelected('T2');
+const skipT3 = cliArgs.includes('--skip-t3') || !isAnyTestSelected(['T3', 'T3A', 'T3B', 'T3C', 'T3D']);
 const forceT3aBypass = process.env.DEMO_T3A_BYPASS === '1';
+let __copilotAvailableCache = null;
 function isCopilotAvailable() {
+  if (__copilotAvailableCache !== null) return __copilotAvailableCache;
+  // File-flag cache: once copilot is detected, drop a marker so subsequent runs
+  // skip the (slow, cold-start-prone) spawn probe entirely. CI envs that lack
+  // copilot can force-skip via DEMO_COPILOT_AVAILABLE=0 or --skip-t3a/--skip-t3c.
+  const envOverride = process.env.DEMO_COPILOT_AVAILABLE;
+  if (envOverride === '0' || envOverride === 'false') { __copilotAvailableCache = false; return false; }
+  if (envOverride === '1' || envOverride === 'true') { __copilotAvailableCache = true; return true; }
+  const flagPath = path.join(os.tmpdir(), 'demo-boards-copilot-available.flag');
   try {
-    const r = spawnSync('copilot', ['--version'], { timeout: 5_000, stdio: 'ignore', windowsHide: true });
-    return !r.error;
-  } catch { return false; }
+    if (fs.existsSync(flagPath)) { __copilotAvailableCache = true; return true; }
+  } catch { /* ignore */ }
+  try {
+    const cmd = process.platform === 'win32' ? 'cmd.exe' : 'copilot';
+    const args = process.platform === 'win32' ? ['/d', '/c', 'copilot', '--version'] : ['--version'];
+    const r = spawnSync(cmd, args, { timeout: 15_000, stdio: 'ignore', windowsHide: true });
+    __copilotAvailableCache = !r.error && r.status === 0;
+  } catch { __copilotAvailableCache = false; }
+  if (__copilotAvailableCache) {
+    try { fs.writeFileSync(flagPath, String(Date.now())); } catch { /* ignore */ }
+  }
+  return __copilotAvailableCache;
+}
+function require_os() {
+  // Lazy synchronous require of node:os without adding a top-level import.
+  if (!require_os._mod) {
+    const { createRequire } = require_os._cr || (require_os._cr = (() => {
+      // eslint-disable-next-line no-shadow
+      const u = new URL(import.meta.url);
+      return { createRequire: (m => m.createRequire)(/** @type {any} */(globalThis).require ? null : null) };
+    })());
+    // Fallback: use dynamic import-resolved built-in via process
+    require_os._mod = { tmpdir: () => process.env.TMPDIR || process.env.TEMP || process.env.TMP || '/tmp' };
+  }
+  return require_os._mod;
 }
 
-const skipT3a = cliArgs.includes('--skip-t3a') || (!forceT3aBypass && !isCopilotAvailable());
-const skipT3b = cliArgs.includes('--skip-t3b');
-const skipT3c = cliArgs.includes('--skip-t3c') || !isCopilotAvailable();
-const skipT3d = cliArgs.includes('--skip-t3d');
+const skipT3a = skipT3 || cliArgs.includes('--skip-t3a') || !isTestSelected('T3A') || (!forceT3aBypass && !isCopilotAvailable());
+const skipT3b = skipT3 || cliArgs.includes('--skip-t3b') || !isTestSelected('T3B');
+const skipT3c = skipT3 || cliArgs.includes('--skip-t3c') || !isTestSelected('T3C') || !isCopilotAvailable();
+const skipT3d = skipT3 || cliArgs.includes('--skip-t3d') || !isTestSelected('T3D');
 
-function buildReadableRunId() {
-  const now = new Date();
-  const datePart = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, '0'),
-    String(now.getDate()).padStart(2, '0'),
-  ].join('');
-  const timePart = [
-    String(now.getHours()).padStart(2, '0'),
-    String(now.getMinutes()).padStart(2, '0'),
-    String(now.getSeconds()).padStart(2, '0'),
-  ].join('');
-  return `run-${datePart}-${timePart}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-const RUN_ID = buildReadableRunId();
-
-const BOARD_ID = 'live';
+const BOARD_ID = cliBoardId || (process.env.DEMO_BOARD_ID || '').trim() || 'live-test';
 const BOARD_DIR = path.resolve(__dirname, '..');
-const REPO_ROOT = path.resolve(BOARD_DIR, '..');
-const SERVER_SCRIPT = path.resolve(BOARD_DIR, 'server', 'board-server.js');
-const DEFAULT_SERVER_CONFIG = path.resolve(BOARD_DIR, 'test', 'server-test-config.json');
-const SERVER_CONFIG = cliServerConfig
-  ? (path.isAbsolute(cliServerConfig) ? cliServerConfig : path.resolve(process.cwd(), cliServerConfig))
-  : DEFAULT_SERVER_CONFIG;
+const SERVER_CONFIG_PATH = path.resolve(BOARD_DIR, 'server-config.json');
 const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
-const CARD_PATTERN = 'cardT*';
+const BOARD_SERVER_URL = Number.isInteger(cliPort) && cliPort > 0
+  ? `http://127.0.0.1:${cliPort}`
+  : 'http://127.0.0.1:7799';
 const CHAT_CARD_ID = 'card-portfolio';
 
-function loadServerConfigJson(configPath) {
-  try {
-    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  } catch {
-    return {};
+function loadLiveTestSetupConfig() {
+  const serverConfig = JSON.parse(fs.readFileSync(SERVER_CONFIG_PATH, 'utf-8'));
+  const liveTestSetup = serverConfig?.boards?.['live-test']?.setup;
+
+  if (!liveTestSetup || typeof liveTestSetup !== 'object') {
+    throw new Error(`Missing boards.live-test.setup in ${SERVER_CONFIG_PATH}`);
   }
+
+  const requiredKeys = [
+    'setupRoot',
+    'aiWorkspaceRoot',
+    'cardStore',
+    'artifactsStore',
+    'boardRuntime',
+    'boardOutputsStore',
+    'chatStore',
+    'scratchStore',
+    'archivalStore',
+  ];
+
+  for (const key of requiredKeys) {
+    if (typeof liveTestSetup[key] !== 'string' || !liveTestSetup[key].trim()) {
+      throw new Error(`Expected boards.live-test.setup.${key} to be a non-empty string in ${SERVER_CONFIG_PATH}`);
+    }
+  }
+
+  return liveTestSetup;
 }
 
-function resolveConfiguredPerRunSetupBase(serverConfig) {
-  const setupRootPerRunBase = serverConfig?.setupRootPerRunBase;
-  if (typeof setupRootPerRunBase !== 'string' || !setupRootPerRunBase.trim()) return null;
-  return path.resolve(BOARD_DIR, setupRootPerRunBase);
-}
-
-function findFreePort() {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const addr = /** @type {import('node:net').AddressInfo} */ (srv.address());
-      srv.close(() => resolve(addr.port));
-    });
-    srv.on('error', reject);
-  });
-}
-
-async function resolveServerPort() {
-  if (Number.isInteger(cliPort) && cliPort > 0) return cliPort;
-  return findFreePort();
-}
+const LIVE_TEST_SETUP = loadLiveTestSetupConfig();
+const BOARD_SETUP_ROOT = path.resolve(BOARD_DIR, LIVE_TEST_SETUP.setupRoot);
+const CLEAN_WORKSPACE_SUBDIRS = [
+  LIVE_TEST_SETUP.aiWorkspaceRoot,
+  LIVE_TEST_SETUP.cardStore,
+  LIVE_TEST_SETUP.artifactsStore,
+  LIVE_TEST_SETUP.boardRuntime,
+  LIVE_TEST_SETUP.boardOutputsStore,
+  LIVE_TEST_SETUP.chatStore,
+  LIVE_TEST_SETUP.scratchStore,
+  LIVE_TEST_SETUP.archivalStore,
+].filter((dir, index, dirs) => dirs.indexOf(dir) === index);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -132,6 +187,30 @@ function probeMcpServer(serverUrl, timeoutMs = 2_000) {
   });
 }
 
+function emptyDirectoryContents(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+    return;
+  }
+
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const entryPath = path.join(dirPath, entry.name);
+    fs.rmSync(entryPath, { recursive: true, force: true });
+  }
+}
+
+function cleanupBoardWorkspaceFiles() {
+  if (BOARD_ID !== 'live-test') {
+    console.log(`[resync] workspace cleanup skipped for board ${BOARD_ID}`);
+    return;
+  }
+
+  for (const relativeDir of CLEAN_WORKSPACE_SUBDIRS) {
+    emptyDirectoryContents(path.join(BOARD_SETUP_ROOT, relativeDir));
+  }
+  console.log(`[resync] cleaned workspace files under ${BOARD_SETUP_ROOT}`);
+}
+
 async function ensureMcpServerRunning(serverUrl) {
   if (await probeMcpServer(serverUrl)) {
     console.log(`[setup] MCP server already available at ${serverUrl}`);
@@ -141,33 +220,47 @@ async function ensureMcpServerRunning(serverUrl) {
   throw new Error(`MCP server is down at ${serverUrl}. Start it before running server-http-test.`);
 }
 
-const PORT = await resolveServerPort();
-const BASE = `http://127.0.0.1:${PORT}/api/boards/${BOARD_ID}`;
+function probeBoardServer(timeoutMs = 3_000) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(`${BOARD_SERVER_URL}/healthz`, { method: 'GET', timeout: timeoutMs }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try {
+            const data = JSON.parse(body);
+            console.log(`[setup] board server running at ${BOARD_SERVER_URL} (pid=${data.pid}, uptime=${Math.round((data.uptimeMs || 0) / 1000)}s)`);
+          } catch { /* ignore parse error */ }
+          resolve();
+          return;
+        }
+        reject(new Error(`Board server at ${BOARD_SERVER_URL} returned HTTP ${res.statusCode}. Start it before running server-http-test.`));
+      });
+    });
+    req.on('error', (err) => reject(new Error(`Board server not reachable at ${BOARD_SERVER_URL}: ${err.message}. Start it before running server-http-test.`)));
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error(`Board server at ${BOARD_SERVER_URL} did not respond within ${timeoutMs}ms. Start it before running server-http-test.`));
+    });
+    req.end();
+  });
+}
+
+async function cleanupAndInitBoard() {
+  cleanupBoardWorkspaceFiles();
+
+  const initResult = await httpGet(`${BOARD_SERVER_URL}/api/boards/${BOARD_ID}/init-board`);
+  if (initResult.status !== 200) {
+    throw new Error(`init-board returned ${initResult.status}: ${JSON.stringify(initResult.data)}`);
+  }
+  console.log('[resync] init-board ok');
+
+  return initResult;
+}
+
+const PORT = Number(new URL(BOARD_SERVER_URL).port || '80');
+const BASE = `${BOARD_SERVER_URL}/api/boards/${BOARD_ID}`;
 const MCP_SERVER_URL = (process.env.DEMO_BOARDS_MCP_SERVER_URL || '').trim() || 'http://127.0.0.1:7801/mcp';
-
-function resolveSetupMode(serverConfig) {
-  const configuredPerRunBase = resolveConfiguredPerRunSetupBase(serverConfig);
-  const setupDir = configuredPerRunBase
-    ? path.join(configuredPerRunBase, RUN_ID)
-    : path.join(os.tmpdir(), RUN_ID);
-  return {
-    setupDir,
-    boardSetupRoot: path.join(setupDir, 'boards'),
-    cleanupPath: setupDir,
-    preserveSetupDir: false,
-  };
-}
-
-const TEST_SERVER_CONFIG = loadServerConfigJson(SERVER_CONFIG);
-const SETUP_MODE = resolveSetupMode(TEST_SERVER_CONFIG);
-const SETUP_DIR = SETUP_MODE.setupDir;
-const BOARD_SETUP_ROOT = SETUP_MODE.boardSetupRoot;
-const SETUP_CLEANUP_PATH = SETUP_MODE.cleanupPath;
-const PRESERVE_SETUP_DIR = SETUP_MODE.preserveSetupDir;
-if (fs.existsSync(SETUP_CLEANUP_PATH)) {
-  fs.rmSync(SETUP_CLEANUP_PATH, { recursive: true, force: true });
-  console.log(`[demo-http-test] wiped setup dir: ${SETUP_CLEANUP_PATH}`);
-}
 
 // ---------------------------------------------------------------------------
 // Shared state — accumulated from SSE frames
@@ -302,6 +395,14 @@ function assert(condition, message) {
   }
 }
 
+function randomTurnId() {
+  let value = '';
+  while (value.length < 6) {
+    value += Math.random().toString(36).slice(2);
+  }
+  return value.slice(0, 6);
+}
+
 function waitUntil(predicate, timeoutMs, label) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs;
@@ -337,9 +438,12 @@ const waitForChatPredicate = (predicate, ms, label) =>
 const waitForWatchpartyPredicate = (predicate, ms, label) =>
   waitUntil(() => predicate(NS.watchpartyEvents) || false, ms, label);
 
-function findAssistantOutcomeInMessages(messages, beforeCount, successPattern) {
+function findAssistantOutcomeInMessages(messages, beforeCount, successPattern, turnId) {
   const newMessages = Array.isArray(messages) ? messages.slice(beforeCount) : [];
-  const assistantMessage = [...newMessages].reverse().find((message) => message?.role === 'assistant');
+  const relevantMessages = turnId
+    ? newMessages.filter((message) => String(message?.turn || '') === turnId)
+    : newMessages;
+  const assistantMessage = [...relevantMessages].reverse().find((message) => message?.role === 'assistant');
 
   if (assistantMessage) {
     const text = String(assistantMessage.text || '');
@@ -353,7 +457,7 @@ function findAssistantOutcomeInMessages(messages, beforeCount, successPattern) {
     };
   }
 
-  const failureMessage = [...newMessages].reverse().find((message) => {
+  const failureMessage = [...relevantMessages].reverse().find((message) => {
     if (!message || (message.role !== 'system' && message.role !== 'assistant')) return false;
     return /(failed|error|unable to complete|couldn't produce a valid response|intent: failure)/i.test(String(message.text || ''));
   });
@@ -370,11 +474,12 @@ function findAssistantOutcomeInMessages(messages, beforeCount, successPattern) {
 function findAssistantOutcome(events, options) {
   const successPattern = options?.successPattern instanceof RegExp ? options.successPattern : null;
   const beforeCount = Number.isInteger(options?.beforeCount) && options.beforeCount >= 0 ? options.beforeCount : 0;
+  const turnId = typeof options?.turnId === 'string' && options.turnId.trim() ? options.turnId.trim() : '';
 
   for (const event of events) {
     if (!event || !Array.isArray(event.messages)) continue;
 
-    const messageOutcome = findAssistantOutcomeInMessages(event.messages, beforeCount, successPattern);
+    const messageOutcome = findAssistantOutcomeInMessages(event.messages, beforeCount, successPattern, turnId);
     if (messageOutcome) {
       return { ...messageOutcome, event, source: 'sse' };
     }
@@ -383,13 +488,14 @@ function findAssistantOutcome(events, options) {
 
   return false;
 }
-async function waitForAssistantOutcome({ eventStart, beforeCount, successPattern, timeoutMs, label }) {
+async function waitForAssistantOutcome({ eventStart, beforeCount, successPattern, timeoutMs, label, turnId }) {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() <= deadline) {
     const eventOutcome = findAssistantOutcome(NS.chatEvents.slice(eventStart), {
       beforeCount,
       successPattern,
+      turnId,
     });
     if (eventOutcome) {
       return eventOutcome;
@@ -527,50 +633,14 @@ function httpUploadChatFile(url, fileName, content, contentType = 'text/plain; c
   });
 }
 
-function startServer(port) {
-  return new Promise((resolve, reject) => {
-    const serverArgs = [SERVER_SCRIPT, '--config', SERVER_CONFIG];
-    const proc = spawn(process.execPath, serverArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      env: {
-        ...process.env,
-        DEMO_SERVER_PORT: String(port),
-        DEMO_CARDS_PATTERN: CARD_PATTERN,
-        DEMO_BOARDS_MCP_SERVER_URL: MCP_SERVER_URL,
-        DEMO_SETUP_DIR: SETUP_DIR,
-        DEMO_BOARD_SETUP_ROOT: BOARD_SETUP_ROOT,
-      },
-    });
-    let ready = false;
-
-    proc.stdout.on('data', (chunk) => {
-      const text = chunk.toString('utf-8');
-      process.stdout.write(`[server] ${text}`);
-      if (!ready && text.includes('listening on')) {
-        ready = true;
-        resolve(proc);
-      }
-    });
-    proc.stderr.on('data', (chunk) => process.stderr.write(`[server:err] ${chunk}`));
-    proc.on('error', reject);
-    proc.on('exit', (code) => {
-      if (!ready) reject(new Error(`Server exited early: code ${code}`));
-    });
-
-    setTimeout(() => {
-      if (!ready) reject(new Error('Server startup timeout (15s)'));
-    }, 15_000);
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Test sequence
 // ---------------------------------------------------------------------------
 
 console.log('\n=== live board HTTP+SSE smoke test ===');
 console.log(`target: ${BASE}`);
-console.log(`card pattern: ${CARD_PATTERN}`);
+console.log(`[setup] board id: ${BOARD_ID}`);
+console.log(`[setup] board server URL: ${BOARD_SERVER_URL}`);
 console.log(`[setup] MCP server URL: ${MCP_SERVER_URL}`);
 
 let serverProc = null;
@@ -607,21 +677,32 @@ async function ensureWatchpartySseSubscription() {
   watchpartySubscribed = true;
 }
 try {
+  await probeBoardServer();
   await ensureMcpServerRunning(MCP_SERVER_URL);
-  serverProc = await startServer(PORT);
 
-  // ── T0: init-board, SSE connect, wait for initial completion ──
+  // ── Pre-T0 sanitization: cleanup workspace, register board ──
 
-  // Register the 'live' board via POST (v8 runtime requires explicit registration)
-  const regRes = await httpJson('POST', `http://127.0.0.1:${PORT}/api/boards`, { id: BOARD_ID, label: 'Live' });
+  // cleanupBoardWorkspaceFiles();
+
+  // Register the board via POST (v8 runtime requires explicit registration)
+  const regRes = await httpJson('POST', `${BOARD_SERVER_URL}/api/boards`, { id: BOARD_ID, label: BOARD_ID });
   assert(regRes.status === 200 || regRes.status === 201 || regRes.status === 409,
     `POST /api/boards returned ${regRes.status}: ${JSON.stringify(regRes.data)}`);
   console.log(`[setup] board '${BOARD_ID}' registered (${regRes.status})`);
 
+  // ── T0: init, SSE connect, wait for initial completion ──
+
   console.log('\n=== T0 Step 1: init-board ===');
-  const initRes = await httpGet(`${BASE}/init-board`);
+  const initRes = await httpGet(`${BOARD_SERVER_URL}/api/boards/${BOARD_ID}/init-board`);
   assert(initRes.status === 200, `init-board returned ${initRes.status}`);
   console.log('[T0.1] init-board ok');
+
+  console.log('\n=== T0 Step 1.5: board-status after init-board ===');
+  const t0PostInitStatusRes = await httpGet(`${BASE}/board-status`);
+  assert(t0PostInitStatusRes.status === 200, `post-init board-status returned ${t0PostInitStatusRes.status}`);
+  const t0PostInitSummary = t0PostInitStatusRes.data?.statusSnapshot?.summary;
+  assert(t0PostInitSummary, 'post-init statusSnapshot.summary missing from board-status');
+  console.log(`[T0.1.5] board-status: ${JSON.stringify(t0PostInitSummary)}`);
 
   console.log('\n=== T0 Step 2: start SSE worker ===');
   const sseClientId = `server-http-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -772,11 +853,13 @@ try {
   const t2EventStart = NS.chatEvents.length;
   const t2WatchpartyStart = NS.watchpartyEvents.length;
   const t2ProbePrompt = `Probe protocol validation ${Date.now()}`;
+  const t2TurnId = randomTurnId();
 
   const t2SendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
     actionType: 'chat-send',
     payload: {
       text: `${ECHO_PROBE_MARKER}${t2ProbePrompt}${ECHO_PROBE_MARKER}`,
+      'turn-id': t2TurnId,
     },
   });
   assert(t2SendRes.status === 200, `T3 chat-send returned ${t2SendRes.status}`);
@@ -816,9 +899,12 @@ try {
   const t2AssistantMsg = t2NewMessages.find((m) => m?.role === 'assistant');
   assert(!!t2User && typeof t2User.id === 'string', 'T3 user chat message missing id');
   assert(String(t2User?.text || '').includes(t2ProbePrompt), 'T3 user file text mismatch');
+  assert(String(t2User?.turn || '') === t2TurnId, 'T3 user turn id mismatch');
   assert(!!t2InProgress && typeof t2InProgress.id === 'string', 'T3 in-progress system message missing id');
+  assert(String(t2InProgress?.turn || '') === t2TurnId, 'T3 in-progress system turn id mismatch');
   assert(!!t2AssistantMsg && typeof t2AssistantMsg.id === 'string', 'T3 assistant chat message missing id');
   assert(String(t2AssistantMsg?.text || '').includes(`Echo: ${t2ProbePrompt}`), 'T3 assistant echo file content mismatch');
+  assert(String(t2AssistantMsg?.turn || '') === t2TurnId, 'T3 assistant turn id mismatch');
   console.log(`[${new Date().toISOString()}] [T3] ok: ordered probe lifecycle observed (user+processing, in-progress, assistant+processing clear)`);
     }
 
@@ -832,9 +918,10 @@ try {
     assert(t2bBefore.status === 200, `T3b pre chats returned ${t2bBefore.status}`);
     const t2bBeforeMessages = Array.isArray(t2bBefore.data?.messages) ? t2bBefore.data.messages : [];
     const t2bBeforeCount = t2bBeforeMessages.length;
+    const t2bTurnId = randomTurnId();
 
     const t2bUploadRes = await httpUploadChatFile(
-      `${BASE}/cards/${CHAT_CARD_ID}/files?inChat=true`,
+      `${BASE}/cards/${CHAT_CARD_ID}/files?inChat=true&turn-id=${encodeURIComponent(t2bTurnId)}`,
       'q1.txt',
       'what is the capital of japan',
     );
@@ -861,6 +948,7 @@ try {
     assert(!!t2bUploadSystem, 'T3b upload protocol missing system chat file');
     assert(String(t2bUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3b upload system message does not describe uploaded file');
     assert(/#\d+\s*$/.test(String(t2bUploadSystem?.text || '')), 'T3b upload system message should include merged file index');
+    assert(String(t2bUploadSystem?.turn || '') === t2bTurnId, 'T3b upload system turn id mismatch');
 
     const t2bSendBaseline = t2bUploadMessages.length;
     const t2bEventStart = NS.chatEvents.length;
@@ -870,6 +958,7 @@ try {
       actionType: 'chat-send',
       payload: {
         text: `${ECHO_PROBE_MARKER}${t2bPrompt}${ECHO_PROBE_MARKER}`,
+        'turn-id': t2bTurnId,
         files: [uploadedFile],
       },
     });
@@ -896,11 +985,14 @@ try {
     const t2bAssistantMsg = t2bNewMessages.find((m) => m?.role === 'assistant');
 
     assert(!!t2bUser && typeof t2bUser.id === 'string', 'T3b missing user chat message notification');
+    assert(String(t2bUser?.turn || '') === t2bTurnId, 'T3b user turn id mismatch');
     assert(!!t2bInProgress && typeof t2bInProgress.id === 'string', 'T3b missing in-progress system chat message');
+    assert(String(t2bInProgress?.turn || '') === t2bTurnId, 'T3b in-progress system turn id mismatch');
     assert(!!t2bAssistantMsg && typeof t2bAssistantMsg.id === 'string', 'T3b missing assistant chat message notification');
     assert(Array.isArray(t2bUser?.files) && t2bUser.files.length === 1, 'T3b user chat message missing uploaded file metadata');
     assert(!Object.prototype.hasOwnProperty.call(t2bUser?.files?.[0] || {}, 'path'), 'T3b user chat file metadata should not expose path');
     assert(String(t2bAssistantMsg?.text || '').includes(`Echo: ${t2bPrompt}`), 'T3b assistant file content mismatch');
+    assert(String(t2bAssistantMsg?.turn || '') === t2bTurnId, 'T3b assistant turn id mismatch');
     console.log('[T3b] ok: upload protocol and ordered probe lifecycle observed (user+processing, in-progress, assistant+processing clear)');
   }
 
@@ -922,11 +1014,13 @@ try {
       : [];
 
     const t2dPrompt = `probe generated attachment validation ${Date.now()}`;
+    const t2dTurnId = randomTurnId();
     const t2dEventStart = NS.chatEvents.length;
     const t2dSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
       actionType: 'chat-send',
       payload: {
         text: `${ECHO_PROBE_MARKER}[attach] ${t2dPrompt}${ECHO_PROBE_MARKER}`,
+        'turn-id': t2dTurnId,
       },
     });
     assert(t2dSendRes.status === 200, `T3d chat-send returned ${t2dSendRes.status}`);
@@ -952,10 +1046,13 @@ try {
     const t2dAssistantMsg = t2dNewMessages.find((m) => m?.role === 'assistant');
 
     assert(!!t2dInProgress && typeof t2dInProgress.id === 'string', 'T3d missing in-progress system chat message');
+    assert(String(t2dInProgress?.turn || '') === t2dTurnId, 'T3d in-progress system turn id mismatch');
     assert(!!t2dAiGenerated && typeof t2dAiGenerated.id === 'string', 'T3d missing AI-generated attachment system chat message');
     assert(/#\d+\s*$/.test(String(t2dAiGenerated?.text || '')), 'T3d AI-generated system message should include merged file index');
+    assert(String(t2dAiGenerated?.turn || '') === t2dTurnId, 'T3d AI-generated system turn id mismatch');
     assert(!!t2dAssistantMsg && typeof t2dAssistantMsg.id === 'string', 'T3d missing assistant chat message');
     assert(String(t2dAssistantMsg?.text || '').includes(`Echo: ${t2dPrompt}`), 'T3d assistant content mismatch');
+    assert(String(t2dAssistantMsg?.turn || '') === t2dTurnId, 'T3d assistant turn id mismatch');
 
     const t2dFileIndexMatch = /#(\d+)\s*$/.exec(String(t2dAiGenerated?.text || ''));
     assert(!!t2dFileIndexMatch, 'T3d AI-generated message missing file index');
@@ -980,7 +1077,10 @@ try {
   // Disabled in the public example unless explicitly requested — requires a
   // configured Azure Foundry endpoint and agent_id in server-config.json.
   if (skipT3a) {
-    console.log('\n=== T3a: skipped (--skip-t3a) ===');
+    const reason = cliArgs.includes('--skip-t3a')
+      ? '--skip-t3a'
+      : (skipT3 ? 'T3 group skipped' : (!isTestSelected('T3A') ? 'not in --tests selection' : (!isCopilotAvailable() ? 'copilot CLI unavailable' : 'skipped')));
+    console.log(`\n=== T3a: skipped (${reason}) ===`);
   } else {
     console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');
     await ensureChatSseSubscription();
@@ -990,11 +1090,13 @@ try {
     const t2aBeforeCount = t2aBeforeMessages.length;
     const t2aEventStart = NS.chatEvents.length;
     const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
+    const t2aTurnId = randomTurnId();
 
     const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
       actionType: 'chat-send',
       payload: {
         text: t2aPrompt,
+        'turn-id': t2aTurnId,
       },
     });
     assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
@@ -1003,6 +1105,7 @@ try {
       eventStart: t2aEventStart,
       beforeCount: t2aBeforeCount,
       successPattern: /paris/i,
+      turnId: t2aTurnId,
       timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
       label: 'T3a assistant response with paris',
     });
@@ -1010,11 +1113,23 @@ try {
     assert(t2aOutcome.source === 'sse', 'T3a should resolve from SSE chat notifications');
 
     const t2aMessages = Array.isArray(t2aOutcome?.event?.messages) ? t2aOutcome.event.messages : [];
-    const t2aNewMessages = t2aMessages.slice(t2aBeforeCount);
+    const t2aSseNewMessages = t2aMessages.slice(t2aBeforeCount);
+    assert(t2aSseNewMessages.length >= 1, `T3a expected at least 1 new SSE chat message, got ${t2aSseNewMessages.length}`);
+    const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
+    assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
+    const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
+    const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
     assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat messages, got ${t2aNewMessages.length}`);
+    const t2aUser = t2aNewMessages.find((m) => m?.role === 'user');
     const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
-    assert(!!t2aAssistantMsg, 'T3a assistant chat message missing from SSE payload');
+    assert(!!t2aUser && typeof t2aUser.id === 'string', 'T3a user chat message missing id');
+    assert(String(t2aUser?.turn || '') === t2aTurnId, 'T3a user turn id mismatch');
+    assert(!!t2aAssistantMsg && typeof t2aAssistantMsg.id === 'string', 'T3a assistant chat message missing id');
     assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T3a assistant file content missing paris');
+    assert(String(t2aAssistantMsg?.turn || '') === t2aTurnId, 'T3a assistant turn id mismatch');
+    for (const message of t2aNewMessages.filter((m) => m?.role === 'system')) {
+      assert(String(message?.turn || '') === t2aTurnId, 'T3a system turn id mismatch');
+    }
     console.log('[T3a] ok: non-probe response contains paris');
   }
 
@@ -1028,9 +1143,10 @@ try {
     assert(t2cBefore.status === 200, `T3c pre chats returned ${t2cBefore.status}`);
     const t2cBeforeMessages = Array.isArray(t2cBefore.data?.messages) ? t2cBefore.data.messages : [];
     const t2cBeforeCount = t2cBeforeMessages.length;
+    const t2cTurnId = randomTurnId();
 
     const t2cUploadRes = await httpUploadChatFile(
-      `${BASE}/cards/${CHAT_CARD_ID}/files?inChat=true`,
+      `${BASE}/cards/${CHAT_CARD_ID}/files?inChat=true&turn-id=${encodeURIComponent(t2cTurnId)}`,
       'q2.txt',
       'What is the captial of Japan',
     );
@@ -1057,6 +1173,7 @@ try {
     assert(!!t2cUploadSystem, 'T3c upload protocol missing system chat file');
     assert(String(t2cUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3c upload system message does not describe uploaded file');
     assert(/#\d+\s*$/.test(String(t2cUploadSystem?.text || '')), 'T3c upload system message should include merged file index');
+    assert(String(t2cUploadSystem?.turn || '') === t2cTurnId, 'T3c upload system turn id mismatch');
 
     const t2cSendBaseline = t2cUploadMessages.length;
     const t2cEventStart = NS.chatEvents.length;
@@ -1066,6 +1183,7 @@ try {
       actionType: 'chat-send',
       payload: {
         text: t2cPrompt,
+        'turn-id': t2cTurnId,
         files: [t2cUploadedFile],
       },
     });
@@ -1075,6 +1193,7 @@ try {
       eventStart: t2cEventStart,
       beforeCount: t2cSendBaseline,
       successPattern: /tokyo/i,
+      turnId: t2cTurnId,
       timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
       label: 'T3c assistant response with tokyo',
     });
@@ -1082,15 +1201,22 @@ try {
     assert(t2cOutcome.source === 'sse', 'T3c should resolve from SSE chat notifications');
 
     const t2cMessages = Array.isArray(t2cOutcome?.event?.messages) ? t2cOutcome.event.messages : [];
-    const t2cNewMessages = t2cMessages.slice(t2cSendBaseline);
+    const t2cSseNewMessages = t2cMessages.slice(t2cSendBaseline);
+    assert(t2cSseNewMessages.length >= 1, `T3c expected at least 1 new SSE chat message, got ${t2cSseNewMessages.length}`);
+    const t2cAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
+    assert(t2cAfter.status === 200, `T3c post chats returned ${t2cAfter.status}`);
+    const t2cAfterMessages = Array.isArray(t2cAfter.data?.messages) ? t2cAfter.data.messages : [];
+    const t2cNewMessages = t2cAfterMessages.slice(t2cSendBaseline);
     assert(t2cNewMessages.length >= 2, `T3c expected at least 2 new chat messages, got ${t2cNewMessages.length}`);
     const t2cUser = t2cNewMessages.find((m) => m?.role === 'user');
     const t2cAssistantMsg = [...t2cNewMessages].reverse().find((m) => m?.role === 'assistant');
-    assert(!!t2cUser, 'T3c user chat message missing from SSE payload');
+    assert(!!t2cUser, 'T3c user chat message missing from stored chats');
+    assert(String(t2cUser?.turn || '') === t2cTurnId, 'T3c user turn id mismatch');
     assert(Array.isArray(t2cUser?.files) && t2cUser.files.length === 1, 'T3c user chat message missing uploaded file metadata');
     assert(!Object.prototype.hasOwnProperty.call(t2cUser?.files?.[0] || {}, 'path'), 'T3c user chat file metadata should not expose path');
     assert(!!t2cAssistantMsg, 'T3c assistant chat message missing from SSE payload');
     assert(/tokyo/i.test(String(t2cAssistantMsg?.text || '')), 'T3c assistant file content missing tokyo');
+    assert(String(t2cAssistantMsg?.turn || '') === t2cTurnId, 'T3c assistant turn id mismatch');
     console.log('[T3c] ok: non-probe file-upload response contains tokyo');
   }
   }
@@ -1114,19 +1240,4 @@ try {
     await new Promise((r) => serverProc.on('exit', r));
   }
   if (sseWorker) await sseWorker.terminate();
-
-  if (PRESERVE_SETUP_DIR) {
-    console.log(`[demo-http-test] server stopped, setup dir preserved: ${SETUP_CLEANUP_PATH}`);
-  } else if (!runCompletedSuccessfully) {
-    console.log(`[demo-http-test] server stopped, setup dir preserved for failed run: ${SETUP_CLEANUP_PATH}`);
-  } else {
-    if (fs.existsSync(SETUP_CLEANUP_PATH)) {
-      try {
-        fs.rmSync(SETUP_CLEANUP_PATH, { recursive: true, force: true });
-      } catch (error) {
-        console.warn(`[demo-http-test] setup dir cleanup skipped: ${error?.message || error}`);
-      }
-    }
-    console.log('[demo-http-test] server stopped, setup dir cleaned');
-  }
 }

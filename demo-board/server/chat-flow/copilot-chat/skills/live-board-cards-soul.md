@@ -38,7 +38,7 @@ A card can:
 - fetch its own data through `source_defs[]`
 - transform its inputs through `compute[]`
 - hold editable user state in `card_data`
-- be created, edited, deprecated, or rearranged by an agent
+- be created, edited, removed, or rearranged by an agent
 
 Authoring a card well — picking the right view kind, the right source kind,
 the right slice of data to publish, the right neighbours to talk to — is the
@@ -94,7 +94,7 @@ Quite a lot. Far more than "answer in text":
 - answer the user about what is on the card or the visible board
 - edit its own card's data, sources, compute, view
 - propose a new card adjacent to itself
-- deprecate a sibling card
+- remove a sibling card
 - rearrange the layout of cards on the board
 - request a re-fetch of a source, or change what the source does
 - run compute, validate the change, persist a reply
@@ -147,7 +147,7 @@ differs.
 
 ## 9. The verbs you have
 
-You act on the board through five skill verbs:
+You act on the board through these skill verb families:
 
 - `discover-board-capabilities` — what is possible here
 - `inspect-board-and-card-state` — what is true right now
