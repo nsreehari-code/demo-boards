@@ -1075,12 +1075,12 @@ function createChatSseBroker(chatStorage) {
         files: Array.isArray(message?.files) ? message.files : [],
       }));
     } catch {
-      return [];
+        const line = `${formatWatchpartyToolMessage(phase, toolName, body)}\n`;
     }
   }
 
-  function isProcessing(cardId) {
     if (!chatStorage || typeof chatStorage.isProcessing !== 'function') {
+          fs.appendFileSync(outputPath, line, 'utf8');
       return false;
     }
     try {
@@ -1454,6 +1454,84 @@ function createReplayableRequest(req, rawBodyBuffer) {
   replayReq.headers = req.headers;
   replayReq.httpVersion = req.httpVersion;
   return replayReq;
+}
+
+function createBufferedJsonResponse() {
+  const headers = {};
+  const chunks = [];
+  let statusCode = 200;
+  let ended = false;
+
+  return {
+    get statusCode() {
+      return statusCode;
+    },
+    set statusCode(value) {
+      statusCode = value;
+    },
+    setHeader(name, value) {
+      headers[String(name).toLowerCase()] = value;
+    },
+    getHeader(name) {
+      return headers[String(name).toLowerCase()];
+    },
+    writeHead(nextStatusCode, nextHeaders = {}) {
+      statusCode = nextStatusCode;
+      for (const [name, value] of Object.entries(nextHeaders)) {
+        headers[String(name).toLowerCase()] = value;
+      }
+      return this;
+    },
+    write(chunk, encoding, cb) {
+      if (chunk != null) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8'));
+      }
+      if (typeof cb === 'function') {
+        cb();
+      }
+      return true;
+    },
+    end(chunk, encoding, cb) {
+      if (chunk != null) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8'));
+      }
+      ended = true;
+      if (typeof cb === 'function') {
+        cb();
+      }
+      return this;
+    },
+    toBuffer() {
+      return Buffer.concat(chunks);
+    },
+    toJsonObject() {
+      const body = this.toBuffer().toString('utf8');
+      return parseJsonObjectOrEmpty(body);
+    },
+    hasEnded() {
+      return ended;
+    },
+  };
+}
+
+async function invokeBoardMcpToolViaRuntime(req, boardId, tool, args) {
+  const requestBody = Buffer.from(JSON.stringify({ tool, args }), 'utf8');
+  const replayReq = createReplayableRequest(req, requestBody);
+  replayReq.url = `${apiBasePath}/${encodeURIComponent(boardId)}/mcp`;
+  if (replayReq.headers && typeof replayReq.headers === 'object') {
+    replayReq.headers = {
+      ...replayReq.headers,
+      'content-type': 'application/json',
+      'content-length': String(requestBody.length),
+    };
+  }
+  const bufferedRes = createBufferedJsonResponse();
+  const handled = await runtime.handleApi(replayReq, bufferedRes, new URL(`http://127.0.0.1:${PORT}${replayReq.url}`));
+  return {
+    handled,
+    statusCode: bufferedRes.statusCode,
+    payload: bufferedRes.toJsonObject(),
+  };
 }
 
 function createConfigBackedServerMetaStore(entries) {
@@ -2422,6 +2500,43 @@ const server = http.createServer((req, res) => {
         const { strippedBody, logId } = stripLogIdFromMcpBody(body);
         const toolName = typeof strippedBody?.tool === 'string' ? strippedBody.tool.trim() : '';
         const strippedArgs = normalizeMcpArgs(strippedBody);
+        const normalizedToolName = normalizeMcpToolName(toolName);
+
+        if (normalizedToolName === 'stage-ai-response-and-any-attachments') {
+          const cardId = typeof readMcpArg(strippedArgs, 'card_id', 'cardId') === 'string'
+            ? String(readMcpArg(strippedArgs, 'card_id', 'cardId')).trim()
+            : '';
+          const turnId = typeof readMcpArg(strippedArgs, 'turn-id', 'turnId') === 'string'
+            ? String(readMcpArg(strippedArgs, 'turn-id', 'turnId')).trim()
+            : '';
+
+          if (cardId && turnId) {
+            const inspectResult = await invokeBoardMcpToolViaRuntime(req, boardId, 'inspect.chat-messages-on-cards', {
+              board_id: boardId,
+              card_id: cardId,
+              'turn-id': turnId,
+            });
+            const inspectedMessages = Array.isArray(inspectResult.payload?.data?.messages)
+              ? inspectResult.payload.data.messages
+              : [];
+            const existingAssistantMessage = inspectedMessages.find((message) => message?.role === 'assistant');
+
+            if (inspectResult.handled && inspectResult.statusCode === 200 && existingAssistantMessage) {
+              jsonReply(res, 200, {
+                status: 'success',
+                data: {
+                  cardId,
+                  id: typeof existingAssistantMessage?.id === 'string' ? existingAssistantMessage.id : '',
+                  role: 'assistant',
+                  turn: turnId,
+                  files: Array.isArray(existingAssistantMessage?.files) ? existingAssistantMessage.files : [],
+                },
+              });
+              return;
+            }
+          }
+        }
+
         logMcpInvocation(toolName, strippedBody);
         appendWatchpartyToolsLog(boardId, logId, 'Invoking', toolName, strippedBody);
 
