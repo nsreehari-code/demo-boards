@@ -3,7 +3,7 @@
  * server-http-mcp-test.js
  *
  * Smoke test for demo-board/server/board-server.js over HTTP + SSE.
- * Targets the 'live-test' board (defined in server-config.json) using the 3
+ * Targets a named board (defined in server-config.json) using the 3
  * seed cards in demo-board/test/live-cards/.
  *
  * Prerequisites:
@@ -14,6 +14,9 @@
  * T0: resync → init-board → SSE initial payload → wait for all cards to complete
  * T1: direct /mcp endpoint — PATCH holdings (+1 row) → verify recomputation
  * T1a: liveboards.* MCP tools — same mutation via MCP server at 7801
+ *
+ * Usage:
+ *   node test/server-http-mcp-test.js [--board-id live-test] [--port 7799] [--run-tests T1,T1A]
  */
 
 import { spawnSync } from 'node:child_process';
@@ -43,6 +46,15 @@ function readCliOptionValue(args, optionName) {
   if (optionIndex === -1) return '';
   return String(args[optionIndex + 1] || '').trim();
 }
+
+const boardIdArg = cliArgs.indexOf('--board-id');
+const boardAliasArg = cliArgs.indexOf('--board');
+const cliBoardId = boardIdArg !== -1
+  ? String(cliArgs[boardIdArg + 1] || '').trim()
+  : (boardAliasArg !== -1 ? String(cliArgs[boardAliasArg + 1] || '').trim() : '');
+const BOARD_ID = cliBoardId || (process.env.DEMO_BOARD_ID || '').trim() || 'live-test';
+const BOARD_DIR = path.resolve(__dirname, '..');
+const SERVER_CONFIG_PATH = path.resolve(BOARD_DIR, 'server-config.json');
 
 function parseRequestedTests(rawValue) {
   if (!rawValue) return null;
@@ -95,14 +107,27 @@ function isCopilotAvailable() {
   return __copilotAvailableCache;
 }
 
-const skipT3a = skipT3 || cliArgs.includes('--skip-t3a') || !isTestSelected('T3A') || (!forceT3aBypass && !isCopilotAvailable());
+let __boardChatAssistantCache = null;
+function getBoardChatAssistant() {
+  if (__boardChatAssistantCache !== null) return __boardChatAssistantCache;
+  try {
+    const cfg = JSON.parse(fs.readFileSync(SERVER_CONFIG_PATH, 'utf-8'));
+    __boardChatAssistantCache = String(cfg?.boards?.[BOARD_ID]?.chat?.assistant || 'copilot').toLowerCase();
+  } catch {
+    __boardChatAssistantCache = 'copilot';
+  }
+  return __boardChatAssistantCache;
+}
+
+function boardRequiresCopilotCli() {
+  return getBoardChatAssistant() === 'copilot';
+}
+
+const skipT3a = skipT3 || cliArgs.includes('--skip-t3a') || !isTestSelected('T3A') || (!forceT3aBypass && boardRequiresCopilotCli() && !isCopilotAvailable());
 const skipT3b = skipT3 || cliArgs.includes('--skip-t3b') || !isTestSelected('T3B');
-const skipT3c = skipT3 || cliArgs.includes('--skip-t3c') || !isTestSelected('T3C') || !isCopilotAvailable();
+const skipT3c = skipT3 || cliArgs.includes('--skip-t3c') || !isTestSelected('T3C') || (boardRequiresCopilotCli() && !isCopilotAvailable());
 const skipT3d = skipT3 || cliArgs.includes('--skip-t3d') || !isTestSelected('T3D');
 
-const BOARD_ID = 'live-test';
-const BOARD_DIR = path.resolve(__dirname, '..');
-const SERVER_CONFIG_PATH = path.resolve(BOARD_DIR, 'server-config.json');
 const BOARD_SERVER_URL = 'http://127.0.0.1:7799';
 const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
 const CHAT_CARD_ID = 'card-portfolio';
@@ -111,14 +136,29 @@ const PORTFOLIO_SEED_CARD = JSON.parse(fs.readFileSync(PORTFOLIO_SEED_CARD_PATH,
 const PORTFOLIO_SEED_HOLDINGS = Array.isArray(PORTFOLIO_SEED_CARD?.card_data?.holdings)
   ? PORTFOLIO_SEED_CARD.card_data.holdings
   : [];
-const T1_ADDED_TICKER = 'AMZN';
+const T1_ADDED_TICKER_CANDIDATES = ['AMZN', 'AMD', 'NVDA', 'ORCL'];
 
-function loadLiveTestSetupConfig() {
+function chooseT1AddedTicker(existingHoldings) {
+  const occupied = new Set(
+    Array.isArray(existingHoldings)
+      ? existingHoldings
+        .map((row) => String(row?.ticker || '').trim().toUpperCase())
+        .filter(Boolean)
+      : [],
+  );
+  const selected = T1_ADDED_TICKER_CANDIDATES.find((ticker) => !occupied.has(ticker));
+  if (!selected) {
+    throw new Error(`Unable to find an unused T1 ticker for board ${BOARD_ID}`);
+  }
+  return selected;
+}
+
+function loadBoardSetupConfig(boardId) {
   const serverConfig = JSON.parse(fs.readFileSync(SERVER_CONFIG_PATH, 'utf-8'));
-  const liveTestSetup = serverConfig?.boards?.['live-test']?.setup;
+  const boardSetup = serverConfig?.boards?.[boardId]?.setup;
 
-  if (!liveTestSetup || typeof liveTestSetup !== 'object') {
-    throw new Error(`Missing boards.live-test.setup in ${SERVER_CONFIG_PATH}`);
+  if (!boardSetup || typeof boardSetup !== 'object') {
+    throw new Error(`Missing boards.${boardId}.setup in ${SERVER_CONFIG_PATH}`);
   }
 
   const requiredKeys = [
@@ -134,15 +174,15 @@ function loadLiveTestSetupConfig() {
   ];
 
   for (const key of requiredKeys) {
-    if (typeof liveTestSetup[key] !== 'string' || !liveTestSetup[key].trim()) {
-      throw new Error(`Expected boards.live-test.setup.${key} to be a non-empty string in ${SERVER_CONFIG_PATH}`);
+    if (typeof boardSetup[key] !== 'string' || !boardSetup[key].trim()) {
+      throw new Error(`Expected boards.${boardId}.setup.${key} to be a non-empty string in ${SERVER_CONFIG_PATH}`);
     }
   }
 
-  return liveTestSetup;
+  return boardSetup;
 }
 
-loadLiveTestSetupConfig();
+loadBoardSetupConfig(BOARD_ID);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -762,7 +802,7 @@ async function readLiveCardChats(cardId, args = {}) {
 // Test sequence
 // ---------------------------------------------------------------------------
 
-console.log('\n=== live-test board HTTP+SSE+MCP smoke test ===');
+console.log(`\n=== ${BOARD_ID} board HTTP+SSE+MCP smoke test ===`);
 console.log(`target: ${BASE}`);
 console.log(`[setup] MCP server URL: ${MCP_SERVER_URL}`);
 
@@ -885,8 +925,7 @@ try {
     const existingHoldings = restored.holdings;
     const t0HoldingsCount = existingHoldings.length;
     const t0PositionsCount = restored.positionsCount;
-    assert(!existingHoldings.some((row) => row?.ticker === T1_ADDED_TICKER), `T1 seed holdings should not already include ${T1_ADDED_TICKER}`);
-    const newTicker = T1_ADDED_TICKER;
+    const newTicker = chooseT1AddedTicker(existingHoldings);
 
     const newHoldings = [...existingHoldings, { ticker: newTicker, quantity: 1, cost_basis: 100 }];
     const nextCard = {
@@ -943,8 +982,7 @@ try {
     const existingHoldings = restored.holdings;
     const t1aHoldingsBeforeCount = existingHoldings.length;
     const t1aPositionsBeforeCount = restored.positionsCount;
-    assert(!existingHoldings.some((row) => row?.ticker === T1_ADDED_TICKER), `T1a seed holdings should not already include ${T1_ADDED_TICKER}`);
-    const newTicker = T1_ADDED_TICKER;
+    const newTicker = chooseT1AddedTicker(existingHoldings);
 
     const newHoldings = [...existingHoldings, { ticker: newTicker, quantity: 1, cost_basis: 100 }];
     const nextCard = {

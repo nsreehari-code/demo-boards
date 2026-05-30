@@ -576,19 +576,30 @@ async function waitForProcessingClearedOutcome({ eventStart, beforeCount, succes
 
 function deriveProbeLifecycleMilestones(events, opts) {
   const milestones = [];
+  const seenMessageIds = new Set();
   let prevMessageCount = Number(opts.beforeCount || 0);
   let prevProcessing = Boolean(opts.beforeProcessing);
   const prompt = String(opts.prompt || '');
   const inProgressText = String(opts.inProgressText || PROBE_IN_PROGRESS_TEXT);
+  const turnId = String(opts?.turnId || '');
 
   for (const event of events) {
     const messages = Array.isArray(event?.messages) ? event.messages : [];
-    const nextMessageCount = Number(event?.messageCount || messages.length || 0);
-    const newMessages = nextMessageCount > prevMessageCount
-      ? messages.slice(prevMessageCount, nextMessageCount)
-      : [];
+    const relevantMessages = turnId
+      ? messages.filter((message) => String(message?.turn || '') === turnId)
+      : (() => {
+        const nextMessageCount = Number(event?.messageCount || messages.length || 0);
+        const newMessages = nextMessageCount > prevMessageCount
+          ? messages.slice(prevMessageCount, nextMessageCount)
+          : [];
+        prevMessageCount = nextMessageCount;
+        return newMessages;
+      })();
 
-    for (const message of newMessages) {
+    for (const message of relevantMessages) {
+      const key = message?.id || `${message?.role}:${message?.text}`;
+      if (seenMessageIds.has(key)) continue;
+      seenMessageIds.add(key);
       const role = String(message?.role || '');
       const text = String(message?.text || '');
       if (role === 'user' && text.includes(prompt)) milestones.push('user');
@@ -598,8 +609,6 @@ function deriveProbeLifecycleMilestones(events, opts) {
 
     const processing = Boolean(event?.processing);
     if (processing !== prevProcessing) milestones.push(processing ? 'processing-true' : 'processing-false');
-
-    prevMessageCount = nextMessageCount;
     prevProcessing = processing;
   }
 
@@ -698,6 +707,10 @@ function httpUploadChatFile(url, fileName, content, contentType = 'text/plain; c
     req.write(data);
     req.end();
   });
+}
+
+function httpGetTurnChats(cardId, turnId) {
+  return httpGet(`${BASE}/cards/${cardId}/chats?turn-id=${encodeURIComponent(turnId)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -936,6 +949,7 @@ try {
       beforeCount: t2BeforeCount,
       beforeProcessing: false,
       prompt: t2ProbePrompt,
+      turnId: t2TurnId,
       inProgressText: PROBE_IN_PROGRESS_TEXT,
     });
   }, 45_000, 'T3 ordered lifecycle');
@@ -981,10 +995,6 @@ try {
   } else {
     console.log('\n=== T3b: probe-echo chat with file upload protocol ===');
     await ensureChatSseSubscription();
-    const t2bBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
-    assert(t2bBefore.status === 200, `T3b pre chats returned ${t2bBefore.status}`);
-    const t2bBeforeMessages = Array.isArray(t2bBefore.data?.messages) ? t2bBefore.data.messages : [];
-    const t2bBeforeCount = t2bBeforeMessages.length;
     const t2bTurnId = randomTurnId();
 
     const t2bUploadRes = await httpUploadChatFile(
@@ -1007,17 +1017,15 @@ try {
     assert(t2bStoredFile?.chat === true, 'T3b stored file should be marked as chat-origin');
     assert(!Object.prototype.hasOwnProperty.call(t2bStoredFile || {}, 'path'), 'T3b stored file metadata should not expose path');
 
-    const t2bAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
+    const t2bAfterUpload = await httpGetTurnChats(CHAT_CARD_ID, t2bTurnId);
     assert(t2bAfterUpload.status === 200, `T3b chats after upload returned ${t2bAfterUpload.status}`);
     const t2bUploadMessages = Array.isArray(t2bAfterUpload.data?.messages) ? t2bAfterUpload.data.messages : [];
-    const t2bUploadNewMessages = t2bUploadMessages.slice(t2bBeforeCount);
-    const t2bUploadSystem = t2bUploadNewMessages.find((m) => m?.role === 'system');
+    const t2bUploadSystem = t2bUploadMessages.find((m) => m?.role === 'system');
     assert(!!t2bUploadSystem, 'T3b upload protocol missing system chat file');
     assert(String(t2bUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3b upload system message does not describe uploaded file');
     assert(/#\d+\s*$/.test(String(t2bUploadSystem?.text || '')), 'T3b upload system message should include merged file index');
     assert(String(t2bUploadSystem?.turn || '') === t2bTurnId, 'T3b upload system turn id mismatch');
 
-    const t2bSendBaseline = t2bUploadMessages.length;
     const t2bEventStart = NS.chatEvents.length;
 
     const t2bPrompt = `probe echo file-upload validation ${Date.now()}`;
@@ -1033,7 +1041,7 @@ try {
 
     const t2bLifecycle = await waitForChatPredicate((events) => {
       return matchOrderedProbeLifecycle(events.slice(t2bEventStart), {
-        beforeCount: t2bSendBaseline,
+        turnId: t2bTurnId,
         beforeProcessing: false,
         prompt: t2bPrompt,
         inProgressText: PROBE_IN_PROGRESS_TEXT,
@@ -1041,15 +1049,14 @@ try {
     }, 60_000, 'T3b ordered lifecycle');
     assert(!!t2bLifecycle, 'T3b ordered lifecycle not observed');
 
-    const t2bAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
-    assert(t2bAfter.status === 200, `T3b post chats returned ${t2bAfter.status}`);
-    const t2bAfterMessages = Array.isArray(t2bAfter.data?.messages) ? t2bAfter.data.messages : [];
-    const t2bNewMessages = t2bAfterMessages.slice(t2bSendBaseline);
-    assert(t2bNewMessages.length >= 3, `T3b expected at least 3 chat messages after send, got ${t2bNewMessages.length}`);
+    const t2bAfterMessages = await httpGetTurnChats(CHAT_CARD_ID, t2bTurnId);
+    assert(t2bAfterMessages.status === 200, `T3b post chats returned ${t2bAfterMessages.status}`);
+    const t2bTurnMessages = Array.isArray(t2bAfterMessages.data?.messages) ? t2bAfterMessages.data.messages : [];
+    assert(t2bTurnMessages.length >= 3, `T3b expected at least 3 chat messages in turn, got ${t2bTurnMessages.length}`);
 
-    const t2bUser = t2bNewMessages.find((m) => m?.role === 'user');
-    const t2bInProgress = t2bNewMessages.find((m) => m?.role === 'system' && String(m?.text || '').trim().toLowerCase() === PROBE_IN_PROGRESS_TEXT);
-    const t2bAssistantMsg = t2bNewMessages.find((m) => m?.role === 'assistant');
+    const t2bUser = t2bTurnMessages.find((m) => m?.role === 'user');
+    const t2bInProgress = t2bTurnMessages.find((m) => m?.role === 'system' && String(m?.text || '').trim().toLowerCase() === PROBE_IN_PROGRESS_TEXT);
+    const t2bAssistantMsg = t2bTurnMessages.find((m) => m?.role === 'assistant');
 
     assert(!!t2bUser && typeof t2bUser.id === 'string', 'T3b missing user chat message notification');
     assert(String(t2bUser?.turn || '') === t2bTurnId, 'T3b user turn id mismatch');
@@ -1097,6 +1104,7 @@ try {
         beforeCount: t2dBeforeCount,
         beforeProcessing: false,
         prompt: t2dPrompt,
+        turnId: t2dTurnId,
         inProgressText: PROBE_IN_PROGRESS_TEXT,
       });
     }, 60_000, 'T3d ordered lifecycle');
@@ -1151,10 +1159,6 @@ try {
   } else {
     console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');
     await ensureChatSseSubscription();
-    const t2aBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
-    assert(t2aBefore.status === 200, `T3a pre chats returned ${t2aBefore.status}`);
-    const t2aBeforeMessages = Array.isArray(t2aBefore.data?.messages) ? t2aBefore.data.messages : [];
-    const t2aBeforeCount = t2aBeforeMessages.length;
     const t2aEventStart = NS.chatEvents.length;
     const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
     const t2aTurnId = randomTurnId();
@@ -1170,7 +1174,7 @@ try {
 
     const t2aOutcome = await waitForAssistantOutcome({
       eventStart: t2aEventStart,
-      beforeCount: t2aBeforeCount,
+      beforeCount: 0,
       successPattern: /paris/i,
       turnId: t2aTurnId,
       timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
@@ -1180,7 +1184,7 @@ try {
     assert(t2aOutcome.source === 'sse', 'T3a should resolve from SSE chat notifications');
     const t2aSettledOutcome = await waitForProcessingClearedOutcome({
       eventStart: t2aEventStart,
-      beforeCount: t2aBeforeCount,
+      beforeCount: 0,
       successPattern: /paris/i,
       turnId: t2aTurnId,
       timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
@@ -1190,22 +1194,22 @@ try {
     assert(t2aSettledOutcome.source === 'sse', 'T3a processing clear should resolve from SSE chat notifications');
     assert(t2aSettledOutcome.event?.processing === false, 'T3a final SSE event should clear processing');
 
-    const t2aMessages = Array.isArray(t2aSettledOutcome?.event?.messages) ? t2aSettledOutcome.event.messages : [];
-    const t2aSseNewMessages = t2aMessages.slice(t2aBeforeCount);
-    assert(t2aSseNewMessages.length >= 1, `T3a expected at least 1 new SSE chat message, got ${t2aSseNewMessages.length}`);
-    const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
+    const t2aMessages = Array.isArray(t2aSettledOutcome?.event?.messages)
+      ? t2aSettledOutcome.event.messages.filter((message) => String(message?.turn || '') === t2aTurnId)
+      : [];
+    assert(t2aMessages.length >= 1, `T3a expected at least 1 SSE chat message in turn, got ${t2aMessages.length}`);
+    const t2aAfter = await httpGetTurnChats(CHAT_CARD_ID, t2aTurnId);
     assert(t2aAfter.status === 200, `T3a post chats returned ${t2aAfter.status}`);
     const t2aAfterMessages = Array.isArray(t2aAfter.data?.messages) ? t2aAfter.data.messages : [];
-    const t2aNewMessages = t2aAfterMessages.slice(t2aBeforeCount);
-    assert(t2aNewMessages.length >= 2, `T3a expected at least 2 new chat messages, got ${t2aNewMessages.length}`);
-    const t2aUser = t2aNewMessages.find((m) => m?.role === 'user');
-    const t2aAssistantMsg = [...t2aNewMessages].reverse().find((m) => m?.role === 'assistant');
+    assert(t2aAfterMessages.length >= 2, `T3a expected at least 2 chat messages in turn, got ${t2aAfterMessages.length}`);
+    const t2aUser = t2aAfterMessages.find((m) => m?.role === 'user');
+    const t2aAssistantMsg = [...t2aAfterMessages].reverse().find((m) => m?.role === 'assistant');
     assert(!!t2aUser && typeof t2aUser.id === 'string', 'T3a user chat message missing id');
     assert(String(t2aUser?.turn || '') === t2aTurnId, 'T3a user turn id mismatch');
     assert(!!t2aAssistantMsg && typeof t2aAssistantMsg.id === 'string', 'T3a assistant chat message missing id');
     assert(/paris/i.test(String(t2aAssistantMsg?.text || '')), 'T3a assistant file content missing paris');
     assert(String(t2aAssistantMsg?.turn || '') === t2aTurnId, 'T3a assistant turn id mismatch');
-    for (const message of t2aNewMessages.filter((m) => m?.role === 'system')) {
+    for (const message of t2aAfterMessages.filter((m) => m?.role === 'system')) {
       assert(String(message?.turn || '') === t2aTurnId, 'T3a system turn id mismatch');
     }
     console.log('[T3a] ok: non-probe response contains paris and SSE clears processing');
@@ -1217,10 +1221,6 @@ try {
   } else {
     console.log('\n=== T3c: non-probe chat with file upload protocol (expect tokyo) ===');
     await ensureChatSseSubscription();
-    const t2cBefore = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
-    assert(t2cBefore.status === 200, `T3c pre chats returned ${t2cBefore.status}`);
-    const t2cBeforeMessages = Array.isArray(t2cBefore.data?.messages) ? t2cBefore.data.messages : [];
-    const t2cBeforeCount = t2cBeforeMessages.length;
     const t2cTurnId = randomTurnId();
 
     const t2cUploadRes = await httpUploadChatFile(
@@ -1243,17 +1243,15 @@ try {
     assert(t2cStoredFile?.chat === true, 'T3c stored file should be marked as chat-origin');
     assert(!Object.prototype.hasOwnProperty.call(t2cStoredFile || {}, 'path'), 'T3c stored file metadata should not expose path');
 
-    const t2cAfterUpload = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
+    const t2cAfterUpload = await httpGetTurnChats(CHAT_CARD_ID, t2cTurnId);
     assert(t2cAfterUpload.status === 200, `T3c chats after upload returned ${t2cAfterUpload.status}`);
     const t2cUploadMessages = Array.isArray(t2cAfterUpload.data?.messages) ? t2cAfterUpload.data.messages : [];
-    const t2cUploadNewMessages = t2cUploadMessages.slice(t2cBeforeCount);
-    const t2cUploadSystem = t2cUploadNewMessages.find((m) => m?.role === 'system');
+    const t2cUploadSystem = t2cUploadMessages.find((m) => m?.role === 'system');
     assert(!!t2cUploadSystem, 'T3c upload protocol missing system chat file');
     assert(String(t2cUploadSystem?.text || '').toLowerCase().includes('file uploaded:'), 'T3c upload system message does not describe uploaded file');
     assert(/#\d+\s*$/.test(String(t2cUploadSystem?.text || '')), 'T3c upload system message should include merged file index');
     assert(String(t2cUploadSystem?.turn || '') === t2cTurnId, 'T3c upload system turn id mismatch');
 
-    const t2cSendBaseline = t2cUploadMessages.length;
     const t2cEventStart = NS.chatEvents.length;
     const t2cPrompt = 'Answer the question in the attached file in one word';
 
@@ -1269,7 +1267,7 @@ try {
 
     const t2cOutcome = await waitForAssistantOutcome({
       eventStart: t2cEventStart,
-      beforeCount: t2cSendBaseline,
+      beforeCount: 0,
       successPattern: /tokyo/i,
       turnId: t2cTurnId,
       timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
@@ -1279,7 +1277,7 @@ try {
     assert(t2cOutcome.source === 'sse', 'T3c should resolve from SSE chat notifications');
     const t2cSettledOutcome = await waitForProcessingClearedOutcome({
       eventStart: t2cEventStart,
-      beforeCount: t2cSendBaseline,
+      beforeCount: 0,
       successPattern: /tokyo/i,
       turnId: t2cTurnId,
       timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
@@ -1289,16 +1287,16 @@ try {
     assert(t2cSettledOutcome.source === 'sse', 'T3c processing clear should resolve from SSE chat notifications');
     assert(t2cSettledOutcome.event?.processing === false, 'T3c final SSE event should clear processing');
 
-    const t2cMessages = Array.isArray(t2cSettledOutcome?.event?.messages) ? t2cSettledOutcome.event.messages : [];
-    const t2cSseNewMessages = t2cMessages.slice(t2cSendBaseline);
-    assert(t2cSseNewMessages.length >= 1, `T3c expected at least 1 new SSE chat message, got ${t2cSseNewMessages.length}`);
-    const t2cAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
+    const t2cMessages = Array.isArray(t2cSettledOutcome?.event?.messages)
+      ? t2cSettledOutcome.event.messages.filter((message) => String(message?.turn || '') === t2cTurnId)
+      : [];
+    assert(t2cMessages.length >= 1, `T3c expected at least 1 SSE chat message in turn, got ${t2cMessages.length}`);
+    const t2cAfter = await httpGetTurnChats(CHAT_CARD_ID, t2cTurnId);
     assert(t2cAfter.status === 200, `T3c post chats returned ${t2cAfter.status}`);
     const t2cAfterMessages = Array.isArray(t2cAfter.data?.messages) ? t2cAfter.data.messages : [];
-    const t2cNewMessages = t2cAfterMessages.slice(t2cSendBaseline);
-    assert(t2cNewMessages.length >= 2, `T3c expected at least 2 new chat messages, got ${t2cNewMessages.length}`);
-    const t2cUser = t2cNewMessages.find((m) => m?.role === 'user');
-    const t2cAssistantMsg = [...t2cNewMessages].reverse().find((m) => m?.role === 'assistant');
+    assert(t2cAfterMessages.length >= 2, `T3c expected at least 2 chat messages in turn, got ${t2cAfterMessages.length}`);
+    const t2cUser = t2cAfterMessages.find((m) => m?.role === 'user');
+    const t2cAssistantMsg = [...t2cAfterMessages].reverse().find((m) => m?.role === 'assistant');
     assert(!!t2cUser, 'T3c user chat message missing from stored chats');
     assert(String(t2cUser?.turn || '') === t2cTurnId, 'T3c user turn id mismatch');
     assert(Array.isArray(t2cUser?.files) && t2cUser.files.length === 1, 'T3c user chat message missing uploaded file metadata');
