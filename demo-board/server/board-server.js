@@ -863,6 +863,20 @@ const serverConfig = loadServerConfig();
 const configuredChatFlowTimeoutMs = normalizeTimeoutMs(serverConfig.chatFlowTimeoutMs, null);
 const configuredInvokeRefTimeoutMs = normalizeNonNegativeTimeoutMs(serverConfig.chatInvokeRefTimeoutMs, 300000);
 const configuredCopilotTimeoutMs = normalizeTimeoutMs(serverConfig.chatCopilotTimeoutMs, 300000);
+const configuredFoundryAgents = (serverConfig.foundryAgents && typeof serverConfig.foundryAgents === 'object')
+  ? serverConfig.foundryAgents
+  : {};
+const configuredFoundryEndpoint = typeof configuredFoundryAgents.endpoint === 'string'
+  ? configuredFoundryAgents.endpoint.trim()
+  : '';
+const configuredFoundryChatAgentId = typeof configuredFoundryAgents.chatAgentId === 'string'
+  ? configuredFoundryAgents.chatAgentId.trim()
+  : '';
+const configuredFoundryChatExposedPrefixes = Array.isArray(configuredFoundryAgents.chatExposedMcpToolPrefixes)
+  ? configuredFoundryAgents.chatExposedMcpToolPrefixes
+      .filter((entry) => typeof entry === 'string' && entry.trim())
+      .map((entry) => entry.trim())
+  : [];
 const configuredWatchpartyConfig = {
   outputChannel: normalizeConfigText(serverConfig.watchparty?.outputChannel, DEFAULT_WATCHPARTY_CONFIG.outputChannel),
   toolsChannel: normalizeConfigText(serverConfig.watchparty?.toolsChannel, DEFAULT_WATCHPARTY_CONFIG.toolsChannel),
@@ -1075,12 +1089,12 @@ function createChatSseBroker(chatStorage) {
         files: Array.isArray(message?.files) ? message.files : [],
       }));
     } catch {
-        const line = `${formatWatchpartyToolMessage(phase, toolName, body)}\n`;
+      return [];
     }
   }
 
+  function isProcessing(cardId) {
     if (!chatStorage || typeof chatStorage.isProcessing !== 'function') {
-          fs.appendFileSync(outputPath, line, 'utf8');
       return false;
     }
     try {
@@ -1796,6 +1810,17 @@ const runtime = createMultiBoardServerRuntime({
     const stepMachinePath = resolveFromConfig(regular.stepMachineCliPath || cfg?.stepMachineCliPath) || (entry?.stepMachineCliPath || configuredStepMachineCliPath);
     const chatCopilotTimeoutMs = configuredCopilotTimeoutMs;
 
+    const perBoardChatCfg = (cfg?.chat && typeof cfg.chat === 'object') ? cfg.chat : {};
+    const chatAssistantRaw = typeof perBoardChatCfg.assistant === 'string'
+      ? perBoardChatCfg.assistant.trim().toLowerCase()
+      : '';
+    const chatAssistant = (chatAssistantRaw === 'foundry' || chatAssistantRaw === 'copilot' || chatAssistantRaw === 'probe')
+      ? chatAssistantRaw
+      : 'copilot';
+    const foundryEndpoint = configuredFoundryEndpoint;
+    const foundryChatAgentId = configuredFoundryChatAgentId;
+    const foundryChatExposedMcpToolPrefixes = configuredFoundryChatExposedPrefixes;
+
     if (chatHandlerPath && !process.env.DEMO_CHAT_HANDLER_PATH) {
       process.env.DEMO_CHAT_HANDLER_PATH = chatHandlerPath;
     }
@@ -1843,6 +1868,10 @@ const runtime = createMultiBoardServerRuntime({
       serverUrl: `http://127.0.0.1:${PORT}`,
       watchPartyFilesForChatDir,
       chatCopilotTimeoutMs,
+      chatAssistant,
+      foundryEndpoint,
+      foundryChatAgentId,
+      foundryChatExposedMcpToolPrefixes,
       ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
     };
 
@@ -1901,6 +1930,10 @@ const runtime = createMultiBoardServerRuntime({
         chatFlowRoot,
         watchPartyFilesForChatDir,
         chatCopilotTimeoutMs,
+        chatAssistant,
+        foundryEndpoint,
+        foundryChatAgentId,
+        foundryChatExposedMcpToolPrefixes,
         ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
       },
     });

@@ -12,6 +12,12 @@
   "chatFlowTimeoutMs": 1800000,
   "chatInvokeRefTimeoutMs": 1800000,
   "chatCopilotTimeoutMs": 1800000,
+  "foundryAgents": {
+    "endpoint": "https://sz-foundry.services.ai.azure.com/api/projects/sz-project",
+    "taskExecutorAgentId": "asst_IMDJiVnL9fS0QbttDXKxN5lF",
+    "chatAgentId": "asst_IMDJiVnL9fS0QbttDXKxN5lF",
+    "chatExposedMcpToolPrefixes": ["liveboards.", "lore."]
+  },
   "watchparty": {
     "outputChannel": "copilot-output",
     "toolsChannel": "copilot-tools",
@@ -22,6 +28,7 @@
     "finbook": {
       "label": "Finbook",
       "subtitle": "Live operational intelligence for agent workflows",
+      "chat": { "assistant": "copilot" },
       "setup": {
         "setupRoot": "../workspaces/finbook/case-workspace",
         "aiWorkspaceRoot": "copilot-workspaces",
@@ -58,6 +65,7 @@
     "live": {
       "label": "Live",
       "subtitle": "Live operational intelligence for agent workflows",
+      "chat": { "assistant": "foundry" },
       "setup": {
         "setupRoot": "../workspaces/live/case-workspace",
         "aiWorkspaceRoot": "copilot-workspaces",
@@ -93,6 +101,7 @@
     },
     "live-test": {
       "label": "Live Test",
+      "chat": { "assistant": "copilot" },
       "setup": {
         "setupRoot": "../workspaces/live-test/case-workspace",
         "aiWorkspaceRoot": "copilot-workspaces",
@@ -128,9 +137,40 @@
         }
       ]
     },
+    "live-test-foundry": {
+      "label": "Live Test (Foundry)",
+      "chat": { "assistant": "foundry" },
+      "setup": {
+        "setupRoot": "../workspaces/live-test-foundry/case-workspace",
+        "aiWorkspaceRoot": "copilot-workspaces",
+        "cardStore": "cards-store",
+        "artifactsStore": "cards-files",
+        "boardRuntime": "runtime",
+        "boardOutputsStore": "board-outputs",
+        "chatStore": "cards-chats",
+        "scratchStore": "scratch",
+        "archivalStore": "runtime-archive"
+      },
+      "regular": {
+        "seedCardsDir": "./test/live-cards",
+        "taskExecutorPath": "./server/board-worker/task-executor.js",
+        "chatHandlerFlowPath": "./server/chat-flow/flow-steps.json"
+      },
+      "copilot-workdirs-setup": [
+        {
+          "copilot-root": "default",
+          "instructionsDirs": ["./server/chat-flow/copilot-chat/instructions", "./boards/live/copilot/default/instructions"],
+          "agentsDirs": ["./server/chat-flow/copilot-chat/agents", "./boards/live/copilot/default/agents"],
+          "agentsSkills": ["./server/chat-flow/copilot-chat/skills", "./boards/live/copilot/default/skills"],
+          "agentsHooks": ["./server/chat-flow/copilot-chat/hooks", "./boards/live/copilot/default/hooks"],
+          "copyScripts": ["./scripts/cli"]
+        }
+      ]
+    },
     "sentinel": {
       "label": "Sentinel Demo",
       "subtitle": "Live operational intelligence for agent workflows",
+      "chat": { "assistant": "copilot" },
       "setup": {
         "setupRoot": "../workspaces/sentinel/case-workspace",
         "aiWorkspaceRoot": "copilot-workspaces",

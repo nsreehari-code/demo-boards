@@ -10,7 +10,7 @@
   "steps": {
     "validate_input_data": {
       "description": "Declare the values entering from input_data and validate the required external flow inputs before internal steps run",
-      "expects_data": ["boardId", "cardId", "logId", "turnId", "baseRef", "aiWorkspaceRoot", "boardSetupRoot", "cardStoreRef", "chatStoreRef", "artifactsStoreRef", "scratchStoreRef", "chatFlowRoot", "userText", "chatCopilotTimeoutMs"],
+      "expects_data": ["boardId", "cardId", "logId", "turnId", "baseRef", "aiWorkspaceRoot", "boardSetupRoot", "cardStoreRef", "chatStoreRef", "artifactsStoreRef", "scratchStoreRef", "chatFlowRoot", "userText", "chatCopilotTimeoutMs", "chatAssistant", "foundryEndpoint", "foundryChatAgentId", "foundryChatExposedMcpToolPrefixes"],
       "input_validations": [
         "$type(cardId) = \"string\" and $length(cardId) > 0",
         "$type(logId) = \"string\" and $length(logId) > 0",
@@ -35,7 +35,7 @@
     },
     "select_assistant": {
       "description": "Normalize the incoming user text, detect the probe marker, and choose the downstream assistant",
-      "expects_data": ["userText", "chatCopilotTimeoutMs"],
+      "expects_data": ["userText", "chatCopilotTimeoutMs", "chatAssistant"],
       "produces_data": ["chatCopilotTimeoutMs", "selectedAssistant"],
       "input_validations": [
         "$type(userText) = \"string\" and $length($trim(userText)) > 0"
@@ -48,12 +48,14 @@
           "data._rawMessageText = $trim(expects_data.userText)",
           "data._isEchoProbe = $length(data._rawMessageText) >= (data._markerLen * 2) and $substring(data._rawMessageText, 0, data._markerLen) = data._marker and $substring(data._rawMessageText, $length(data._rawMessageText) - data._markerLen) = data._marker",
           "data.chatCopilotTimeoutMs = ($parsePositiveInt := function($value) { ($type($value) = \"number\" and $value > 0) ? $floor($value) : (($type($value) = \"string\" and $count($match($trim($value), /^[0-9]+$/)) > 0 and $number($trim($value)) > 0) ? $floor($number($trim($value))) : null) }; $fallbackTimeout := $parsePositiveInt(expects_data.chatCopilotTimeoutMs); $fallbackTimeout ? $fallbackTimeout : 300000)",
-          "data.selectedAssistant = data._isEchoProbe ? \"probe\" : \"copilot\"",
+          "data._configuredAssistant = $type(expects_data.chatAssistant) = \"string\" and $length($trim(expects_data.chatAssistant)) > 0 ? $lowercase($trim(expects_data.chatAssistant)) : \"copilot\"",
+          "data.selectedAssistant = data._isEchoProbe ? \"probe\" : (data._configuredAssistant in [\"copilot\", \"foundry\", \"probe\"] ? data._configuredAssistant : \"copilot\")",
           "result = data.selectedAssistant"
         ]
       },
       "transitions": {
         "copilot": "copilot_assistant",
+        "foundry": "foundry_assistant",
         "probe": "probe_assistant",
         "failure": "cleanup_failure",
         "error": "cleanup_failure"
@@ -85,6 +87,43 @@
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/copilot-chat/assistant.js'"],
           "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'logId': logId, 'turnId': turnId, 'baseRef': baseRef, 'aiWorkspaceRoot': aiWorkspaceRoot, 'boardSetupRoot': boardSetupRoot, 'cardStoreRef': cardStoreRef, 'chatStoreRef': chatStoreRef, 'artifactsStoreRef': artifactsStoreRef, 'scratchStoreRef': scratchStoreRef, 'chatFlowRoot': chatFlowRoot, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs }"
+        },
+        "meta": "chat-handler"
+      },
+      "transitions": {
+        "success": "assistant_clear_processing",
+        "failure": "cleanup_failure",
+        "error": "cleanup_failure"
+      }
+    },
+    "foundry_assistant": {
+      "description": "Run the Foundry-backed assistant logic, which persists its own assistant reply into chat storage via the same final-reply MCP path",
+      "server_reply_contract_comment": "No reply text is expected back from foundry-chat/assistant.js. The assistant must write user-visible replies through the shared final-reply MCP tool and exit success or error.",
+      "expects_data": ["boardId", "cardId", "logId", "turnId", "baseRef", "aiWorkspaceRoot", "boardSetupRoot", "cardStoreRef", "chatStoreRef", "artifactsStoreRef", "scratchStoreRef", "chatFlowRoot", "watchPartyFilesForChatDir", "chatCopilotTimeoutMs", "foundryEndpoint", "foundryChatAgentId", "foundryChatExposedMcpToolPrefixes"],
+      "produces_data": ["assistantHandled"],
+      "input_validations": [
+        "$type(aiWorkspaceRoot) = \"string\" and $length(aiWorkspaceRoot) > 0",
+        "$type(boardSetupRoot) = \"string\" and $length(boardSetupRoot) > 0",
+        "$type(cardStoreRef) = \"string\" and $length(cardStoreRef) > 0",
+        "$type(chatStoreRef) = \"string\" and $length(chatStoreRef) > 0",
+        "$type(logId) = \"string\" and $length(logId) > 0",
+        "$type(turnId) = \"string\" and $length(turnId) > 0",
+        "$type(scratchStoreRef) = \"string\" and $length(scratchStoreRef) > 0",
+        "$type(chatFlowRoot) = \"string\" and $length(chatFlowRoot) > 0",
+        "$type(watchPartyFilesForChatDir) = \"string\" and $length(watchPartyFilesForChatDir) > 0",
+        "$type(foundryEndpoint) = \"string\" and $length(foundryEndpoint) > 0",
+        "$type(foundryChatAgentId) = \"string\" and $length(foundryChatAgentId) > 0"
+      ],
+      "handler": {
+        "type": "ref",
+        "howToRun": "local-process",
+        "whatToRun": {
+          "kind": "process-name",
+          "value": "node"
+        },
+        "argsMassaging": {
+          "cmdTemplate": ["chatFlowRoot & '/foundry-chat/assistant.js'"],
+          "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'logId': logId, 'turnId': turnId, 'baseRef': baseRef, 'aiWorkspaceRoot': aiWorkspaceRoot, 'boardSetupRoot': boardSetupRoot, 'cardStoreRef': cardStoreRef, 'chatStoreRef': chatStoreRef, 'artifactsStoreRef': artifactsStoreRef, 'scratchStoreRef': scratchStoreRef, 'chatFlowRoot': chatFlowRoot, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs, 'foundryEndpoint': foundryEndpoint, 'foundryChatAgentId': foundryChatAgentId, 'foundryChatExposedMcpToolPrefixes': foundryChatExposedMcpToolPrefixes }"
         },
         "meta": "chat-handler"
       },

@@ -9,7 +9,7 @@
     "test": "node demo-board/test/server-http-test.js && npm run mcp:test",
     "finbook:build": "npm --prefix mcp-server-managed-truthsets/finbook run build",
     "finbook:check": "npm --prefix mcp-server-managed-truthsets/finbook run check",
-    "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt",
+    "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt && pip install -r demo-board/server/chat-flow/foundry-chat/requirements.txt",
     "postinstall": "npm run install:foundry && npm run check:prereqs",
     "start": "node scripts/start-server.cjs demo-board --all",
     "ui": "node ./node_modules/http-server/bin/http-server docs -p 8000 -c-1",

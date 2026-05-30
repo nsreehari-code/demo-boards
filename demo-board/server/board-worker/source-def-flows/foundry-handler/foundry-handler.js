@@ -13,7 +13,8 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HANDLER_DIR = path.dirname(fileURLToPath(import.meta.url));
-const FOUNDRY_CONFIG_FILE = path.join(HANDLER_DIR, 'foundry-config.json');
+// server-config.json lives at demo-board/server-config.json — four levels up from this handler.
+const SERVER_CONFIG_FILE = path.resolve(HANDLER_DIR, '..', '..', '..', '..', 'server-config.json');
 const FOUNDRY_INVOKE_SCRIPT = path.join(HANDLER_DIR, 'invoke.py');
 
 function interpolate(template, args) {
@@ -28,11 +29,16 @@ function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 }
 
-function loadFoundryConfig() {
+function loadFoundryAgentsConfig() {
   try {
-    return readJson(FOUNDRY_CONFIG_FILE);
+    const cfg = readJson(SERVER_CONFIG_FILE);
+    const fa = (cfg && typeof cfg.foundryAgents === 'object') ? cfg.foundryAgents : {};
+    return {
+      endpoint: typeof fa.endpoint === 'string' ? fa.endpoint.trim() : '',
+      agent_id: typeof fa.taskExecutorAgentId === 'string' ? fa.taskExecutorAgentId.trim() : '',
+    };
   } catch {
-    return {};
+    return { endpoint: '', agent_id: '' };
   }
 }
 
@@ -54,7 +60,7 @@ export async function execute(context) {
   const sourceDef = context?.sourceDef || {};
   const extra = context?.extra || {};
   const promptContext = context?.promptContext || DEFAULT_PROMPT_CONTEXT;
-  const handlerConfig = loadFoundryConfig();
+  const handlerConfig = loadFoundryAgentsConfig();
 
   const cfg = typeof sourceDef.foundry === 'object' ? sourceDef.foundry : {};
   if (!cfg.prompt_template) {
@@ -66,7 +72,7 @@ export async function execute(context) {
   if (!endpoint || !agentId) {
     return {
       result: 'failure',
-      data: { error: 'foundry: endpoint and agent_id must be set in source_def or foundry-config.json' },
+      data: { error: 'foundry: endpoint and agent_id must be set in source_def or server-config.json foundryAgents block' },
       error: 'missing endpoint/agent_id',
     };
   }
