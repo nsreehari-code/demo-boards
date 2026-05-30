@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import {
   deriveCardIdFromLogId,
   deriveLogIdFromCardId,
-  resolveCopilotToolsLogFilePath,
+  resolveAgentToolsLogFilePath,
 } from './chat-flow/copilot-chat/watchparty.js';
 
 import {
@@ -435,7 +435,7 @@ function appendWatchpartyToolsLog(boardId, logId, phase, toolName, body) {
     return;
   }
 
-  const outputPath = resolveCopilotToolsLogFilePath(watchPartyFilesForChatDir, sanitizedCardId);
+  const outputPath = resolveAgentToolsLogFilePath(watchPartyFilesForChatDir, sanitizedCardId);
   const line = formatWatchpartyToolMessage(phase, toolName, body);
 
   try {
@@ -467,12 +467,12 @@ const DEFAULT_SETUP_LEAVES = {
 };
 
 const DEFAULT_WATCHPARTY_CONFIG = {
-  outputChannel: 'copilot-output',
-  toolsChannel: 'copilot-tools',
+  outputChannel: 'agent-output',
+  toolsChannel: 'agent-tools',
   filesForChatDir: 'watchparty-files-for-chat',
 };
 
-function parseCopilotWatchpartyFileName(relativePath, watchpartyConfig) {
+function parseAgentWatchpartyFileName(relativePath, watchpartyConfig) {
   const normalized = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   if (!normalized) {
     return null;
@@ -1294,7 +1294,7 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
 
   function emitFileSnapshot(key) {
     clearTimer(key);
-    const watchpartyMeta = parseCopilotWatchpartyFileName(key, configuredWatchpartyConfig);
+    const watchpartyMeta = parseAgentWatchpartyFileName(key, configuredWatchpartyConfig);
     if (!watchpartyMeta) {
       return;
     }
@@ -1359,7 +1359,7 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
     }
 
     for (const key of keys) {
-      if (!parseCopilotWatchpartyFileName(key, configuredWatchpartyConfig)) {
+      if (!parseAgentWatchpartyFileName(key, configuredWatchpartyConfig)) {
         continue;
       }
       if (fs.existsSync(path.join(watchDir, key))) {
@@ -1389,7 +1389,7 @@ function createWatchpartyDirectoryWatcher(broker, watchDir) {
           return;
         }
 
-        if (parseCopilotWatchpartyFileName(key, configuredWatchpartyConfig)) {
+        if (parseAgentWatchpartyFileName(key, configuredWatchpartyConfig)) {
           ensureFilePoller(key);
         }
 

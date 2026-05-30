@@ -17,8 +17,8 @@ import {
   stageAssistantReplyViaMcp,
 } from './shared.js';
 import {
-  resolveCopilotOutputFilePath,
-  resolveCopilotWatchpartyCardDir,
+  resolveAgentOutputFilePath,
+  resolveAgentWatchpartyCardDir,
 } from './watchparty.js';
 
 const COPILOT_MODEL = 'gpt-5.4';
@@ -52,8 +52,8 @@ const DEBUG_FILE_OVERRIDE = resolveAssistantDebugFile();
 const scratchDir = scratchStoreRef ? resolveStoreDir(scratchStoreRef, 'scratchStoreRef') : '';
 const DEBUG_LOG_FILE = DEBUG_FILE_OVERRIDE
   || (scratchDir ? path.join(scratchDir, 'assistant-debug.jsonl') : '');
-const copilotOutputFile = watchPartyFilesForChatDir ? resolveCopilotOutputFilePath(watchPartyFilesForChatDir, cardId) : '';
-const copilotWatchpartyCardDir = watchPartyFilesForChatDir ? resolveCopilotWatchpartyCardDir(watchPartyFilesForChatDir, cardId) : '';
+const agentOutputFile = watchPartyFilesForChatDir ? resolveAgentOutputFilePath(watchPartyFilesForChatDir, cardId) : '';
+const agentWatchpartyCardDir = watchPartyFilesForChatDir ? resolveAgentWatchpartyCardDir(watchPartyFilesForChatDir, cardId) : '';
 
 function DBG_LOG(stage, details = {}) {
   if (!ENABLE_DEBUG_LOGGING) {
@@ -296,13 +296,13 @@ function runCopilot(prompt, workingDir, options = {}) {
   const { continueSession = false, onCleanupDeferred = null } = options;
   const ts = Date.now();
   const tempRoot = scratchDir;
-  const outFile = copilotOutputFile || path.join(tempRoot, `asst-out-${ts}.txt`);
+  const outFile = agentOutputFile || path.join(tempRoot, `asst-out-${ts}.txt`);
   const errFile = path.join(tempRoot, `asst-err-${ts}.txt`);
 
   function cleanupWatchpartyFiles() {
-    if (copilotWatchpartyCardDir) {
+    if (agentWatchpartyCardDir) {
       try {
-        fs.rmSync(copilotWatchpartyCardDir, { recursive: true, force: true });
+        fs.rmSync(agentWatchpartyCardDir, { recursive: true, force: true });
       } catch {}
       return;
     }

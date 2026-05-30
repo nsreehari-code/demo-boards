@@ -25,7 +25,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 
-const COPILOT_OUTPUT_CHANNEL = 'copilot-output';
+const AGENT_OUTPUT_CHANNEL = 'agent-output';
 
 const ECHO_PROBE_MARKER = '__probe__echo__probe__';
 const PROBE_IN_PROGRESS_TEXT = 'in-progress';
@@ -725,7 +725,7 @@ async function ensureChatSseSubscription() {
   if (!chatSseClient) {
     chatSseClient = startSseClient(`${BASE}/sse?clientId=${encodeURIComponent(chatSseClientId)}`, (payload) => {
       captureChatEvents(payload, CHAT_CARD_ID);
-      captureWatchpartyEvents(payload, CHAT_CARD_ID, COPILOT_OUTPUT_CHANNEL);
+      captureWatchpartyEvents(payload, CHAT_CARD_ID, AGENT_OUTPUT_CHANNEL);
     });
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
@@ -739,7 +739,7 @@ async function ensureWatchpartySseSubscription() {
   if (watchpartySubscribed) {
     return;
   }
-  const subRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/watch-channel/${COPILOT_OUTPUT_CHANNEL}/subscribe-sse`, { clientId: chatSseClientId });
+  const subRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/watch-channel/${AGENT_OUTPUT_CHANNEL}/subscribe-sse`, { clientId: chatSseClientId });
   assert(subRes.status === 200, `watchparty subscribe returned ${subRes.status}`);
   watchpartySubscribed = true;
 }
@@ -1316,7 +1316,7 @@ try {
   if (chatSseClientId) {
     try {
       if (watchpartySubscribed) {
-        await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/watch-channel/${COPILOT_OUTPUT_CHANNEL}/unsubscribe-sse`, { clientId: chatSseClientId });
+        await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/watch-channel/${AGENT_OUTPUT_CHANNEL}/unsubscribe-sse`, { clientId: chatSseClientId });
       }
     } catch { /* ignore */ }
     try {

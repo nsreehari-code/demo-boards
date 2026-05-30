@@ -3,9 +3,9 @@
 /**
  * foundry-chat/assistant.js — Foundry-backed chat assistant.
  *
- * Same stdin contract as copilot-chat/assistant.js. Loads the same
- * instructions/skills (single source of truth in copilot-chat/) and delegates
- * to invoke.py for the Foundry agent tool-loop.
+ * Same stdin contract as copilot-chat/assistant.js. Loads the shared
+ * instructions/skills from chat-flow/ and delegates to invoke.py for the
+ * Foundry agent tool-loop.
  */
 
 import * as fs from 'node:fs';
@@ -24,14 +24,14 @@ import {
   writeCardMetaFieldViaApi,
 } from '../copilot-chat/shared.js';
 import {
-  resolveCopilotOutputFilePath,
-  resolveCopilotWatchpartyCardDir,
+  resolveAgentOutputFilePath,
+  resolveAgentWatchpartyCardDir,
 } from '../copilot-chat/watchparty.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const COPILOT_CHAT_DIR = path.resolve(HERE, '..', 'copilot-chat');
-const INSTRUCTIONS_DIR = path.join(COPILOT_CHAT_DIR, 'instructions');
-const SKILLS_DIR = path.join(COPILOT_CHAT_DIR, 'skills');
+const CHAT_FLOW_DIR = path.resolve(HERE, '..');
+const INSTRUCTIONS_DIR = path.join(CHAT_FLOW_DIR, 'instructions');
+const SKILLS_DIR = path.join(CHAT_FLOW_DIR, 'skills');
 const INVOKE_PY = path.join(HERE, 'invoke.py');
 const SERVER_CONFIG_FILE = path.resolve(HERE, '..', '..', '..', 'server-config.json');
 
@@ -257,8 +257,8 @@ appendDebug('foundry-assistant:start', {
   boardId, cardId, turnId, foundryEndpoint, foundryChatAgentId, chatTimeoutMs,
 });
 
-const outputFile = watchPartyFilesForChatDir ? resolveCopilotOutputFilePath(watchPartyFilesForChatDir, cardId) : '';
-const cardWatchDir = watchPartyFilesForChatDir ? resolveCopilotWatchpartyCardDir(watchPartyFilesForChatDir, cardId) : '';
+const outputFile = watchPartyFilesForChatDir ? resolveAgentOutputFilePath(watchPartyFilesForChatDir, cardId) : '';
+const cardWatchDir = watchPartyFilesForChatDir ? resolveAgentWatchpartyCardDir(watchPartyFilesForChatDir, cardId) : '';
 
 function cleanupWatchpartyFiles() {
   if (cardWatchDir) {

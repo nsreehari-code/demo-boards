@@ -13,7 +13,7 @@ import {
   stageAssistantReplyViaMcp,
   stageFinalResponsePayload,
 } from './shared.js';
-import { getCopilotOutputFileName } from './watchparty.js';
+import { getAgentOutputFileName } from './watchparty.js';
 
 const PROBE_MARKER = '__probe__echo__probe__';
 const PROBE_ATTACHMENT_PREFIX = '[attach]';
@@ -92,7 +92,7 @@ function sleep(ms) {
 }
 
 async function writeWatchpartyFrames(dirPath, cId, replyText) {
-  const outFile = path.join(dirPath, getCopilotOutputFileName(cId));
+  const outFile = path.join(dirPath, getAgentOutputFileName(cId));
   const frames = [
     "Assistant's Output:\n",
     "Assistant's Output:\nprobe frame 1\n",

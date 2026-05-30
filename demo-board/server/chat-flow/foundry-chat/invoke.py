@@ -14,7 +14,7 @@ Reads a single JSON request from stdin:
   "turn_id":             "<turn id>",
   "mcp_server_url":      "<http://127.0.0.1:7801/mcp>",
   "existing_thread_id":  "<reusable Foundry thread id> | ''",
-  "output_file":         "<abs path of copilot-output.txt> | ''",
+  "output_file":         "<abs path of agent-output.txt> | ''",
   "timeout_seconds":     <int>
 }
 
@@ -32,7 +32,7 @@ Behavior:
                               which the agent calls as its final tool)
     * failed / cancelled / expired -> exit 1
 - Emits human-readable JSONL progress lines on stdout (the Node wrapper appends
-    them to copilot-output.txt).
+    them to agent-output.txt).
 """
 
 import asyncio

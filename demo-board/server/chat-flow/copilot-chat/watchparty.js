@@ -25,30 +25,30 @@ export function deriveCardIdFromLogId(logId) {
   return sanitizeWatchpartyToken(cardToken);
 }
 
-export const COPILOT_OUTPUT_FILE_STEM = 'copilot-output.txt';
-export const COPILOT_TOOLS_FILE_STEM = 'copilot-tools.txt';
+export const AGENT_OUTPUT_FILE_STEM = 'agent-output.txt';
+export const AGENT_TOOLS_FILE_STEM = 'agent-tools.txt';
 
-export function getCopilotOutputFileName(cardId) {
-  return path.join(sanitizeWatchpartyToken(cardId), COPILOT_OUTPUT_FILE_STEM);
+export function getAgentOutputFileName(cardId) {
+  return path.join(sanitizeWatchpartyToken(cardId), AGENT_OUTPUT_FILE_STEM);
 }
 
-export function getCopilotToolsLogFileName(cardId) {
-  return path.join(sanitizeWatchpartyToken(cardId), COPILOT_TOOLS_FILE_STEM);
+export function getAgentToolsLogFileName(cardId) {
+  return path.join(sanitizeWatchpartyToken(cardId), AGENT_TOOLS_FILE_STEM);
 }
 
-export function resolveCopilotWatchpartyCardDir(dirPath, cardId) {
+export function resolveAgentWatchpartyCardDir(dirPath, cardId) {
   return path.join(dirPath, sanitizeWatchpartyToken(cardId));
 }
 
-export function resolveCopilotOutputFilePath(dirPath, cardId) {
-  return path.join(resolveCopilotWatchpartyCardDir(dirPath, cardId), COPILOT_OUTPUT_FILE_STEM);
+export function resolveAgentOutputFilePath(dirPath, cardId) {
+  return path.join(resolveAgentWatchpartyCardDir(dirPath, cardId), AGENT_OUTPUT_FILE_STEM);
 }
 
-export function resolveCopilotToolsLogFilePath(dirPath, cardId) {
-  return path.join(resolveCopilotWatchpartyCardDir(dirPath, cardId), COPILOT_TOOLS_FILE_STEM);
+export function resolveAgentToolsLogFilePath(dirPath, cardId) {
+  return path.join(resolveAgentWatchpartyCardDir(dirPath, cardId), AGENT_TOOLS_FILE_STEM);
 }
 
-export function parseCopilotWatchpartyRelativePath(relativePath) {
+export function parseAgentWatchpartyRelativePath(relativePath) {
   const normalized = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   if (!normalized) return null;
   const parts = normalized.split('/');
@@ -56,7 +56,7 @@ export function parseCopilotWatchpartyRelativePath(relativePath) {
   const [cardToken, fileName] = parts;
   if (!cardToken || !fileName) return null;
   const cardId = sanitizeWatchpartyToken(cardToken);
-  if (fileName === COPILOT_OUTPUT_FILE_STEM) return { cardId, fileStem: COPILOT_OUTPUT_FILE_STEM };
-  if (fileName === COPILOT_TOOLS_FILE_STEM) return { cardId, fileStem: COPILOT_TOOLS_FILE_STEM };
+  if (fileName === AGENT_OUTPUT_FILE_STEM) return { cardId, fileStem: AGENT_OUTPUT_FILE_STEM };
+  if (fileName === AGENT_TOOLS_FILE_STEM) return { cardId, fileStem: AGENT_TOOLS_FILE_STEM };
   return null;
 }
