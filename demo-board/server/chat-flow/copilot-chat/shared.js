@@ -618,8 +618,18 @@ export function clearFinalResponseContainer(containerDir) {
     if (!fs.existsSync(containerDir)) {
       return;
     }
-    for (const entry of fs.readdirSync(containerDir)) {
-      fs.rmSync(path.join(containerDir, entry), { recursive: true, force: true });
+    fs.rmSync(containerDir, { recursive: true, force: true });
+
+    let parentDir = path.dirname(containerDir);
+    for (let depth = 0; depth < 2; depth += 1) {
+      if (!parentDir || !fs.existsSync(parentDir)) {
+        break;
+      }
+      if (fs.readdirSync(parentDir).length > 0) {
+        break;
+      }
+      fs.rmSync(parentDir, { recursive: true, force: true });
+      parentDir = path.dirname(parentDir);
     }
   } catch {}
 }
@@ -706,11 +716,15 @@ export function resolveStoreDir(storeRef, fieldName) {
   return resolveFsPathRef(storeRef, fieldName);
 }
 
+function resolveCardStoreCliPath() {
+  return CARD_STORE_CLI || path.join(YAML_FLOW_BUNDLED_CLI_DIR, 'card-store-cli.mjs');
+}
+
 export function readStoredCard(storeRef, cardId, timeoutMs = 30000) {
   if (!storeRef || !cardId) return null;
   try {
     const raw = execFileSync(process.execPath, [
-      requireConfiguredCliPath(CARD_STORE_CLI, 'card-store-cli'),
+      resolveCardStoreCliPath(),
       'get',
       '--store-ref',
       storeRef,
@@ -728,5 +742,37 @@ export function readStoredCard(storeRef, cardId, timeoutMs = 30000) {
     return Array.isArray(parsed) && parsed[0] && typeof parsed[0] === 'object' ? parsed[0] : null;
   } catch {
     return null;
+  }
+}
+
+function cardApiUrl(boardServerPort, boardId, cardId) {
+  return `http://127.0.0.1:${boardServerPort}/api/boards/${encodeURIComponent(boardId)}/cards/${encodeURIComponent(cardId)}`;
+}
+
+export async function readCardMetaFieldViaApi({ boardServerPort, boardId, cardId, fieldName }) {
+  if (!boardServerPort || !boardId || !cardId || !fieldName) return undefined;
+  try {
+    const res = await fetch(cardApiUrl(boardServerPort, boardId, cardId), { method: 'GET' });
+    if (!res.ok) return undefined;
+    const card = await res.json();
+    const meta = card && typeof card === 'object' ? card.meta : null;
+    if (!meta || typeof meta !== 'object') return undefined;
+    return meta[fieldName];
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writeCardMetaFieldViaApi({ boardServerPort, boardId, cardId, fieldName, value }) {
+  if (!boardServerPort || !boardId || !cardId || !fieldName) return false;
+  try {
+    const res = await fetch(cardApiUrl(boardServerPort, boardId, cardId), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meta: { [fieldName]: value } }),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }

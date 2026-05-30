@@ -69,7 +69,10 @@ function isAnyTestSelected(testIds) {
 const portArg = cliArgs.indexOf('--port');
 const cliPort = portArg !== -1 ? parseInt(cliArgs[portArg + 1], 10) : NaN;
 const boardIdArg = cliArgs.indexOf('--board-id');
-const cliBoardId = boardIdArg !== -1 ? String(cliArgs[boardIdArg + 1] || '').trim() : '';
+const boardAliasArg = cliArgs.indexOf('--board');
+const cliBoardId = boardIdArg !== -1
+  ? String(cliArgs[boardIdArg + 1] || '').trim()
+  : (boardAliasArg !== -1 ? String(cliArgs[boardAliasArg + 1] || '').trim() : '');
 const skipT1 = cliArgs.includes('--skip-t1') || !isTestSelected('T1');
 const skipT2 = cliArgs.includes('--skip-t2') || !isTestSelected('T2');
 const skipT3 = cliArgs.includes('--skip-t3') || !isAnyTestSelected(['T3', 'T3A', 'T3B', 'T3C', 'T3D']);
@@ -112,26 +115,36 @@ function require_os() {
   return require_os._mod;
 }
 
-const skipT3a = skipT3 || cliArgs.includes('--skip-t3a') || !isTestSelected('T3A') || (!forceT3aBypass && !isCopilotAvailable());
-const skipT3b = skipT3 || cliArgs.includes('--skip-t3b') || !isTestSelected('T3B');
-const skipT3c = skipT3 || cliArgs.includes('--skip-t3c') || !isTestSelected('T3C') || !isCopilotAvailable();
-const skipT3d = skipT3 || cliArgs.includes('--skip-t3d') || !isTestSelected('T3D');
-
 const BOARD_ID = cliBoardId || (process.env.DEMO_BOARD_ID || '').trim() || 'live-test';
 const BOARD_DIR = path.resolve(__dirname, '..');
 const SERVER_CONFIG_PATH = path.resolve(BOARD_DIR, 'server-config.json');
+let __boardChatAssistantCache = null;
+function getBoardChatAssistant() {
+  if (__boardChatAssistantCache !== null) return __boardChatAssistantCache;
+  try {
+    const cfg = JSON.parse(fs.readFileSync(SERVER_CONFIG_PATH, 'utf-8'));
+    __boardChatAssistantCache = String(cfg?.boards?.[BOARD_ID]?.chat?.assistant || 'copilot').toLowerCase();
+  } catch { __boardChatAssistantCache = 'copilot'; }
+  return __boardChatAssistantCache;
+}
+function boardRequiresCopilotCli() { return getBoardChatAssistant() === 'copilot'; }
+
+const skipT3a = skipT3 || cliArgs.includes('--skip-t3a') || !isTestSelected('T3A') || (!forceT3aBypass && boardRequiresCopilotCli() && !isCopilotAvailable());
+const skipT3b = skipT3 || cliArgs.includes('--skip-t3b') || !isTestSelected('T3B');
+const skipT3c = skipT3 || cliArgs.includes('--skip-t3c') || !isTestSelected('T3C') || (boardRequiresCopilotCli() && !isCopilotAvailable());
+const skipT3d = skipT3 || cliArgs.includes('--skip-t3d') || !isTestSelected('T3D');
 const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
 const BOARD_SERVER_URL = Number.isInteger(cliPort) && cliPort > 0
   ? `http://127.0.0.1:${cliPort}`
   : 'http://127.0.0.1:7799';
 const CHAT_CARD_ID = 'card-portfolio';
 
-function loadLiveTestSetupConfig() {
+function loadBoardSetupConfig(boardId) {
   const serverConfig = JSON.parse(fs.readFileSync(SERVER_CONFIG_PATH, 'utf-8'));
-  const liveTestSetup = serverConfig?.boards?.['live-test']?.setup;
+  const boardSetup = serverConfig?.boards?.[boardId]?.setup;
 
-  if (!liveTestSetup || typeof liveTestSetup !== 'object') {
-    throw new Error(`Missing boards.live-test.setup in ${SERVER_CONFIG_PATH}`);
+  if (!boardSetup || typeof boardSetup !== 'object') {
+    throw new Error(`Missing boards.${boardId}.setup in ${SERVER_CONFIG_PATH}`);
   }
 
   const requiredKeys = [
@@ -147,15 +160,15 @@ function loadLiveTestSetupConfig() {
   ];
 
   for (const key of requiredKeys) {
-    if (typeof liveTestSetup[key] !== 'string' || !liveTestSetup[key].trim()) {
-      throw new Error(`Expected boards.live-test.setup.${key} to be a non-empty string in ${SERVER_CONFIG_PATH}`);
+    if (typeof boardSetup[key] !== 'string' || !boardSetup[key].trim()) {
+      throw new Error(`Expected boards.${boardId}.setup.${key} to be a non-empty string in ${SERVER_CONFIG_PATH}`);
     }
   }
 
-  return liveTestSetup;
+  return boardSetup;
 }
 
-const LIVE_TEST_SETUP = loadLiveTestSetupConfig();
+const LIVE_TEST_SETUP = loadBoardSetupConfig(BOARD_ID);
 const BOARD_SETUP_ROOT = path.resolve(BOARD_DIR, LIVE_TEST_SETUP.setupRoot);
 const CLEAN_WORKSPACE_SUBDIRS = [
   LIVE_TEST_SETUP.aiWorkspaceRoot,
@@ -200,7 +213,7 @@ function emptyDirectoryContents(dirPath) {
 }
 
 function cleanupBoardWorkspaceFiles() {
-  if (BOARD_ID !== 'live-test') {
+  if (!/^live-test(?:-|$)/.test(BOARD_ID)) {
     console.log(`[resync] workspace cleanup skipped for board ${BOARD_ID}`);
     return;
   }
@@ -493,6 +506,60 @@ async function waitForAssistantOutcome({ eventStart, beforeCount, successPattern
 
   while (Date.now() <= deadline) {
     const eventOutcome = findAssistantOutcome(NS.chatEvents.slice(eventStart), {
+      beforeCount,
+      successPattern,
+      turnId,
+    });
+    if (eventOutcome) {
+      return eventOutcome;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(`Timeout (${timeoutMs}ms) waiting for: ${label}`);
+}
+
+function findProcessingClearedOutcome(events, { beforeCount, turnId, successPattern }) {
+  let prevMessageCount = Number(beforeCount || 0);
+  let seenAssistantMessage = null;
+
+  for (const event of events) {
+    const messages = Array.isArray(event?.messages) ? event.messages : [];
+    const nextMessageCount = Number(event?.messageCount || messages.length || 0);
+    const newMessages = nextMessageCount > prevMessageCount
+      ? messages.slice(prevMessageCount, nextMessageCount)
+      : [];
+    const assistantMessage = [...newMessages].reverse().find((message) => (
+      message?.role === 'assistant'
+      && String(message?.turn || '') === turnId
+      && successPattern.test(String(message?.text || ''))
+    ));
+
+    if (assistantMessage) {
+      seenAssistantMessage = assistantMessage;
+    }
+
+    if (seenAssistantMessage && event?.processing === false) {
+      return {
+        ok: true,
+        source: 'sse',
+        event,
+        assistantMessage: seenAssistantMessage,
+      };
+    }
+
+    prevMessageCount = nextMessageCount;
+  }
+
+  return null;
+}
+
+async function waitForProcessingClearedOutcome({ eventStart, beforeCount, successPattern, timeoutMs, label, turnId }) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    const eventOutcome = findProcessingClearedOutcome(NS.chatEvents.slice(eventStart), {
       beforeCount,
       successPattern,
       turnId,
@@ -1111,8 +1178,19 @@ try {
     });
     assert(t2aOutcome.ok, `T3a failed before assistant response: ${t2aOutcome.reason || 'unknown reason'}`);
     assert(t2aOutcome.source === 'sse', 'T3a should resolve from SSE chat notifications');
+    const t2aSettledOutcome = await waitForProcessingClearedOutcome({
+      eventStart: t2aEventStart,
+      beforeCount: t2aBeforeCount,
+      successPattern: /paris/i,
+      turnId: t2aTurnId,
+      timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
+      label: 'T3a processing cleared after assistant response',
+    });
+    assert(t2aSettledOutcome.ok, 'T3a should observe processing=false after assistant response');
+    assert(t2aSettledOutcome.source === 'sse', 'T3a processing clear should resolve from SSE chat notifications');
+    assert(t2aSettledOutcome.event?.processing === false, 'T3a final SSE event should clear processing');
 
-    const t2aMessages = Array.isArray(t2aOutcome?.event?.messages) ? t2aOutcome.event.messages : [];
+    const t2aMessages = Array.isArray(t2aSettledOutcome?.event?.messages) ? t2aSettledOutcome.event.messages : [];
     const t2aSseNewMessages = t2aMessages.slice(t2aBeforeCount);
     assert(t2aSseNewMessages.length >= 1, `T3a expected at least 1 new SSE chat message, got ${t2aSseNewMessages.length}`);
     const t2aAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
@@ -1130,7 +1208,7 @@ try {
     for (const message of t2aNewMessages.filter((m) => m?.role === 'system')) {
       assert(String(message?.turn || '') === t2aTurnId, 'T3a system turn id mismatch');
     }
-    console.log('[T3a] ok: non-probe response contains paris');
+    console.log('[T3a] ok: non-probe response contains paris and SSE clears processing');
   }
 
   // ── T3c: non-probe chat + file upload protocol over API + SSE ──
@@ -1199,8 +1277,19 @@ try {
     });
     assert(t2cOutcome.ok, `T3c failed before assistant response: ${t2cOutcome.reason || 'unknown reason'}`);
     assert(t2cOutcome.source === 'sse', 'T3c should resolve from SSE chat notifications');
+    const t2cSettledOutcome = await waitForProcessingClearedOutcome({
+      eventStart: t2cEventStart,
+      beforeCount: t2cSendBaseline,
+      successPattern: /tokyo/i,
+      turnId: t2cTurnId,
+      timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
+      label: 'T3c processing cleared after assistant response',
+    });
+    assert(t2cSettledOutcome.ok, 'T3c should observe processing=false after assistant response');
+    assert(t2cSettledOutcome.source === 'sse', 'T3c processing clear should resolve from SSE chat notifications');
+    assert(t2cSettledOutcome.event?.processing === false, 'T3c final SSE event should clear processing');
 
-    const t2cMessages = Array.isArray(t2cOutcome?.event?.messages) ? t2cOutcome.event.messages : [];
+    const t2cMessages = Array.isArray(t2cSettledOutcome?.event?.messages) ? t2cSettledOutcome.event.messages : [];
     const t2cSseNewMessages = t2cMessages.slice(t2cSendBaseline);
     assert(t2cSseNewMessages.length >= 1, `T3c expected at least 1 new SSE chat message, got ${t2cSseNewMessages.length}`);
     const t2cAfter = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
@@ -1217,7 +1306,7 @@ try {
     assert(!!t2cAssistantMsg, 'T3c assistant chat message missing from SSE payload');
     assert(/tokyo/i.test(String(t2cAssistantMsg?.text || '')), 'T3c assistant file content missing tokyo');
     assert(String(t2cAssistantMsg?.turn || '') === t2cTurnId, 'T3c assistant turn id mismatch');
-    console.log('[T3c] ok: non-probe file-upload response contains tokyo');
+    console.log('[T3c] ok: non-probe file-upload response contains tokyo and SSE clears processing');
   }
   }
 
