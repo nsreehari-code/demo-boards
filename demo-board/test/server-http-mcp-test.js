@@ -19,13 +19,11 @@
  *   node test/server-http-mcp-test.js [--board-id live-test] [--port 7799] [--run-tests T1,T1A]
  */
 
-import { spawnSync } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import http from 'node:http';
 import fs from 'node:fs';
-import os from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
@@ -91,20 +89,8 @@ function isCopilotAvailable() {
   const envOverride = process.env.DEMO_COPILOT_AVAILABLE;
   if (envOverride === '0' || envOverride === 'false') { __copilotAvailableCache = false; return false; }
   if (envOverride === '1' || envOverride === 'true') { __copilotAvailableCache = true; return true; }
-  const flagPath = path.join(os.tmpdir(), 'demo-boards-copilot-available.flag');
-  try {
-    if (fs.existsSync(flagPath)) { __copilotAvailableCache = true; return true; }
-  } catch { /* ignore */ }
-  try {
-    const cmd = process.platform === 'win32' ? 'cmd.exe' : 'copilot';
-    const args = process.platform === 'win32' ? ['/d', '/c', 'copilot', '--version'] : ['--version'];
-    const r = spawnSync(cmd, args, { timeout: 15_000, stdio: 'ignore', windowsHide: true });
-    __copilotAvailableCache = !r.error && r.status === 0;
-  } catch { __copilotAvailableCache = false; }
-  if (__copilotAvailableCache) {
-    try { fs.writeFileSync(flagPath, String(Date.now())); } catch { /* ignore */ }
-  }
-  return __copilotAvailableCache;
+  __copilotAvailableCache = false;
+  return false;
 }
 
 let __boardChatAssistantCache = null;
@@ -1334,7 +1320,7 @@ try {
   if (skipT3a) {
     const reason = cliArgs.includes('--skip-t3a')
       ? '--skip-t3a'
-      : (skipT3 ? 'T3 group skipped' : (!isTestSelected('T3A') ? 'not in --tests selection' : (!isCopilotAvailable() ? 'copilot CLI unavailable' : 'skipped')));
+      : (skipT3 ? 'T3 group skipped' : (!isTestSelected('T3A') ? 'not in --tests selection' : (!isCopilotAvailable() ? 'copilot availability not declared (set DEMO_COPILOT_AVAILABLE=1 to enable)' : 'skipped')));
     console.log(`\n=== T3a: skipped (${reason}) ===`);
   } else {
     console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');

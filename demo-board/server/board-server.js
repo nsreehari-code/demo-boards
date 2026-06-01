@@ -7,7 +7,6 @@ import net from 'node:net';
 import os from 'node:os';
 import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   deriveCardIdFromLogId,
@@ -42,8 +41,6 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const SERVER_DIR = path.dirname(__filename);
 const BOARD_ROOT = path.resolve(SERVER_DIR, '..');
-const require = createRequire(import.meta.url);
-const YAML_FLOW_BUNDLED_CLI_DIR = path.dirname(require.resolve('yaml-flow/cli-bundled/board-live-cards-cli.mjs'));
 const DEFAULT_MCP_SERVER_URL = 'http://127.0.0.1:7801/mcp';
 const cliArgs = process.argv.slice(2);
 const SERVER_CONFIG = path.join(BOARD_ROOT, 'server-config.json');
@@ -1598,16 +1595,14 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
 
   const notifyChannel = `yaml-flow-server-${label}-${boardId}-${process.pid}`;
   const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath }));
-  const boardAdapter = createFsBoardPlatformAdapter(baseRef, YAML_FLOW_BUNDLED_CLI_DIR, { notifyChannel });
-  const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(baseRef, YAML_FLOW_BUNDLED_CLI_DIR, { onWarn: console.warn });
+  const boardAdapter = createFsBoardPlatformAdapter(baseRef, { notifyChannel });
+  const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(baseRef, { onWarn: console.warn });
   boardAdapter.requestProcessAccumulated = () => {};
   nonCoreAdapter.requestProcessAccumulated = () => {};
 
   const artifactsRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath }));
-  const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, YAML_FLOW_BUNDLED_CLI_DIR, { suppressSpawn: true });
-  const artifactsStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath });
+  const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, { suppressSpawn: true });
   const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
-  const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
 
   return {
     label,
@@ -1615,9 +1610,7 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
     nonCoreAdapter,
     artifactsAdapter,
     baseRef,
-    artifactsStoreRef,
     cardStoreRef,
-    chatStoreRef,
     outputsStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardOutputsStorePath }),
     scratchStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath }),
     archiveStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.archivalStorePath }),
@@ -1831,9 +1824,7 @@ const runtime = createMultiBoardServerRuntime({
     const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
     const baseRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath });
     const aiWorkspaceRoot = boardSetupPaths.aiWorkspaceRootPath;
-    const artifactsStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath });
     const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
-    const chatStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath });
     const scratchStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath });
     const watchPartyFilesForChatDir = path.join(boardSetupPaths.setupRoot, configuredWatchpartyConfig.filesForChatDir);
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
@@ -1856,10 +1847,8 @@ const runtime = createMultiBoardServerRuntime({
       boardSetupRoot: boardSetupPaths.setupRoot,
       boardRuntimeDir: boardSetupPaths.boardRuntime,
       cardStoreRef,
-      chatStoreRef,
       runtimeStatusDir: boardSetupPaths.boardOutputsStore,
       artifactsStore: boardSetupPaths.artifactsStore,
-      artifactsStoreRef,
       scratchStore: boardSetupPaths.scratchStore,
       scratchStoreRef,
       archivalStore: boardSetupPaths.archivalStore,
@@ -1919,10 +1908,8 @@ const runtime = createMultiBoardServerRuntime({
         boardSetupRoot: boardSetupPaths.setupRoot,
         boardRuntimeDir: boardSetupPaths.boardRuntime,
         cardStoreRef,
-        chatStoreRef,
         runtimeStatusDir: boardSetupPaths.boardOutputsStore,
         artifactsStore: boardSetupPaths.artifactsStore,
-        artifactsStoreRef,
         scratchStore: boardSetupPaths.scratchStore,
         scratchStoreRef,
         archivalStore: boardSetupPaths.archivalStore,
@@ -2534,41 +2521,6 @@ const server = http.createServer((req, res) => {
         const toolName = typeof strippedBody?.tool === 'string' ? strippedBody.tool.trim() : '';
         const strippedArgs = normalizeMcpArgs(strippedBody);
         const normalizedToolName = normalizeMcpToolName(toolName);
-
-        if (normalizedToolName === 'stage-ai-response-and-any-attachments') {
-          const cardId = typeof readMcpArg(strippedArgs, 'card_id', 'cardId') === 'string'
-            ? String(readMcpArg(strippedArgs, 'card_id', 'cardId')).trim()
-            : '';
-          const turnId = typeof readMcpArg(strippedArgs, 'turn-id', 'turnId') === 'string'
-            ? String(readMcpArg(strippedArgs, 'turn-id', 'turnId')).trim()
-            : '';
-
-          if (cardId && turnId) {
-            const inspectResult = await invokeBoardMcpToolViaRuntime(req, boardId, 'inspect.chat-messages-on-cards', {
-              board_id: boardId,
-              card_id: cardId,
-              'turn-id': turnId,
-            });
-            const inspectedMessages = Array.isArray(inspectResult.payload?.data?.messages)
-              ? inspectResult.payload.data.messages
-              : [];
-            const existingAssistantMessage = inspectedMessages.find((message) => message?.role === 'assistant');
-
-            if (inspectResult.handled && inspectResult.statusCode === 200 && existingAssistantMessage) {
-              jsonReply(res, 200, {
-                status: 'success',
-                data: {
-                  cardId,
-                  id: typeof existingAssistantMessage?.id === 'string' ? existingAssistantMessage.id : '',
-                  role: 'assistant',
-                  turn: turnId,
-                  files: Array.isArray(existingAssistantMessage?.files) ? existingAssistantMessage.files : [],
-                },
-              });
-              return;
-            }
-          }
-        }
 
         logMcpInvocation(toolName, strippedBody);
         appendWatchpartyToolsLog(boardId, logId, 'Invoking', toolName, strippedBody);

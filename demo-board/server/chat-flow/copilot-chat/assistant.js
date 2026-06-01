@@ -7,7 +7,6 @@ import { spawn, spawnSync } from 'node:child_process';
 import {
   readChatMessagesViaMcp,
   readEnhancedChatMessages,
-  configureWorkspaceCliScripts,
   readJsonStdin,
   requireRequiredStrings,
   resolveAssistantDebugEnabled,
@@ -32,8 +31,6 @@ const {
   baseRef = '',
   aiWorkspaceRoot = '',
   cardStoreRef = '',
-  chatStoreRef = '',
-  artifactsStoreRef = '',
   scratchStoreRef = '',
   watchPartyFilesForChatDir = '',
   chatCopilotTimeoutMs: rawChatCopilotTimeoutMs = 300000,
@@ -100,7 +97,7 @@ function buildPrompt(cId, currentLogId, turnTranscript) {
   const instructionsBlock = [
     'You are responding for one live board chat turn.',
     'Use the available agent instructions, skills, and MCP tools to discover what you need. Prefer the smallest additional read or tool call that resolves the current turn.',
-    'Treat the runtime handles below as authoritative. Every liveboards.* MCP tool call must include the provided opaque log_id exactly as given. Do not derive, alter, or omit it.',
+    'Treat the runtime handles below as authoritative. Every liveboards.* MCP tool call must use snake_case args and must include the provided opaque log_id exactly as given. Do not derive, alter, or omit it.',
     'Stay grounded in the current turn context — the current-turn user message, any current-turn system messages (including attachments referenced by them), and the contents of files those attachments point to. Read referenced attachment contents before reasoning. Reach into nearby board state or prior chat history only when the user intent clearly requires it; never use prior chat history to guess the current turn\u2019s answer.',
     'When the final user-visible reply is ready, use the provide-final-reply-to-user skill exactly once.',
     'Do not expose internal orchestration details, logs, refs, paths, directory names, or implementation notes.',
@@ -110,9 +107,9 @@ function buildPrompt(cId, currentLogId, turnTranscript) {
   const runtimeHandlesBlock = [
     'Runtime handles:',
     `- boardId: \"${boardId || '(not provided)'}\"`,
-    `- cardId / card-id: \"${cId}\"`,
-    `- logId / log_id: \"${currentLogId || '(not provided)'}\"`,
-    `- turnId: \"${turnId}\"`,
+    `- cardId / card_id: "${cId}"`,
+    `- logId / log_id: "${currentLogId || '(not provided)'}"`,
+    `- turnId / turn_id: "${turnId}"`,
   ].join('\n');
 
   return [
@@ -253,8 +250,9 @@ function formatChatTranscript(messages, currentCardId) {
 }
 
 async function loadPromptChatMessages(currentCardId) {
-  const turnScopedMessages = readEnhancedChatMessages(baseRef, chatStoreRef, currentCardId, 30000, {
+  const turnScopedMessages = await readEnhancedChatMessages(boardId, currentCardId, 30000, {
     turnId,
+    logId,
   });
 
   if (Array.isArray(turnScopedMessages) && turnScopedMessages.length > 0) {
@@ -462,7 +460,6 @@ requireRequiredStrings({
   turnId,
   aiWorkspaceRoot,
   cardStoreRef,
-  chatStoreRef,
   scratchStoreRef,
 }, 'assistant');
 
@@ -473,8 +470,6 @@ appendDebug('assistant:start', {
   baseRef,
   aiWorkspaceRoot,
   cardStoreRef,
-  chatStoreRef,
-  artifactsStoreRef,
   scratchStoreRef,
   scratchDir,
   chatCopilotTimeoutMs,
@@ -483,14 +478,12 @@ DBG_LOG('assistant:start', {
   boardId,
   cardId,
   turnId,
-  chatStoreRef,
   scratchStoreRef,
   aiWorkspaceRoot,
   enableDebugLogging: ENABLE_DEBUG_LOGGING,
 });
 
 const workingDir = resolveCopilotWorkspaceDir(aiWorkspaceRoot, cardStoreRef, cardId, 'assistant');
-configureWorkspaceCliScripts(workingDir, 'assistant');
 const promptChatMessages = await loadPromptChatMessages(cardId);
 const turnTranscript = formatChatTranscript(promptChatMessages, cardId);
 const prompt = buildPrompt(cardId, logId, turnTranscript);

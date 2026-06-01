@@ -285,22 +285,31 @@ def _merge_liveboards_runtime_handles(
     if not tool_name.startswith("liveboards."):
         return args
 
+    legacy_to_supported = {
+        "boardId": "board_id",
+        "cardId": "card_id",
+        "logId": "log_id",
+        "turnId": "turn_id",
+        "turn-id": "turn_id",
+        "tail-turns": "tail_turns",
+        "all-turns": "all_turns",
+        "tail-turns-before-id": "tail_turns_before_id",
+    }
+    for legacy_key, supported_key in legacy_to_supported.items():
+        if legacy_key in args and supported_key not in args:
+            args[supported_key] = args[legacy_key]
+
     if board_id:
         args["board_id"] = board_id
-        args["boardId"] = board_id
     if log_id:
         args["log_id"] = log_id
-        args["logId"] = log_id
 
     if tool_name == "liveboards.stage-ai-response-and-any-attachments":
         # Final reply must land on the current card/turn even when the agent
         # has inspected other cards during discovery.
         if card_id:
             args["card_id"] = card_id
-            args["cardId"] = card_id
         if turn_id:
-            args["turn-id"] = turn_id
-            args["turnId"] = turn_id
             args["turn_id"] = turn_id
 
     return args
@@ -498,7 +507,7 @@ def main() -> int:
                     args = {
                         "board_id": board_id,
                         "card_id": card_id,
-                        "turn-id": turn_id,
+                        "turn_id": turn_id,
                         "text": text_value.strip(),
                         "files": [],
                         "log_id": log_id,

@@ -43,8 +43,6 @@ const {
   turnId = '',
   baseRef = '',
   aiWorkspaceRoot = '',
-  chatStoreRef = '',
-  artifactsStoreRef = '',
   scratchStoreRef = '',
   watchPartyFilesForChatDir = '',
   foundryEndpoint = '',
@@ -216,7 +214,7 @@ function formatChatTranscript(messages) {
 }
 
 async function loadPromptChatMessages() {
-  const turnScoped = readEnhancedChatMessages(baseRef, chatStoreRef, cardId, 30000, { turnId });
+  const turnScoped = await readEnhancedChatMessages(boardId, cardId, 30000, { turnId, logId });
   if (Array.isArray(turnScoped) && turnScoped.length > 0) return turnScoped;
   return readChatMessagesViaMcp(boardId, cardId, { logId, turnId });
 }
@@ -225,7 +223,7 @@ function buildSystemInstructions(skillsBlock) {
   const head = [
     'You are responding for one live board chat turn.',
     'Use the available MCP tools (liveboards.* for board/card/chat state, lore.* for durable cross-board memory) to discover what you need; prefer the smallest tool call that resolves this turn.',
-    'Treat the runtime handles below as authoritative. Every liveboards.* MCP tool call must include the provided opaque log_id exactly as given. Do not derive, alter, or omit it.',
+    'Treat the runtime handles below as authoritative. Every liveboards.* MCP tool call must use snake_case args and must include the provided opaque log_id exactly as given. Do not derive, alter, or omit it.',
     'Stay grounded in the current turn context — the user message, any current-turn system messages (including attachment references), and the contents of files those attachments point to. Reach into prior chat history only when the user intent clearly requires it.',
     'When the final user-visible reply is ready, call the liveboards.stage-ai-response-and-any-attachments tool exactly once with the final reply text. Do not include markdown fences. No fluff.',
     'Do not expose internal orchestration details, logs, refs, paths, directory names, or implementation notes.',
@@ -234,9 +232,9 @@ function buildSystemInstructions(skillsBlock) {
   const handles = [
     'Runtime handles:',
     `- boardId: "${boardId || '(not provided)'}"`,
-    `- cardId / card-id: "${cardId}"`,
+    `- cardId / card_id: "${cardId}"`,
     `- logId / log_id: "${logId || '(not provided)'}"`,
-    `- turnId / turn-id: "${turnId}"`,
+    `- turnId / turn_id: "${turnId}"`,
   ].join('\n');
 
   return [head, '', handles, '', '## Instructions and skills', '', skillsBlock].join('\n');
@@ -247,7 +245,6 @@ requireRequiredStrings({
   cardId,
   logId,
   turnId,
-  chatStoreRef,
   scratchStoreRef,
   foundryEndpoint,
   foundryChatAgentId,
@@ -278,7 +275,7 @@ if (outputFile) {
   } catch {}
 }
 
-const FOUNDRY_THREAD_META_KEY = '__ai_foundry_thread_id';
+const FOUNDRY_THREAD_META_KEY = 'chat.foundry_thread_id';
 const boardServerPort = loadBoardServerPort();
 const existingThreadId = await (async () => {
   try {

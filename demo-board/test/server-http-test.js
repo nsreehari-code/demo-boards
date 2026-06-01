@@ -17,18 +17,15 @@
  *   node test/server-http-test.js [--board-id live-test] [--port 7799] [--run-tests T1,T2]
  */
 
-import { spawnSync } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import http from 'node:http';
 import fs from 'node:fs';
-import os from 'node:os';
 
 const AGENT_OUTPUT_CHANNEL = 'agent-output';
 
 const ECHO_PROBE_MARKER = '__probe__echo__probe__';
-const PROBE_IN_PROGRESS_TEXT = 'in-progress';
 const PROBE_WATCHPARTY_FRAME_1 = 'probe frame 1';
 const PROBE_WATCHPARTY_FRAME_2 = 'probe frame 2';
 const NON_PROBE_RESPONSE_TIMEOUT_MS = 120_000;
@@ -80,39 +77,11 @@ const forceT3aBypass = process.env.DEMO_T3A_BYPASS === '1';
 let __copilotAvailableCache = null;
 function isCopilotAvailable() {
   if (__copilotAvailableCache !== null) return __copilotAvailableCache;
-  // File-flag cache: once copilot is detected, drop a marker so subsequent runs
-  // skip the (slow, cold-start-prone) spawn probe entirely. CI envs that lack
-  // copilot can force-skip via DEMO_COPILOT_AVAILABLE=0 or --skip-t3a/--skip-t3c.
   const envOverride = process.env.DEMO_COPILOT_AVAILABLE;
   if (envOverride === '0' || envOverride === 'false') { __copilotAvailableCache = false; return false; }
   if (envOverride === '1' || envOverride === 'true') { __copilotAvailableCache = true; return true; }
-  const flagPath = path.join(os.tmpdir(), 'demo-boards-copilot-available.flag');
-  try {
-    if (fs.existsSync(flagPath)) { __copilotAvailableCache = true; return true; }
-  } catch { /* ignore */ }
-  try {
-    const cmd = process.platform === 'win32' ? 'cmd.exe' : 'copilot';
-    const args = process.platform === 'win32' ? ['/d', '/c', 'copilot', '--version'] : ['--version'];
-    const r = spawnSync(cmd, args, { timeout: 15_000, stdio: 'ignore', windowsHide: true });
-    __copilotAvailableCache = !r.error && r.status === 0;
-  } catch { __copilotAvailableCache = false; }
-  if (__copilotAvailableCache) {
-    try { fs.writeFileSync(flagPath, String(Date.now())); } catch { /* ignore */ }
-  }
-  return __copilotAvailableCache;
-}
-function require_os() {
-  // Lazy synchronous require of node:os without adding a top-level import.
-  if (!require_os._mod) {
-    const { createRequire } = require_os._cr || (require_os._cr = (() => {
-      // eslint-disable-next-line no-shadow
-      const u = new URL(import.meta.url);
-      return { createRequire: (m => m.createRequire)(/** @type {any} */(globalThis).require ? null : null) };
-    })());
-    // Fallback: use dynamic import-resolved built-in via process
-    require_os._mod = { tmpdir: () => process.env.TMPDIR || process.env.TEMP || process.env.TMP || '/tmp' };
-  }
-  return require_os._mod;
+  __copilotAvailableCache = false;
+  return false;
 }
 
 const BOARD_ID = cliBoardId || (process.env.DEMO_BOARD_ID || '').trim() || 'live-test';
@@ -580,7 +549,6 @@ function deriveProbeLifecycleMilestones(events, opts) {
   let prevMessageCount = Number(opts.beforeCount || 0);
   let prevProcessing = Boolean(opts.beforeProcessing);
   const prompt = String(opts.prompt || '');
-  const inProgressText = String(opts.inProgressText || PROBE_IN_PROGRESS_TEXT);
   const turnId = String(opts?.turnId || '');
 
   for (const event of events) {
@@ -603,7 +571,6 @@ function deriveProbeLifecycleMilestones(events, opts) {
       const role = String(message?.role || '');
       const text = String(message?.text || '');
       if (role === 'user' && text.includes(prompt)) milestones.push('user');
-      else if (role === 'system' && text.trim().toLowerCase() === inProgressText) milestones.push('in-progress');
       else if (role === 'assistant' && text.includes(`Echo: ${prompt}`)) milestones.push('assistant');
     }
 
@@ -617,13 +584,12 @@ function deriveProbeLifecycleMilestones(events, opts) {
 
 function matchOrderedProbeLifecycle(events, opts) {
   const milestones = deriveProbeLifecycleMilestones(events, opts);
-  if (milestones.length !== 5) return false;
+  if (milestones.length !== 4) return false;
   const firstPair = milestones.slice(0, 2);
-  const lastPair = milestones.slice(3, 5);
+  const lastPair = milestones.slice(2, 4);
   const firstOk = firstPair.includes('user') && firstPair.includes('processing-true');
-  const middleOk = milestones[2] === 'in-progress';
   const lastOk = lastPair.includes('assistant') && lastPair.includes('processing-false');
-  return (firstOk && middleOk && lastOk) ? { milestones } : false;
+  return (firstOk && lastOk) ? { milestones } : false;
 }
 
 function httpGet(url) {
@@ -926,7 +892,7 @@ try {
   await ensureChatSseSubscription();
   await ensureWatchpartySseSubscription();
 
-  const t2Before = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
+  const t2Before = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
   assert(t2Before.status === 200, `T3 pre chats returned ${t2Before.status}`);
   const t2BeforeMessages = Array.isArray(t2Before.data?.messages) ? t2Before.data.messages : [];
   const t2BeforeCount = t2BeforeMessages.length;
@@ -939,7 +905,7 @@ try {
     actionType: 'chat-send',
     payload: {
       text: `${ECHO_PROBE_MARKER}${t2ProbePrompt}${ECHO_PROBE_MARKER}`,
-      'turn-id': t2TurnId,
+        'turn-id': t2TurnId,
     },
   });
   assert(t2SendRes.status === 200, `T3 chat-send returned ${t2SendRes.status}`);
@@ -950,7 +916,6 @@ try {
       beforeProcessing: false,
       prompt: t2ProbePrompt,
       turnId: t2TurnId,
-      inProgressText: PROBE_IN_PROGRESS_TEXT,
     });
   }, 45_000, 'T3 ordered lifecycle');
   assert(!!t2Lifecycle, 'T3 ordered lifecycle not observed');
@@ -970,23 +935,20 @@ try {
   }, 45_000, 'T3 watchparty lifecycle');
   assert(!!t2WatchpartyLifecycle, 'T3 watchparty lifecycle not observed');
 
-  const t2After = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
+  const t2After = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
   assert(t2After.status === 200, `T3 post chats returned ${t2After.status}`);
   const t2AfterMessages = Array.isArray(t2After.data?.messages) ? t2After.data.messages : [];
   const t2NewMessages = t2AfterMessages.slice(t2BeforeCount);
-  assert(t2NewMessages.length >= 3, `T3 expected at least 3 new chat messages, got ${t2NewMessages.length}`);
+  assert(t2NewMessages.length >= 2, `T3 expected at least 2 new chat messages, got ${t2NewMessages.length}`);
   const t2User = t2NewMessages.find((m) => m?.role === 'user');
-  const t2InProgress = t2NewMessages.find((m) => m?.role === 'system' && String(m?.text || '').trim().toLowerCase() === PROBE_IN_PROGRESS_TEXT);
   const t2AssistantMsg = t2NewMessages.find((m) => m?.role === 'assistant');
   assert(!!t2User && typeof t2User.id === 'string', 'T3 user chat message missing id');
   assert(String(t2User?.text || '').includes(t2ProbePrompt), 'T3 user file text mismatch');
   assert(String(t2User?.turn || '') === t2TurnId, 'T3 user turn id mismatch');
-  assert(!!t2InProgress && typeof t2InProgress.id === 'string', 'T3 in-progress system message missing id');
-  assert(String(t2InProgress?.turn || '') === t2TurnId, 'T3 in-progress system turn id mismatch');
   assert(!!t2AssistantMsg && typeof t2AssistantMsg.id === 'string', 'T3 assistant chat message missing id');
   assert(String(t2AssistantMsg?.text || '').includes(`Echo: ${t2ProbePrompt}`), 'T3 assistant echo file content mismatch');
   assert(String(t2AssistantMsg?.turn || '') === t2TurnId, 'T3 assistant turn id mismatch');
-  console.log(`[${new Date().toISOString()}] [T3] ok: ordered probe lifecycle observed (user+processing, in-progress, assistant+processing clear)`);
+  console.log(`[${new Date().toISOString()}] [T3] ok: ordered probe lifecycle observed (user+processing, assistant+processing clear)`);
     }
 
   // ── T3b: probe-echo chat + file upload protocol over API + SSE ──
@@ -1033,7 +995,7 @@ try {
       actionType: 'chat-send',
       payload: {
         text: `${ECHO_PROBE_MARKER}${t2bPrompt}${ECHO_PROBE_MARKER}`,
-        'turn-id': t2bTurnId,
+          'turn-id': t2bTurnId,
         files: [uploadedFile],
       },
     });
@@ -1044,7 +1006,6 @@ try {
         turnId: t2bTurnId,
         beforeProcessing: false,
         prompt: t2bPrompt,
-        inProgressText: PROBE_IN_PROGRESS_TEXT,
       });
     }, 60_000, 'T3b ordered lifecycle');
     assert(!!t2bLifecycle, 'T3b ordered lifecycle not observed');
@@ -1052,22 +1013,19 @@ try {
     const t2bAfterMessages = await httpGetTurnChats(CHAT_CARD_ID, t2bTurnId);
     assert(t2bAfterMessages.status === 200, `T3b post chats returned ${t2bAfterMessages.status}`);
     const t2bTurnMessages = Array.isArray(t2bAfterMessages.data?.messages) ? t2bAfterMessages.data.messages : [];
-    assert(t2bTurnMessages.length >= 3, `T3b expected at least 3 chat messages in turn, got ${t2bTurnMessages.length}`);
+    assert(t2bTurnMessages.length >= 2, `T3b expected at least 2 chat messages in turn, got ${t2bTurnMessages.length}`);
 
     const t2bUser = t2bTurnMessages.find((m) => m?.role === 'user');
-    const t2bInProgress = t2bTurnMessages.find((m) => m?.role === 'system' && String(m?.text || '').trim().toLowerCase() === PROBE_IN_PROGRESS_TEXT);
     const t2bAssistantMsg = t2bTurnMessages.find((m) => m?.role === 'assistant');
 
     assert(!!t2bUser && typeof t2bUser.id === 'string', 'T3b missing user chat message notification');
     assert(String(t2bUser?.turn || '') === t2bTurnId, 'T3b user turn id mismatch');
-    assert(!!t2bInProgress && typeof t2bInProgress.id === 'string', 'T3b missing in-progress system chat message');
-    assert(String(t2bInProgress?.turn || '') === t2bTurnId, 'T3b in-progress system turn id mismatch');
     assert(!!t2bAssistantMsg && typeof t2bAssistantMsg.id === 'string', 'T3b missing assistant chat message notification');
     assert(Array.isArray(t2bUser?.files) && t2bUser.files.length === 1, 'T3b user chat message missing uploaded file metadata');
     assert(!Object.prototype.hasOwnProperty.call(t2bUser?.files?.[0] || {}, 'path'), 'T3b user chat file metadata should not expose path');
     assert(String(t2bAssistantMsg?.text || '').includes(`Echo: ${t2bPrompt}`), 'T3b assistant file content mismatch');
     assert(String(t2bAssistantMsg?.turn || '') === t2bTurnId, 'T3b assistant turn id mismatch');
-    console.log('[T3b] ok: upload protocol and ordered probe lifecycle observed (user+processing, in-progress, assistant+processing clear)');
+    console.log('[T3b] ok: upload protocol and ordered probe lifecycle observed (user+processing, assistant+processing clear)');
   }
 
   // ── T3d: probe-echo chat with one AI-generated attachment ──
@@ -1076,7 +1034,7 @@ try {
   } else {
     console.log('\n=== T3d: probe-echo chat with AI-generated attachment ===');
     await ensureChatSseSubscription();
-    const t2dBeforeChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
+    const t2dBeforeChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
     assert(t2dBeforeChats.status === 200, `T3d pre chats returned ${t2dBeforeChats.status}`);
     const t2dBeforeMessages = Array.isArray(t2dBeforeChats.data?.messages) ? t2dBeforeChats.data.messages : [];
     const t2dBeforeCount = t2dBeforeMessages.length;
@@ -1094,7 +1052,7 @@ try {
       actionType: 'chat-send',
       payload: {
         text: `${ECHO_PROBE_MARKER}[attach] ${t2dPrompt}${ECHO_PROBE_MARKER}`,
-        'turn-id': t2dTurnId,
+          'turn-id': t2dTurnId,
       },
     });
     assert(t2dSendRes.status === 200, `T3d chat-send returned ${t2dSendRes.status}`);
@@ -1105,23 +1063,19 @@ try {
         beforeProcessing: false,
         prompt: t2dPrompt,
         turnId: t2dTurnId,
-        inProgressText: PROBE_IN_PROGRESS_TEXT,
       });
     }, 60_000, 'T3d ordered lifecycle');
     assert(!!t2dLifecycle, 'T3d ordered lifecycle not observed');
 
-    const t2dAfterChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats?all-turns=true`);
+    const t2dAfterChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
     assert(t2dAfterChats.status === 200, `T3d post chats returned ${t2dAfterChats.status}`);
     const t2dAfterMessages = Array.isArray(t2dAfterChats.data?.messages) ? t2dAfterChats.data.messages : [];
     const t2dNewMessages = t2dAfterMessages.slice(t2dBeforeCount);
-    assert(t2dNewMessages.length >= 4, `T3d expected at least 4 chat messages after send, got ${t2dNewMessages.length}`);
+    assert(t2dNewMessages.length >= 3, `T3d expected at least 3 chat messages after send, got ${t2dNewMessages.length}`);
 
-    const t2dInProgress = t2dNewMessages.find((m) => m?.role === 'system' && String(m?.text || '').trim().toLowerCase() === PROBE_IN_PROGRESS_TEXT);
     const t2dAiGenerated = t2dNewMessages.find((m) => m?.role === 'system' && /^AI generated:/i.test(String(m?.text || '')));
     const t2dAssistantMsg = t2dNewMessages.find((m) => m?.role === 'assistant');
 
-    assert(!!t2dInProgress && typeof t2dInProgress.id === 'string', 'T3d missing in-progress system chat message');
-    assert(String(t2dInProgress?.turn || '') === t2dTurnId, 'T3d in-progress system turn id mismatch');
     assert(!!t2dAiGenerated && typeof t2dAiGenerated.id === 'string', 'T3d missing AI-generated attachment system chat message');
     assert(/#\d+\s*$/.test(String(t2dAiGenerated?.text || '')), 'T3d AI-generated system message should include merged file index');
     assert(String(t2dAiGenerated?.turn || '') === t2dTurnId, 'T3d AI-generated system turn id mismatch');
@@ -1154,7 +1108,7 @@ try {
   if (skipT3a) {
     const reason = cliArgs.includes('--skip-t3a')
       ? '--skip-t3a'
-      : (skipT3 ? 'T3 group skipped' : (!isTestSelected('T3A') ? 'not in --tests selection' : (!isCopilotAvailable() ? 'copilot CLI unavailable' : 'skipped')));
+      : (skipT3 ? 'T3 group skipped' : (!isTestSelected('T3A') ? 'not in --tests selection' : (!isCopilotAvailable() ? 'copilot availability not declared (set DEMO_COPILOT_AVAILABLE=1 to enable)' : 'skipped')));
     console.log(`\n=== T3a: skipped (${reason}) ===`);
   } else {
     console.log('\n=== T3a: non-probe chat protocol (expect paris) ===');
@@ -1167,7 +1121,7 @@ try {
       actionType: 'chat-send',
       payload: {
         text: t2aPrompt,
-        'turn-id': t2aTurnId,
+          'turn-id': t2aTurnId,
       },
     });
     assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
@@ -1259,7 +1213,7 @@ try {
       actionType: 'chat-send',
       payload: {
         text: t2cPrompt,
-        'turn-id': t2cTurnId,
+          'turn-id': t2cTurnId,
         files: [t2cUploadedFile],
       },
     });

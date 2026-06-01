@@ -3,8 +3,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  appendSystemMessage,
-  configureWorkspaceCliScripts,
   createFinalResponseContainer,
   publishFinalResponseFromContainer,
   readJsonStdin,
@@ -61,8 +59,6 @@ const {
   baseRef = '',
   aiWorkspaceRoot = '',
   cardStoreRef = '',
-  chatStoreRef = '',
-  artifactsStoreRef = '',
   cardId = '',
   logId = '',
   scratchStoreRef = '',
@@ -74,7 +70,7 @@ const {
 requireRequiredStrings({
   aiWorkspaceRoot,
   cardStoreRef,
-  chatStoreRef,
+  boardId,
   cardId,
   logId,
   userText,
@@ -82,7 +78,7 @@ requireRequiredStrings({
 }, 'probe');
 
 function canUseManagedFinalResponseFlow() {
-  return [baseRef, artifactsStoreRef, scratchStoreRef, turnId].every(
+  return [boardId, scratchStoreRef, turnId].every(
     (value) => typeof value === 'string' && value.trim().length > 0,
   );
 }
@@ -111,8 +107,6 @@ async function writeWatchpartyFrames(dirPath, cId, replyText) {
 
 try {
   const workingDir = resolveCopilotWorkspaceDir(aiWorkspaceRoot, cardStoreRef, cardId, 'probe');
-  configureWorkspaceCliScripts(workingDir, 'probe');
-  appendSystemMessage(chatStoreRef, cardId, 'in-progress', 30000, turnId);
   const probeResponse = buildProbeResponse(userText);
   await writeWatchpartyFrames(watchPartyFilesForChatDir, cardId, probeResponse.replyText);
   if (canUseManagedFinalResponseFlow()) {
@@ -121,14 +115,13 @@ try {
       text: probeResponse.replyText,
       files: probeResponse.files,
     });
-    publishFinalResponseFromContainer({
-      baseRef,
-      chatStoreRef,
-      artifactsStoreRef,
+    await publishFinalResponseFromContainer({
+      boardId,
       cardId,
       containerDir,
       replyText: probeResponse.replyText,
       turnId,
+      logId,
     });
   } else {
     await stageAssistantReplyViaMcp(
@@ -140,6 +133,7 @@ try {
       { logId },
     );
   }
+  void workingDir;
   // The flow only consumes success or error from this process. Reply text must not be returned here.
   process.stdout.write(JSON.stringify({ assistantHandled: true }));
 } catch (err) {
