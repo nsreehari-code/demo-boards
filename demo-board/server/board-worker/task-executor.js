@@ -327,6 +327,60 @@ async function runSourceFetchSubcommand(argv) {
 
 }
 
+async function executeLogicalSourceFetchRequest(request) {
+  const sourceDef = sanitizeRuntimeSourceDef(request?.source_def);
+  const callback = request?.callback;
+  const outputRefStr = typeof request?.output?.ref === 'string' ? request.output.ref : undefined;
+  const diagnosticsRefStr = typeof request?.diagnostics?.ref === 'string' ? request.diagnostics.ref : undefined;
+  const extra = request?.extra && typeof request.extra === 'object' && !Array.isArray(request.extra) ? request.extra : {};
+
+  if (!sourceDef || typeof sourceDef !== 'object' || Array.isArray(sourceDef)) {
+    throw new Error('executeBoardWorkerRequest requires source_def');
+  }
+  if (!outputRefStr) {
+    throw new Error('executeBoardWorkerRequest requires output.ref');
+  }
+
+  const outRef = parseRef(outputRefStr);
+  const errRef = diagnosticsRefStr ? parseRef(diagnosticsRefStr) : undefined;
+  const outStorage = blobStorageForRef(outRef);
+  const errStorage = errRef ? blobStorageForRef(errRef) : undefined;
+
+  const reportHostedFailure = (msg) => {
+    if (errStorage && errRef) { try { errStorage.write(errRef.value, msg); } catch {} }
+    console.error(`${LOG_PREFIX} ${msg}`);
+    if (callback) { try { reportFailed(callback, msg); } catch {} }
+  };
+
+  let flowResult;
+  try {
+    const resolved = await resolveAndExecuteSourceFlow(sourceDef, extra, { outRef, errRef });
+    flowResult = resolved.flowResult;
+  } catch (err) {
+    const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
+    reportHostedFailure(`source invocation failed: ${String(err && err.message || err)}${detail}`);
+    return;
+  }
+
+  if (!flowResult?.wroteOutputDirectly) {
+    try {
+      outStorage.write(outRef.value, JSON.stringify(flowResult?.resultValue, null, 2));
+    } catch (err) {
+      const msg = `Cannot write output: ${String(err && err.message || err)}`;
+      reportHostedFailure(msg);
+      throw new Error(msg);
+    }
+  }
+
+  if (callback) {
+    try {
+      reportComplete(callback, outRef);
+    } catch (err) {
+      throw new Error(`reportComplete failed: ${String(err && err.message || err)}`);
+    }
+  }
+}
+
 function parseOptionalExtraArg(argv) {
   const extraIdx = argv.indexOf('--extra');
   const extraB64 = extraIdx !== -1 ? argv[extraIdx + 1] : undefined;
@@ -645,6 +699,173 @@ function validateSourceDefSubcommand() {
   process.exit(errors.length === 0 ? 0 : 1);
 }
 
+function validateSourceDefPayload(rawInput) {
+  if (!rawInput) {
+    return { ok: false, errors: ['Missing source JSON on stdin'] };
+  }
+
+  let sourceDef;
+  try {
+    sourceDef = JSON.parse(rawInput);
+  } catch (err) {
+    return { ok: false, errors: [`Cannot parse source JSON from stdin: ${err && err.message || err}`] };
+  }
+
+  const registry = loadSourceDefFlowsConfig();
+  const { errors } = validateSourceDefContract(sourceDef, registry);
+  return { ok: errors.length === 0, errors };
+}
+
+function describeCapabilitiesPayload() {
+  const registry = loadSourceDefFlowsConfig();
+  const sourceKinds = {};
+  for (const [kind, spec] of Object.entries(registry?.kinds || {})) {
+    sourceKinds[kind] = {
+      ...(spec?.manifest && typeof spec.manifest === 'object' ? spec.manifest : {}),
+      ...(spec?.supports && typeof spec.supports === 'object' ? { supports: spec.supports } : {}),
+      ...(spec?.probe && typeof spec.probe === 'object' ? { probe: spec.probe } : {}),
+    };
+  }
+  return {
+    version: registry?.version || '1.0',
+    executor: registry?.executor || EXECUTOR_NAME,
+    subcommands: Array.isArray(registry?.subcommands)
+      ? registry.subcommands
+      : ['run-source-fetch', 'probe-source-preflight', 'run-source-preflight', 'describe-capabilities', 'validate-source-def'],
+    sourceKinds,
+    ...(registry?.commonSourceDefFields && typeof registry.commonSourceDefFields === 'object'
+      ? { commonSourceDefFields: registry.commonSourceDefFields }
+      : {}),
+    ...(registry?.extraSchema ? { extraSchema: registry.extraSchema } : {}),
+  };
+}
+
+async function probeSourcePreflightRequest(rawInput, extra = {}) {
+  const startedAt = Date.now();
+  try {
+    if (!rawInput) {
+      return { ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: 'Missing probe input JSON on stdin' };
+    }
+
+    let sourceDef;
+    try {
+      sourceDef = JSON.parse(rawInput);
+    } catch (err) {
+      return { ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: `Invalid probe JSON: ${String(err && err.message || err)}` };
+    }
+
+    void extra;
+    const registry = loadSourceDefFlowsConfig();
+    const { kind, errors } = validateSourceDefContract(sourceDef, registry);
+    if (errors.length > 0) {
+      throw new Error(errors.join(' '));
+    }
+    const spec = registry?.kinds?.[kind] || {};
+    const probeInfo = spec?.probe && typeof spec.probe === 'object' ? spec.probe : null;
+    return {
+      ok: true,
+      reachable: true,
+      latencyMs: Date.now() - startedAt,
+      kind,
+      note: 'Lightweight probe passed',
+      ...(probeInfo ? { probe: probeInfo } : {}),
+    };
+  } catch (err) {
+    const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
+    return { ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: `probe failed: ${String(err && err.message || err)}${detail}` };
+  }
+}
+
+async function runSourcePreflightRequest(rawInput, extra = {}) {
+  const startedAt = Date.now();
+  try {
+    if (!rawInput) {
+      return { ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: 'Missing run preflight input JSON on stdin' };
+    }
+
+    let sourceDef;
+    try {
+      sourceDef = JSON.parse(rawInput);
+    } catch (err) {
+      return { ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: `Invalid run preflight JSON: ${String(err && err.message || err)}` };
+    }
+
+    const registry = loadSourceDefFlowsConfig();
+    const { errors } = validateSourceDefContract(sourceDef, registry);
+    if (errors.length > 0) {
+      throw new Error(errors.join(' '));
+    }
+
+    validateRunSourcePreflightProjections(sourceDef);
+
+    const { kind, flowResult } = await resolveAndExecuteSourceFlow(sourceDef, extra);
+    return {
+      ok: true,
+      reachable: true,
+      latencyMs: Date.now() - startedAt,
+      kind,
+      note: 'Actual fetch preflight passed',
+      resultValue: flowResult?.resultValue,
+    };
+  } catch (err) {
+    const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
+    return { ok: false, reachable: false, latencyMs: Date.now() - startedAt, error: `source invocation failed: ${String(err && err.message || err)}${detail}` };
+  }
+}
+
+function buildTaskExecutorArgvFromRequest(request) {
+  const subcommand = typeof request?.subcommand === 'string' ? request.subcommand.trim() : '';
+  if (!subcommand) {
+    throw new Error('executeTaskExecutorRequest requires subcommand');
+  }
+
+  const argv = [];
+  if (typeof request?.inRef === 'string' && request.inRef.trim()) argv.push('--in-ref', request.inRef.trim());
+  if (typeof request?.outRef === 'string' && request.outRef.trim()) argv.push('--out-ref', request.outRef.trim());
+  if (typeof request?.errRef === 'string' && request.errRef.trim()) argv.push('--err-ref', request.errRef.trim());
+  if (request?.extra && typeof request.extra === 'object' && !Array.isArray(request.extra)) {
+    argv.push('--extra', Buffer.from(JSON.stringify(request.extra)).toString('base64'));
+  }
+  return { subcommand, argv };
+}
+
+export async function executeBoardWorkerRequest(request) {
+  if (request?.source_def) {
+    await executeLogicalSourceFetchRequest(request);
+    return { ok: true };
+  }
+  const { subcommand, argv } = buildTaskExecutorArgvFromRequest(request);
+  const inlineInput = typeof request?.input === 'string'
+    ? request.input
+    : request?.input !== undefined
+      ? JSON.stringify(request.input)
+      : '';
+  const inlineExtra = request?.extra && typeof request.extra === 'object' && !Array.isArray(request.extra) ? request.extra : {};
+
+  if (subcommand === 'run-source-fetch') {
+    await runSourceFetchSubcommand(argv);
+    return { ok: true };
+  }
+  if (subcommand === 'probe-source-preflight') {
+    return await probeSourcePreflightRequest(inlineInput, inlineExtra);
+  }
+  if (subcommand === 'run-source-preflight') {
+    return await runSourcePreflightRequest(inlineInput, inlineExtra);
+  }
+  if (subcommand === 'describe' || subcommand === 'describe-capabilities') {
+    return describeCapabilitiesPayload();
+  }
+  if (subcommand === 'validate-source-def') {
+    return validateSourceDefPayload(inlineInput);
+  }
+
+  throw new Error(`Unknown subcommand: ${subcommand}`);
+}
+
+export async function executeTaskExecutorRequest(request) {
+  return executeBoardWorkerRequest(request);
+}
+
 async function describeCapabilities() {
   const registry = loadSourceDefFlowsConfig();
   const sourceKinds = {};
@@ -709,7 +930,9 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(err => {
-  console.error(`${LOG_PREFIX} fatal: ${err && err.message || err}`);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(err => {
+    console.error(`${LOG_PREFIX} fatal: ${err && err.message || err}`);
+    process.exit(1);
+  });
+}

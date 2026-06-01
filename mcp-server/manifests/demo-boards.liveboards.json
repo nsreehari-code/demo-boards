@@ -113,7 +113,7 @@
             "type": "string",
             "description": "Card ID whose chat history should be read."
           },
-          "turn-id": {
+          "turn_id": {
             "type": "string",
             "description": "Only messages with this turn id."
           },
@@ -122,14 +122,14 @@
             "minimum": 0,
             "description": "Last N individual messages."
           },
-          "tail-turns": {
+          "tail_turns": {
             "type": "integer",
             "minimum": 0,
             "description": "Last N user turns only."
           },
-          "tail-turns-before-id": {
+          "tail_turns_before_id": {
             "type": "string",
-            "description": "Requires tail-turns; messages before the given turn id."
+            "description": "Requires tail_turns; messages before the given turn id."
           }
         },
         "required": ["board_id", "log_id", "card_id"],
@@ -502,7 +502,7 @@
             "type": "string",
             "description": "Response text to stage."
           },
-          "turn-id": {
+          "turn_id": {
             "type": "string",
             "description": "Turn id to associate the message with."
           },
@@ -514,7 +514,7 @@
             }
           }
         },
-        "required": ["board_id", "log_id", "card_id", "text", "turn-id"],
+        "required": ["board_id", "log_id", "card_id", "text", "turn_id"],
         "additionalProperties": false
       }
     }

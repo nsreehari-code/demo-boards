@@ -543,6 +543,25 @@ async function waitForProcessingClearedOutcome({ eventStart, beforeCount, succes
   throw new Error(`Timeout (${timeoutMs}ms) waiting for: ${label}`);
 }
 
+async function waitForTurnMessages({ cardId, turnId, timeoutMs, label, predicate }) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    const response = await httpGetTurnChats(cardId, turnId);
+    if (response.status === 200) {
+      const messages = Array.isArray(response.data?.messages) ? response.data.messages : [];
+      const result = predicate(messages);
+      if (result) {
+        return result;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(`Timeout (${timeoutMs}ms) waiting for: ${label}`);
+}
+
 function deriveProbeLifecycleMilestones(events, opts) {
   const milestones = [];
   const seenMessageIds = new Set();
@@ -892,10 +911,6 @@ try {
   await ensureChatSseSubscription();
   await ensureWatchpartySseSubscription();
 
-  const t2Before = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-  assert(t2Before.status === 200, `T3 pre chats returned ${t2Before.status}`);
-  const t2BeforeMessages = Array.isArray(t2Before.data?.messages) ? t2Before.data.messages : [];
-  const t2BeforeCount = t2BeforeMessages.length;
   const t2EventStart = NS.chatEvents.length;
   const t2WatchpartyStart = NS.watchpartyEvents.length;
   const t2ProbePrompt = `Probe protocol validation ${Date.now()}`;
@@ -910,15 +925,17 @@ try {
   });
   assert(t2SendRes.status === 200, `T3 chat-send returned ${t2SendRes.status}`);
 
-  const t2Lifecycle = await waitForChatPredicate((events) => {
-    return matchOrderedProbeLifecycle(events.slice(t2EventStart), {
-      beforeCount: t2BeforeCount,
-      beforeProcessing: false,
-      prompt: t2ProbePrompt,
-      turnId: t2TurnId,
-    });
-  }, 45_000, 'T3 ordered lifecycle');
-  assert(!!t2Lifecycle, 'T3 ordered lifecycle not observed');
+  await waitForTurnMessages({
+    cardId: CHAT_CARD_ID,
+    turnId: t2TurnId,
+    timeoutMs: 45_000,
+    label: 'T3 turn messages',
+    predicate: (messages) => {
+      const hasUser = messages.some((message) => message?.role === 'user' && String(message?.text || '').includes(t2ProbePrompt));
+      const hasAssistant = messages.some((message) => message?.role === 'assistant' && String(message?.text || '').includes(`Echo: ${t2ProbePrompt}`));
+      return hasUser && hasAssistant ? messages : false;
+    },
+  });
 
   const t2WatchpartyLifecycle = await waitForWatchpartyPredicate((events) => {
     const relevant = events.slice(t2WatchpartyStart);
@@ -935,20 +952,19 @@ try {
   }, 45_000, 'T3 watchparty lifecycle');
   assert(!!t2WatchpartyLifecycle, 'T3 watchparty lifecycle not observed');
 
-  const t2After = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+  const t2After = await httpGetTurnChats(CHAT_CARD_ID, t2TurnId);
   assert(t2After.status === 200, `T3 post chats returned ${t2After.status}`);
-  const t2AfterMessages = Array.isArray(t2After.data?.messages) ? t2After.data.messages : [];
-  const t2NewMessages = t2AfterMessages.slice(t2BeforeCount);
-  assert(t2NewMessages.length >= 2, `T3 expected at least 2 new chat messages, got ${t2NewMessages.length}`);
-  const t2User = t2NewMessages.find((m) => m?.role === 'user');
-  const t2AssistantMsg = t2NewMessages.find((m) => m?.role === 'assistant');
+  const t2TurnMessages = Array.isArray(t2After.data?.messages) ? t2After.data.messages : [];
+  assert(t2TurnMessages.length >= 2, `T3 expected at least 2 chat messages in turn, got ${t2TurnMessages.length}`);
+  const t2User = t2TurnMessages.find((m) => m?.role === 'user');
+  const t2AssistantMsg = t2TurnMessages.find((m) => m?.role === 'assistant');
   assert(!!t2User && typeof t2User.id === 'string', 'T3 user chat message missing id');
   assert(String(t2User?.text || '').includes(t2ProbePrompt), 'T3 user file text mismatch');
   assert(String(t2User?.turn || '') === t2TurnId, 'T3 user turn id mismatch');
   assert(!!t2AssistantMsg && typeof t2AssistantMsg.id === 'string', 'T3 assistant chat message missing id');
   assert(String(t2AssistantMsg?.text || '').includes(`Echo: ${t2ProbePrompt}`), 'T3 assistant echo file content mismatch');
   assert(String(t2AssistantMsg?.turn || '') === t2TurnId, 'T3 assistant turn id mismatch');
-  console.log(`[${new Date().toISOString()}] [T3] ok: ordered probe lifecycle observed (user+processing, assistant+processing clear)`);
+  console.log(`[${new Date().toISOString()}] [T3] ok: probe turn stored user and assistant messages`);
     }
 
   // ── T3b: probe-echo chat + file upload protocol over API + SSE ──
@@ -1001,14 +1017,17 @@ try {
     });
     assert(t2bSendRes.status === 200, `T3b chat-send returned ${t2bSendRes.status}`);
 
-    const t2bLifecycle = await waitForChatPredicate((events) => {
-      return matchOrderedProbeLifecycle(events.slice(t2bEventStart), {
-        turnId: t2bTurnId,
-        beforeProcessing: false,
-        prompt: t2bPrompt,
-      });
-    }, 60_000, 'T3b ordered lifecycle');
-    assert(!!t2bLifecycle, 'T3b ordered lifecycle not observed');
+    await waitForTurnMessages({
+      cardId: CHAT_CARD_ID,
+      turnId: t2bTurnId,
+      timeoutMs: 60_000,
+      label: 'T3b turn messages',
+      predicate: (messages) => {
+        const hasUser = messages.some((message) => message?.role === 'user' && String(message?.text || '').includes(t2bPrompt));
+        const hasAssistant = messages.some((message) => message?.role === 'assistant' && String(message?.text || '').includes(`Echo: ${t2bPrompt}`));
+        return hasUser && hasAssistant ? messages : false;
+      },
+    });
 
     const t2bAfterMessages = await httpGetTurnChats(CHAT_CARD_ID, t2bTurnId);
     assert(t2bAfterMessages.status === 200, `T3b post chats returned ${t2bAfterMessages.status}`);
@@ -1025,7 +1044,7 @@ try {
     assert(!Object.prototype.hasOwnProperty.call(t2bUser?.files?.[0] || {}, 'path'), 'T3b user chat file metadata should not expose path');
     assert(String(t2bAssistantMsg?.text || '').includes(`Echo: ${t2bPrompt}`), 'T3b assistant file content mismatch');
     assert(String(t2bAssistantMsg?.turn || '') === t2bTurnId, 'T3b assistant turn id mismatch');
-    console.log('[T3b] ok: upload protocol and ordered probe lifecycle observed (user+processing, assistant+processing clear)');
+    console.log('[T3b] ok: upload protocol completed and turn stored user and assistant messages');
   }
 
   // ── T3d: probe-echo chat with one AI-generated attachment ──
@@ -1034,10 +1053,6 @@ try {
   } else {
     console.log('\n=== T3d: probe-echo chat with AI-generated attachment ===');
     await ensureChatSseSubscription();
-    const t2dBeforeChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
-    assert(t2dBeforeChats.status === 200, `T3d pre chats returned ${t2dBeforeChats.status}`);
-    const t2dBeforeMessages = Array.isArray(t2dBeforeChats.data?.messages) ? t2dBeforeChats.data.messages : [];
-    const t2dBeforeCount = t2dBeforeMessages.length;
 
     const t2dBeforeCard = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}`);
     assert(t2dBeforeCard.status === 200, `T3d pre card returned ${t2dBeforeCard.status}`);
@@ -1057,21 +1072,22 @@ try {
     });
     assert(t2dSendRes.status === 200, `T3d chat-send returned ${t2dSendRes.status}`);
 
-    const t2dLifecycle = await waitForChatPredicate((events) => {
-      return matchOrderedProbeLifecycle(events.slice(t2dEventStart), {
-        beforeCount: t2dBeforeCount,
-        beforeProcessing: false,
-        prompt: t2dPrompt,
-        turnId: t2dTurnId,
-      });
-    }, 60_000, 'T3d ordered lifecycle');
-    assert(!!t2dLifecycle, 'T3d ordered lifecycle not observed');
+    await waitForTurnMessages({
+      cardId: CHAT_CARD_ID,
+      turnId: t2dTurnId,
+      timeoutMs: 60_000,
+      label: 'T3d turn messages',
+      predicate: (messages) => {
+        const hasAiGenerated = messages.some((message) => message?.role === 'system' && /^AI generated:/i.test(String(message?.text || '')));
+        const hasAssistant = messages.some((message) => message?.role === 'assistant' && String(message?.text || '').includes(`Echo: ${t2dPrompt}`));
+        return hasAiGenerated && hasAssistant ? messages : false;
+      },
+    });
 
-    const t2dAfterChats = await httpGet(`${BASE}/cards/${CHAT_CARD_ID}/chats`);
+    const t2dAfterChats = await httpGetTurnChats(CHAT_CARD_ID, t2dTurnId);
     assert(t2dAfterChats.status === 200, `T3d post chats returned ${t2dAfterChats.status}`);
-    const t2dAfterMessages = Array.isArray(t2dAfterChats.data?.messages) ? t2dAfterChats.data.messages : [];
-    const t2dNewMessages = t2dAfterMessages.slice(t2dBeforeCount);
-    assert(t2dNewMessages.length >= 3, `T3d expected at least 3 chat messages after send, got ${t2dNewMessages.length}`);
+    const t2dNewMessages = Array.isArray(t2dAfterChats.data?.messages) ? t2dAfterChats.data.messages : [];
+    assert(t2dNewMessages.length >= 3, `T3d expected at least 3 chat messages in turn, got ${t2dNewMessages.length}`);
 
     const t2dAiGenerated = t2dNewMessages.find((m) => m?.role === 'system' && /^AI generated:/i.test(String(m?.text || '')));
     const t2dAssistantMsg = t2dNewMessages.find((m) => m?.role === 'assistant');

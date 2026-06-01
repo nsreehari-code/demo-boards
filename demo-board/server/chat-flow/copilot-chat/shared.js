@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { parseRef, serializeRef } from 'yaml-flow/board-worker-adapter';
-import { publishStagedAttachments as publishManagedAiGeneratedAttachments } from './manage-ai-generated-attachments.js';
 
 const DEFAULT_MCP_SERVER_URL = 'http://127.0.0.1:7801/mcp';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -181,6 +180,7 @@ export async function readAttachmentTextViaMcp(boardId, cardId, fileIndex, optio
 export async function stageAssistantReplyViaMcp(boardId, cardId, turnId, text, files = [], options = {}) {
   requireRequiredStrings({ boardId, cardId, turnId }, 'liveboards assistant reply stage');
   const result = await callLiveboardsTool('liveboards.stage-ai-response-and-any-attachments', appendRequiredLogId({
+    board_id: boardId,
     card_id: cardId,
     turn_id: turnId,
     text,
@@ -409,24 +409,31 @@ function listStagedAttachmentFiles(containerDir) {
   }
 }
 
-function publishStagedAttachments({
-  boardId,
-  currentCardId,
-  containerDir,
-  turnId = '',
-  logId = '',
-}) {
-  const stagedFiles = listStagedAttachmentFiles(containerDir);
-  if (stagedFiles.length === 0) {
-    return null;
+function inferMimeTypeFromFileName(fileName) {
+  const ext = path.extname(fileName).toLowerCase();
+  switch (ext) {
+    case '.txt':
+    case '.md':
+      return 'text/plain; charset=utf-8';
+    case '.json':
+      return 'application/json';
+    case '.csv':
+      return 'text/csv; charset=utf-8';
+    default:
+      return 'application/octet-stream';
   }
+}
 
-  return publishManagedAiGeneratedAttachments({
-    boardId,
-    cardId: currentCardId,
-    attachmentsContainerDir: containerDir,
-    turnId,
-    logId,
+function inferDisplayNameFromStagedFileName(fileName) {
+  const match = /^100-file-\d{3}-(.+)$/.exec(fileName);
+  return match?.[1] || fileName;
+}
+
+function collectStagedAttachmentPayloads(containerDir) {
+  return listStagedAttachmentFiles(containerDir).map((fileName) => {
+    const displayName = inferDisplayNameFromStagedFileName(fileName);
+    const text = fs.readFileSync(path.join(containerDir, fileName), 'utf8');
+    return { file_name: displayName, content_type: inferMimeTypeFromFileName(displayName), text };
   });
 }
 
@@ -503,7 +510,7 @@ export function readStagedFinalResponse(responseFilePath) {
   }
 }
 
-export function publishFinalResponseFromContainer({
+export async function publishFinalResponseFromContainer({
   boardId = '',
   cardId = '',
   containerDir = '',
@@ -514,25 +521,12 @@ export function publishFinalResponseFromContainer({
 } = {}) {
   requireRequiredStrings({ boardId, cardId, containerDir, replyText, turnId }, 'final response publish');
 
-  const hasStagedAttachments = listStagedAttachmentFiles(containerDir).length > 0;
-  const attachmentsResult = hasStagedAttachments
-    ? publishStagedAttachments({
-      boardId,
-      currentCardId: cardId,
-      containerDir,
-      turnId,
-      logId,
-    })
-    : null;
-
-  stageAssistantReplyViaMcp(boardId, cardId, turnId, replyText, [], { logId, timeoutMs });
+  const files = collectStagedAttachmentPayloads(containerDir);
+  await stageAssistantReplyViaMcp(boardId, cardId, turnId, replyText, files, { logId, timeoutMs });
   clearFinalResponseContainer(containerDir);
 
   return {
-    attachmentsResult,
-    publishedAttachmentCount: Array.isArray(attachmentsResult?.data?.published)
-      ? attachmentsResult.data.published.length
-      : 0,
+    publishedAttachmentCount: files.length,
   };
 }
 

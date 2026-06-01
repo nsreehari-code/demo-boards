@@ -7,7 +7,7 @@ import net from 'node:net';
 import os from 'node:os';
 import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   deriveCardIdFromLogId,
   deriveLogIdFromCardId,
@@ -17,11 +17,14 @@ import {
 import {
   createMultiBoardServerRuntime,
   createSingleBoardServerRuntime,
+  createHostedBoardQueueLaneRegistry,
 } from 'yaml-flow/board-live-cards-server-runtime';
 
 import {
   createFsBoardNonCorePlatformAdapter,
   createFsBoardPlatformAdapter,
+  createHttpBoardCallbackTransport,
+  createInProcessBoardCallbackTransport,
   createFsBoardChatStorage,
   createNodeSpawnInvocationAdapter,
   createArtifactsStore,
@@ -30,7 +33,9 @@ import {
   parseRef,
   resolveWhatToRunValue,
   serializeRef,
+  startQueueLaneRunners,
 } from 'yaml-flow/board-live-cards-node';
+import { registerInProcessBoardWorkerCallback } from 'yaml-flow/board-worker-adapter';
 import {
   MemoryStore,
   buildStepHandlersForFlow,
@@ -860,6 +865,16 @@ const serverConfig = loadServerConfig();
 const configuredChatFlowTimeoutMs = normalizeTimeoutMs(serverConfig.chatFlowTimeoutMs, null);
 const configuredInvokeRefTimeoutMs = normalizeNonNegativeTimeoutMs(serverConfig.chatInvokeRefTimeoutMs, 300000);
 const configuredCopilotTimeoutMs = normalizeTimeoutMs(serverConfig.chatCopilotTimeoutMs, 300000);
+function normalizeBoardWorkerTransport(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'queue') return 'queue';
+  if (normalized === 'in-process-loop') return 'in-process-loop';
+  return 'http';
+}
+
+const configuredBoardWorkerTransport = normalizeBoardWorkerTransport(
+  process.env.DEMO_TASK_EXECUTOR_TRANSPORT || serverConfig.taskExecutorTransport || 'http',
+);
 const configuredFoundryAgents = (serverConfig.foundryAgents && typeof serverConfig.foundryAgents === 'object')
   ? serverConfig.foundryAgents
   : {};
@@ -966,6 +981,89 @@ function makeExecutionRef(scriptPath, extra) {
     howToRun: 'local-node',
     whatToRun: serializeRef({ kind: 'fs-path', value: resolved }),
     ...(extra !== undefined ? { meta: extra } : {}),
+  };
+}
+
+function makeLocalTaskExecutorRef(scriptPath, extra) {
+  if (!scriptPath) return undefined;
+  const resolved = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(process.cwd(), scriptPath);
+  return {
+    meta: 'task-executor',
+    howToRun: 'local-node',
+    whatToRun: serializeRef({ kind: 'fs-path', value: resolved }),
+    ...(extra !== undefined ? { extra } : {}),
+  };
+}
+
+function isHostedTaskExecutorRef(ref) {
+  return ref?.howToRun === 'queue-storage'
+    || ref?.howToRun === 'in-process-loop'
+    || ref?.howToRun === 'http:post'
+    || ref?.howToRun === 'http:get';
+}
+
+function makeHostedBoardWorkerRef(boardId, taskExecPath, transport, executionExtra) {
+  if (!taskExecPath) return undefined;
+  if (transport === 'in-process-loop') {
+    return {
+      meta: 'task-executor',
+      howToRun: 'in-process-loop',
+      whatToRun: serializeRef({ kind: 'in-process-loop', value: `board:${boardId}:board-worker` }),
+    };
+  }
+  if (transport === 'http') {
+    return {
+      meta: 'task-executor',
+      howToRun: 'http:post',
+      whatToRun: serializeRef({
+        kind: 'http-url',
+        value: `${String(executionExtra.serverUrl || '').replace(/\/+$/, '')}/api/board-worker`,
+      }),
+      extra: { boardId },
+    };
+  }
+  if (transport === 'queue') {
+    return {
+      meta: 'task-executor',
+      howToRun: 'queue-storage',
+      whatToRun: serializeRef({ kind: 'queue-storage', value: `board:${boardId}:board-worker` }),
+      extra: { boardId },
+    };
+  }
+  throw new Error(`Unsupported board-worker transport for demo host: ${transport}`);
+}
+
+function makeBoardWorkerCallbackTransport(serverUrl, boardApiBasePath, transport, boardId) {
+  if (transport === 'in-process-loop' || transport === 'queue' || transport === 'http') {
+    return createInProcessBoardCallbackTransport(`board:${boardId}:board-worker-callback`);
+  }
+  const normalizedServerUrl = typeof serverUrl === 'string' ? serverUrl.trim().replace(/\/+$/, '') : '';
+  const normalizedApiBasePath = typeof boardApiBasePath === 'string' ? boardApiBasePath.trim().replace(/\/+$/, '') : '';
+  if (!normalizedServerUrl || !normalizedApiBasePath) return undefined;
+  return createHttpBoardCallbackTransport(`${normalizedServerUrl}${normalizedApiBasePath}/callback/board-worker`);
+}
+
+const boardWorkerModuleCache = new Map();
+
+async function loadBoardWorkerModule(taskExecPath) {
+  const resolved = path.isAbsolute(taskExecPath) ? taskExecPath : path.resolve(BOARD_ROOT, taskExecPath);
+  if (!boardWorkerModuleCache.has(resolved)) {
+    boardWorkerModuleCache.set(resolved, import(pathToFileURL(resolved).href));
+  }
+  return boardWorkerModuleCache.get(resolved);
+}
+
+function createHostedBoardWorkerDispatcher(boardId, taskExecPath) {
+  if (!taskExecPath) return null;
+  return async (request) => {
+    const mod = await loadBoardWorkerModule(taskExecPath);
+    if (typeof mod.executeBoardWorkerRequest === 'function') {
+      return await mod.executeBoardWorkerRequest(request);
+    }
+    if (typeof mod.executeTaskExecutorRequest === 'function') {
+      return await mod.executeTaskExecutorRequest(request);
+    }
+    throw new Error(`Hosted board worker for board ${boardId} must export executeBoardWorkerRequest(request)`);
   };
 }
 
@@ -1590,18 +1688,38 @@ const boardSetupRootOverride = (process.env.DEMO_BOARD_SETUP_ROOT || '').trim();
 
 validateConfiguredBoardSetupPaths(boardConfigEntries, boardSetupRootOverride);
 
-function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, executionExtra = {}) {
+function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, executionExtra = {}, boardWorkerTransport = configuredBoardWorkerTransport) {
   ensureBoardSetupPaths(boardId, boardSetupPaths);
 
   const notifyChannel = `yaml-flow-server-${label}-${boardId}-${process.pid}`;
   const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath }));
-  const boardAdapter = createFsBoardPlatformAdapter(baseRef, { notifyChannel });
-  const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(baseRef, { onWarn: console.warn });
+  const callbackTransport = makeBoardWorkerCallbackTransport(
+    executionExtra.serverUrl,
+    executionExtra.apiBasePath,
+    boardWorkerTransport,
+    boardId,
+  );
+  const boardAdapter = createFsBoardPlatformAdapter(baseRef, BOARD_ROOT, {
+    notifyChannel,
+    ...(callbackTransport ? { callbackTransport } : {}),
+  });
+  const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(baseRef, BOARD_ROOT, {
+    onWarn: console.warn,
+    ...(callbackTransport ? { callbackTransport } : {}),
+  });
+  const localSyncTaskExecutorRef = makeLocalTaskExecutorRef(taskExecPath, executionExtra);
+  if (localSyncTaskExecutorRef) {
+    const invokeExecutor = nonCoreAdapter.invokeExecutor.bind(nonCoreAdapter);
+    nonCoreAdapter.invokeExecutor = (ref, subcommand, execOpts) => {
+      const syncRef = isHostedTaskExecutorRef(ref) ? localSyncTaskExecutorRef : ref;
+      return invokeExecutor(syncRef, subcommand, execOpts);
+    };
+  }
   boardAdapter.requestProcessAccumulated = () => {};
   nonCoreAdapter.requestProcessAccumulated = () => {};
 
   const artifactsRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath }));
-  const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, { suppressSpawn: true });
+  const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, BOARD_ROOT, { suppressSpawn: true });
   const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
 
   return {
@@ -1615,7 +1733,7 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
     scratchStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath }),
     archiveStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.archivalStorePath }),
     notifyRef: { kind: 'named-pipe', value: namedPipePath(notifyChannel) },
-    taskExecutorRef: makeExecutionRef(taskExecPath, executionExtra),
+    taskExecutorRef: makeHostedBoardWorkerRef(boardId, taskExecPath, boardWorkerTransport, executionExtra),
     chatHandlerFlow,
     inferenceAdapterRef: makeExecutionRef(infAdapterPath),
   };
@@ -1777,6 +1895,8 @@ function parseExecutionStdout(stdout) {
 const watchpartyBrokers = new Map(); // boardId → WatchpartyBroker
 const watchpartyDirectoryWatchers = new Map(); // boardId → directory watcher
 const chatSseBrokers = new Map(); // boardId → chat SSE broker
+const hostedBoardWorkerDispatchers = new Map(); // boardId → hosted board-worker dispatcher
+const hostedQueueLaneStops = new Map(); // boardId → stop fn for queue lane runners
 
 const runtime = createMultiBoardServerRuntime({
   apiBasePath,
@@ -1788,6 +1908,9 @@ const runtime = createMultiBoardServerRuntime({
 
     const cardsDir = resolveFromConfig(regular.seedCardsDir);
     const taskExecPath = resolveFromConfig(regular.taskExecutorPath) || (entry?.taskExecutorPath || configuredTaskExecutorPath);
+    const boardWorkerTransport = normalizeBoardWorkerTransport(
+      regular.taskExecutorTransport || entry?.taskExecutorTransport || configuredBoardWorkerTransport,
+    );
     const chatHandlerPath = resolveFromConfig(regular.chatHandlerPath) || (entry?.chatHandlerPath || configuredChatHandlerPath);
     const boardFlowTimeoutMs = configuredChatFlowTimeoutMs;
     const chatInvokeRefTimeoutMs = configuredInvokeRefTimeoutMs;
@@ -1854,7 +1977,9 @@ const runtime = createMultiBoardServerRuntime({
       archivalStore: boardSetupPaths.archivalStore,
       projectRoot: BOARD_ROOT,
       chatFlowRoot,
+      apiBasePath: `${apiBasePath}/${boardId}`,
       serverUrl: `http://127.0.0.1:${PORT}`,
+      taskExecutorTransport: boardWorkerTransport,
       watchPartyFilesForChatDir,
       chatCopilotTimeoutMs,
       chatAssistant,
@@ -1864,7 +1989,16 @@ const runtime = createMultiBoardServerRuntime({
       ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
     };
 
-    const baseCfg = buildBoardContextConfig('base', boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, baseExecutionExtra);
+    const baseCfg = buildBoardContextConfig(
+      'base',
+      boardSetupPaths,
+      taskExecPath,
+      chatHandlerFlow,
+      infAdapterPath,
+      boardId,
+      baseExecutionExtra,
+      boardWorkerTransport,
+    );
     const boards = [baseCfg];
 
     demoPrepSetup({
@@ -1924,6 +2058,33 @@ const runtime = createMultiBoardServerRuntime({
         ...(stepMachinePath ? { stepMachineCliPath: stepMachinePath } : {}),
       },
     });
+
+    const hostedBoardWorkerDispatch = createHostedBoardWorkerDispatcher(boardId, taskExecPath);
+    if (hostedBoardWorkerDispatch) {
+      hostedBoardWorkerDispatchers.set(boardId, hostedBoardWorkerDispatch);
+    }
+    if ((boardWorkerTransport === 'in-process-loop' || boardWorkerTransport === 'queue' || boardWorkerTransport === 'http') && hostedBoardWorkerDispatch) {
+      registerInProcessBoardWorkerCallback(`board:${boardId}:board-worker-callback`, (payload) => {
+        if (payload.outcome === 'success') {
+          return singleBoardRuntime.reportSourceFetched(payload.token, String(payload.ref || ''));
+        }
+        return singleBoardRuntime.reportSourceFetchFailure(payload.token, String(payload.reason || 'unknown'));
+      });
+    }
+
+    // Start server-owned queue lane runners (process-accumulated + chat-agent drains)
+    const previousQueueStop = hostedQueueLaneStops.get(boardId);
+    if (previousQueueStop) {
+      previousQueueStop();
+      hostedQueueLaneStops.delete(boardId);
+    }
+    const stopQueueRunner = startQueueLaneRunners(createHostedBoardQueueLaneRegistry({
+      boardId,
+      runtime: singleBoardRuntime,
+      boardAdapter: baseCfg.boardAdapter,
+      logger,
+    }));
+    hostedQueueLaneStops.set(boardId, stopQueueRunner);
 
     // Seed card store from source cardsDir if empty
     const existing = singleBoardRuntime.cardStore.get({});
@@ -2509,7 +2670,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  const mcpRouteMatch = pathname.match(/^\/api\/boards\/([^/]+)\/(mcp|mcp-raw)$/);
+  const mcpRouteMatch = pathname.match(/^\/api\/boards\/([^/]+)\/(mcp|mcp-raw|mcp-controlplane)$/);
   if (method === 'POST' && mcpRouteMatch) {
     (async () => {
       try {
@@ -2563,6 +2724,37 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/board-worker') {
+    (async () => {
+      try {
+        const body = await readRequestBody(req);
+        const boardId = typeof body?.extra?.boardId === 'string' ? body.extra.boardId.trim() : '';
+        if (!boardId) {
+          jsonReply(res, 400, { error: 'boardId is required in request.extra.boardId' });
+          return;
+        }
+        runtime.requireBoardService(boardId);
+        const dispatcher = hostedBoardWorkerDispatchers.get(boardId);
+        if (!dispatcher) {
+          jsonReply(res, 409, { error: `No hosted board-worker configured for board: ${boardId}` });
+          return;
+        }
+        if (body?.source_def) {
+          void dispatcher(body).catch((err) => {
+            logger.error(`[board-server] hosted board-worker failed for ${boardId}: ${String(err && err.message || err)}`);
+          });
+          jsonReply(res, 202, { status: 'success', dispatched: true });
+          return;
+        }
+        const workerResult = await dispatcher(body);
+        jsonReply(res, 200, workerResult ?? { status: 'success', data: {} });
+      } catch (err) {
+        jsonReply(res, 404, { error: String(err && err.message || err) });
+      }
+    })();
+    return;
+  }
+
   // All other /api/boards routes are handled by the platform-free runtime
   runtime.handleApi(req, res, url).then((handled) => {
     if (!handled) {
@@ -2591,4 +2783,13 @@ server.listen(PORT, HOST, () => {
   logBoardServerLine(`  GET  ${apiBasePath}/:boardId/cards/:id/chats`);
   logBoardServerLine(`  POST ${apiBasePath}/:boardId/cards/:id/chats/subscribe-sse`);
   logBoardServerLine(`  POST ${apiBasePath}/:boardId/cards/:id/chats/unsubscribe-sse`);
+  logBoardServerLine(`  POST ${apiBasePath}/:boardId/mcp-controlplane`);
+});
+
+server.on('close', () => {
+  for (const stop of hostedQueueLaneStops.values()) {
+    try { stop(); } catch { /* ignore */ }
+  }
+  hostedBoardWorkerDispatchers.clear();
+  hostedQueueLaneStops.clear();
 });
