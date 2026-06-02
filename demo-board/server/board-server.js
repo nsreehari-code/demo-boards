@@ -549,6 +549,114 @@ function resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride) {
   };
 }
 
+function applyBoardIdTemplate(value, boardId) {
+  return String(value || '').replace(/\{\{boardId\}\}/g, boardId);
+}
+
+function defaultBoardRuntimeRefs(boardSetupPaths) {
+  return {
+    baseRef: { kind: 'fs-path', value: boardSetupPaths.boardRuntimePath },
+    cardStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath }),
+    outputsStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardOutputsStorePath }),
+    artifactsStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath }),
+    chatStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.chatStorePath }),
+    scratchStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath }),
+    archiveStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.archivalStorePath }),
+  };
+}
+
+function normalizeConfiguredKindValueRef(rawRef, boardId, configKey, boardSetupPaths) {
+  if (typeof rawRef === 'string') {
+    const normalized = applyBoardIdTemplate(rawRef.trim(), boardId);
+    if (!normalized) {
+      throw new Error(`[board-server] boards.${boardId}.refs.${configKey} must not be empty`);
+    }
+    try {
+      return normalizeConfiguredKindValueRef(parseRef(normalized), boardId, configKey, boardSetupPaths);
+    } catch {
+      throw new Error(`[board-server] boards.${boardId}.refs.${configKey} must be a serialized ref or { kind, value }`);
+    }
+  }
+
+  if (!rawRef || typeof rawRef !== 'object' || Array.isArray(rawRef)) {
+    throw new Error(`[board-server] boards.${boardId}.refs.${configKey} must be a serialized ref or { kind, value }`);
+  }
+
+  const kind = typeof rawRef.kind === 'string' ? rawRef.kind.trim() : '';
+  const value = typeof rawRef.value === 'string' ? rawRef.value.trim() : '';
+  if (!kind || !value) {
+    throw new Error(`[board-server] boards.${boardId}.refs.${configKey} requires non-empty kind and value`);
+  }
+
+  const templatedValue = applyBoardIdTemplate(value, boardId);
+  const normalizedValue = kind === 'fs-path' && !path.isAbsolute(templatedValue)
+    ? path.resolve(boardSetupPaths.setupRoot, templatedValue)
+    : templatedValue;
+
+  return { kind, value: normalizedValue };
+}
+
+function requireSupportedServerRef(ref, boardId, configKey) {
+  if (!ref || ref.kind !== 'fs-path') {
+    const kind = ref?.kind ? String(ref.kind) : 'unknown';
+    throw new Error(
+      `[board-server] boards.${boardId}.refs.${configKey} kind "${kind}" is not supported by this host yet; only "fs-path" refs are currently supported`,
+    );
+  }
+  return ref;
+}
+
+function fsPathValueFromSerializedRef(ref, boardId, configKey) {
+  return requireSupportedServerRef(parseRef(ref), boardId, configKey).value;
+}
+
+function resolveBoardRuntimeRefs(cfg, boardId, boardSetupPaths) {
+  const defaults = defaultBoardRuntimeRefs(boardSetupPaths);
+  const configuredRefs = cfg?.refs && typeof cfg.refs === 'object' && !Array.isArray(cfg.refs)
+    ? cfg.refs
+    : {};
+
+  const baseRef = Object.prototype.hasOwnProperty.call(configuredRefs, 'baseRef')
+    ? requireSupportedServerRef(
+      normalizeConfiguredKindValueRef(configuredRefs.baseRef, boardId, 'baseRef', boardSetupPaths),
+      boardId,
+      'baseRef',
+    )
+    : defaults.baseRef;
+
+  function resolveSerializedRef(key) {
+    if (!Object.prototype.hasOwnProperty.call(configuredRefs, key)) {
+      return defaults[key];
+    }
+    const parsed = requireSupportedServerRef(
+      normalizeConfiguredKindValueRef(configuredRefs[key], boardId, key, boardSetupPaths),
+      boardId,
+      key,
+    );
+    return serializeRef(parsed);
+  }
+
+  return {
+    baseRef,
+    cardStoreRef: resolveSerializedRef('cardStoreRef'),
+    outputsStoreRef: resolveSerializedRef('outputsStoreRef'),
+    artifactsStoreRef: resolveSerializedRef('artifactsStoreRef'),
+    chatStoreRef: resolveSerializedRef('chatStoreRef'),
+    scratchStoreRef: resolveSerializedRef('scratchStoreRef'),
+    archiveStoreRef: resolveSerializedRef('archiveStoreRef'),
+  };
+}
+
+function ensureBoardRuntimeRefPaths(boardId, boardRuntimeRefs) {
+  ensureDirectoryExists(boardRuntimeRefs.baseRef.value, `boards.${boardId}.refs.baseRef`);
+  ensureDirectoryExists(fsPathValueFromSerializedRef(boardRuntimeRefs.cardStoreRef, boardId, 'cardStoreRef'), `boards.${boardId}.refs.cardStoreRef`);
+  ensureDirectoryExists(fsPathValueFromSerializedRef(boardRuntimeRefs.outputsStoreRef, boardId, 'outputsStoreRef'), `boards.${boardId}.refs.outputsStoreRef`);
+  ensureDirectoryExists(fsPathValueFromSerializedRef(boardRuntimeRefs.artifactsStoreRef, boardId, 'artifactsStoreRef'), `boards.${boardId}.refs.artifactsStoreRef`);
+  ensureDirectoryExists(fsPathValueFromSerializedRef(boardRuntimeRefs.chatStoreRef, boardId, 'chatStoreRef'), `boards.${boardId}.refs.chatStoreRef`);
+  ensureDirectoryExists(fsPathValueFromSerializedRef(boardRuntimeRefs.scratchStoreRef, boardId, 'scratchStoreRef'), `boards.${boardId}.refs.scratchStoreRef`);
+  ensureDirectoryExists(fsPathValueFromSerializedRef(boardRuntimeRefs.archiveStoreRef, boardId, 'archiveStoreRef'), `boards.${boardId}.refs.archiveStoreRef`);
+}
+
 function ensureBoardSetupPaths(boardId, boardSetupPaths) {
   ensureDirectoryExists(boardSetupPaths.setupRoot, `boards.${boardId}.setup.setupRoot`);
   ensureDirectoryExists(boardSetupPaths.aiWorkspaceRootPath, `boards.${boardId}.setup.aiWorkspaceRoot`);
@@ -565,6 +673,7 @@ function validateConfiguredBoardSetupPaths(entries, boardSetupRootOverride) {
   for (const [boardId, cfg] of entries) {
     const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
     ensureBoardSetupPaths(boardId, boardSetupPaths);
+    ensureBoardRuntimeRefPaths(boardId, resolveBoardRuntimeRefs(cfg, boardId, boardSetupPaths));
   }
 }
 
@@ -1040,7 +1149,7 @@ function makeBoardWorkerCallbackTransport(serverUrl, boardApiBasePath, transport
   const normalizedServerUrl = typeof serverUrl === 'string' ? serverUrl.trim().replace(/\/+$/, '') : '';
   const normalizedApiBasePath = typeof boardApiBasePath === 'string' ? boardApiBasePath.trim().replace(/\/+$/, '') : '';
   if (!normalizedServerUrl || !normalizedApiBasePath) return undefined;
-  return createHttpBoardCallbackTransport(`${normalizedServerUrl}${normalizedApiBasePath}/callback/board-worker`);
+  return createHttpBoardCallbackTransport(`${normalizedServerUrl}${normalizedApiBasePath}/mcp-webhooks`);
 }
 
 const boardWorkerModuleCache = new Map();
@@ -1688,11 +1797,12 @@ const boardSetupRootOverride = (process.env.DEMO_BOARD_SETUP_ROOT || '').trim();
 
 validateConfiguredBoardSetupPaths(boardConfigEntries, boardSetupRootOverride);
 
-function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, executionExtra = {}, boardWorkerTransport = configuredBoardWorkerTransport) {
+function buildBoardContextConfig(label, boardSetupPaths, boardRuntimeRefs, taskExecPath, chatHandlerFlow, infAdapterPath, boardId, executionExtra = {}, boardWorkerTransport = configuredBoardWorkerTransport) {
   ensureBoardSetupPaths(boardId, boardSetupPaths);
+  ensureBoardRuntimeRefPaths(boardId, boardRuntimeRefs);
 
   const notifyChannel = `yaml-flow-server-${label}-${boardId}-${process.pid}`;
-  const baseRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath }));
+  const baseRef = boardRuntimeRefs.baseRef;
   const callbackTransport = makeBoardWorkerCallbackTransport(
     executionExtra.serverUrl,
     executionExtra.apiBasePath,
@@ -1718,9 +1828,8 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
   boardAdapter.requestProcessAccumulated = () => {};
   nonCoreAdapter.requestProcessAccumulated = () => {};
 
-  const artifactsRef = parseRef(serializeRef({ kind: 'fs-path', value: boardSetupPaths.artifactsStorePath }));
+  const artifactsRef = parseRef(boardRuntimeRefs.artifactsStoreRef);
   const artifactsAdapter = createFsBoardPlatformAdapter(artifactsRef, BOARD_ROOT, { suppressSpawn: true });
-  const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
 
   return {
     label,
@@ -1728,10 +1837,12 @@ function buildBoardContextConfig(label, boardSetupPaths, taskExecPath, chatHandl
     nonCoreAdapter,
     artifactsAdapter,
     baseRef,
-    cardStoreRef,
-    outputsStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardOutputsStorePath }),
-    scratchStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath }),
-    archiveStoreRef: serializeRef({ kind: 'fs-path', value: boardSetupPaths.archivalStorePath }),
+    cardStoreRef: boardRuntimeRefs.cardStoreRef,
+    outputsStoreRef: boardRuntimeRefs.outputsStoreRef,
+    artifactsStoreRef: boardRuntimeRefs.artifactsStoreRef,
+    chatStoreRef: boardRuntimeRefs.chatStoreRef,
+    scratchStoreRef: boardRuntimeRefs.scratchStoreRef,
+    archiveStoreRef: boardRuntimeRefs.archiveStoreRef,
     notifyRef: { kind: 'named-pipe', value: namedPipePath(notifyChannel) },
     taskExecutorRef: makeHostedBoardWorkerRef(boardId, taskExecPath, boardWorkerTransport, executionExtra),
     chatHandlerFlow,
@@ -1945,15 +2056,23 @@ const runtime = createMultiBoardServerRuntime({
     }
 
     const boardSetupPaths = resolveBoardSetupPaths(cfg, boardId, boardSetupRootOverride);
-    const baseRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.boardRuntimePath });
+    const boardRuntimeRefs = resolveBoardRuntimeRefs(cfg, boardId, boardSetupPaths);
+    const baseRef = serializeRef(boardRuntimeRefs.baseRef);
     const aiWorkspaceRoot = boardSetupPaths.aiWorkspaceRootPath;
-    const cardStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.cardStorePath });
-    const scratchStoreRef = serializeRef({ kind: 'fs-path', value: boardSetupPaths.scratchStorePath });
+    const cardStoreRef = boardRuntimeRefs.cardStoreRef;
+    const scratchStoreRef = boardRuntimeRefs.scratchStoreRef;
+    const boardRuntimeDir = boardRuntimeRefs.baseRef.value;
+    const runtimeStatusDir = fsPathValueFromSerializedRef(boardRuntimeRefs.outputsStoreRef, boardId, 'outputsStoreRef');
+    const artifactsStorePath = fsPathValueFromSerializedRef(boardRuntimeRefs.artifactsStoreRef, boardId, 'artifactsStoreRef');
+    const chatStorePath = fsPathValueFromSerializedRef(boardRuntimeRefs.chatStoreRef, boardId, 'chatStoreRef');
+    const scratchStorePath = fsPathValueFromSerializedRef(boardRuntimeRefs.scratchStoreRef, boardId, 'scratchStoreRef');
+    const archivalStorePath = fsPathValueFromSerializedRef(boardRuntimeRefs.archiveStoreRef, boardId, 'archiveStoreRef');
     const watchPartyFilesForChatDir = path.join(boardSetupPaths.setupRoot, configuredWatchpartyConfig.filesForChatDir);
     const chatFlowRoot = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
     ensureBoardSetupPaths(boardId, boardSetupPaths);
+    ensureBoardRuntimeRefPaths(boardId, boardRuntimeRefs);
     ensureDirectoryExists(watchPartyFilesForChatDir, `boards.${boardId}.watchPartyFilesForChatDir`);
-    const chatStorage = createFsBoardChatStorage(boardSetupPaths.chatStorePath);
+    const chatStorage = createFsBoardChatStorage(chatStorePath);
     const chatSseBroker = createChatSseBroker(chatStorage);
     const flowRunner = createUserTextAwareChatFlowRunner(
       chatStorage,
@@ -1968,13 +2087,14 @@ const runtime = createMultiBoardServerRuntime({
       baseRef,
       aiWorkspaceRoot,
       boardSetupRoot: boardSetupPaths.setupRoot,
-      boardRuntimeDir: boardSetupPaths.boardRuntime,
+      boardRuntimeDir,
       cardStoreRef,
-      runtimeStatusDir: boardSetupPaths.boardOutputsStore,
-      artifactsStore: boardSetupPaths.artifactsStore,
-      scratchStore: boardSetupPaths.scratchStore,
+      runtimeStatusDir,
+      artifactsStore: artifactsStorePath,
+      chatStore: chatStorePath,
+      scratchStore: scratchStorePath,
       scratchStoreRef,
-      archivalStore: boardSetupPaths.archivalStore,
+      archivalStore: archivalStorePath,
       projectRoot: BOARD_ROOT,
       chatFlowRoot,
       apiBasePath: `${apiBasePath}/${boardId}`,
@@ -1992,6 +2112,7 @@ const runtime = createMultiBoardServerRuntime({
     const baseCfg = buildBoardContextConfig(
       'base',
       boardSetupPaths,
+      boardRuntimeRefs,
       taskExecPath,
       chatHandlerFlow,
       infAdapterPath,
@@ -2008,7 +2129,7 @@ const runtime = createMultiBoardServerRuntime({
       boardSetupRoot: boardSetupPaths.setupRoot,
       aiWorkspaceRoot,
       baseRef,
-      scratchDir: boardSetupPaths.scratchStorePath,
+      scratchDir: scratchStorePath,
     });
 
     const broker = createWatchpartyBroker();
@@ -2040,13 +2161,14 @@ const runtime = createMultiBoardServerRuntime({
         baseRef,
         aiWorkspaceRoot,
         boardSetupRoot: boardSetupPaths.setupRoot,
-        boardRuntimeDir: boardSetupPaths.boardRuntime,
+        boardRuntimeDir,
         cardStoreRef,
-        runtimeStatusDir: boardSetupPaths.boardOutputsStore,
-        artifactsStore: boardSetupPaths.artifactsStore,
-        scratchStore: boardSetupPaths.scratchStore,
+        runtimeStatusDir,
+        artifactsStore: artifactsStorePath,
+        chatStore: chatStorePath,
+        scratchStore: scratchStorePath,
         scratchStoreRef,
-        archivalStore: boardSetupPaths.archivalStore,
+        archivalStore: archivalStorePath,
         projectRoot: BOARD_ROOT,
         chatFlowRoot,
         watchPartyFilesForChatDir,
