@@ -9,10 +9,10 @@ const workspaceDir = process.cwd();
 const args = process.argv.slice(2);
 const boardDirArg = args.find(a => !a.startsWith('--')) || 'demo-board';
 const boardDir = path.resolve(workspaceDir, boardDirArg);
-const boardServerPath = path.join(boardDir, 'server', 'board-server.js');
+const firebaseHostsLauncherPath = path.join(boardDir, 'scripts', 'start-firebase-hosts.cjs');
 
-if (!fs.existsSync(boardServerPath)) {
-  console.error(`[start-server] Missing ${boardServerPath}. Pass a valid board directory, for example "demo-board".`);
+if (!fs.existsSync(firebaseHostsLauncherPath)) {
+  console.error(`[start-server] Missing ${firebaseHostsLauncherPath}. Pass a valid board directory, for example "demo-board".`);
   process.exit(1);
 }
 
@@ -63,7 +63,7 @@ async function handleMcpExit(code) {
 }
 
 console.log(`[start-server] board dir: ${boardDir}`);
-console.log(`[start-server] backend:  http://${backendHost}:7799`);
+console.log(`[start-server] backend:  http://${backendHost}:7810`);
 console.log('[start-server] mcp:      http://127.0.0.1:7801/mcp');
 console.log('[start-server] frontend: http://127.0.0.1:8000');
 
@@ -73,7 +73,7 @@ const mcp = spawn(process.execPath, [mcpServerPath, '--transport', 'streamable-h
   stdio: 'inherit',
 });
 
-const backend = spawn(process.execPath, [boardServerPath], {
+const backend = spawn(process.execPath, [firebaseHostsLauncherPath], {
   cwd: boardDir,
   env: sharedEnv,
   stdio: 'inherit',

@@ -1,0 +1,13 @@
+{
+  "name": "demo-board-server-queue-runner-firebase",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node ./queue-runner.js --config ./queue-runner.config.json",
+    "start:local": "node ./queue-runner.js --config ./queue-runner.config.json"
+  },
+  "dependencies": {
+    "firebase": "^12.14.0",
+    "yaml-flow": "file:../../../yaml-flow"
+  }
+}
