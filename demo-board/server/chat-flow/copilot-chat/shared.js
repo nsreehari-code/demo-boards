@@ -564,7 +564,7 @@ export async function readCardMetaFieldViaApi({ boardServerPort, boardId, cardId
     const payload = await callBoardControlplaneTool({
       boardServerPort,
       boardId,
-      tool: 'getstate.card-meta',
+      tool: 'getstate.card-private',
       args: {
         board_id: boardId,
         card_id: cardId,
@@ -586,7 +586,7 @@ export async function writeCardMetaFieldViaApi({ boardServerPort, boardId, cardI
     const payload = await callBoardControlplaneTool({
       boardServerPort,
       boardId,
-      tool: 'setstate.card-meta',
+      tool: 'setstate.card-private',
       args: {
         board_id: boardId,
         card_id: cardId,
