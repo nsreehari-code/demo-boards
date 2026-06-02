@@ -8,6 +8,6 @@
   },
   "dependencies": {
     "firebase": "^12.14.0",
-    "yaml-flow": "file:../../../yaml-flow"
+    "yaml-flow": "^8.7.0"
   }
 }

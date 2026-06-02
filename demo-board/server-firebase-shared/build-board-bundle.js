@@ -1,5 +1,5 @@
-import { createFirestoreBoardRuntimeBundle } from '../../../yaml-flow/lib/firestore-storage/index.js';
-import { wrapWithFirebaseStorageBlobs } from '../../../yaml-flow/lib/firebase-storage/index.js';
+import { createFirestoreBoardRuntimeBundle } from 'yaml-flow/firestore-storage';
+import { wrapWithFirebaseStorageBlobs } from 'yaml-flow/firebase-storage';
 
 export function buildBoardBundle(boardId, boardConfig, firebaseServices, runtimeHooks = {}, options = {}) {
   const { refs, boardAdapter } = createFirestoreBoardRuntimeBundle(

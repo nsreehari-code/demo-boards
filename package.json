@@ -30,7 +30,7 @@
     "axios": "^1.16.1",
     "better-sqlite3": "^12.9.0",
     "node-sse": "^0.0.2",
-    "yaml-flow": "^8.6.4"
+    "yaml-flow": "^8.7.0"
   },
   "devDependencies": {
     "http-server": "^14.1.1"
