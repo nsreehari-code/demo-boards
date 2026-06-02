@@ -558,7 +558,7 @@ async function callBoardControlplaneTool({ boardServerPort, boardId, tool, args 
   return payload;
 }
 
-export async function readCardMetaFieldViaApi({ boardServerPort, boardId, cardId, fieldName }) {
+export async function readCardPrivateFieldViaApi({ boardServerPort, boardId, cardId, fieldName }) {
   if (!boardServerPort || !boardId || !cardId || !fieldName) return undefined;
   try {
     const payload = await callBoardControlplaneTool({
@@ -580,7 +580,7 @@ export async function readCardMetaFieldViaApi({ boardServerPort, boardId, cardId
   }
 }
 
-export async function writeCardMetaFieldViaApi({ boardServerPort, boardId, cardId, fieldName, value }) {
+export async function writeCardPrivateFieldViaApi({ boardServerPort, boardId, cardId, fieldName, value }) {
   if (!boardServerPort || !boardId || !cardId || !fieldName) return false;
   try {
     const payload = await callBoardControlplaneTool({

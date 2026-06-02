@@ -20,8 +20,8 @@ import {
   resolveAssistantDebugEnabled,
   resolveAssistantDebugFile,
   resolveStoreDir,
-  readCardMetaFieldViaApi,
-  writeCardMetaFieldViaApi,
+  readCardPrivateFieldViaApi,
+  writeCardPrivateFieldViaApi,
 } from '../copilot-chat/shared.js';
 import {
   resolveAgentOutputFilePath,
@@ -275,15 +275,15 @@ if (outputFile) {
   } catch {}
 }
 
-const FOUNDRY_THREAD_META_KEY = 'chat.foundry_thread_id';
+const FOUNDRY_THREAD_PRIVATE_KEY = 'chat.foundry_thread_id';
 const boardServerPort = loadBoardServerPort();
 const existingThreadId = await (async () => {
   try {
-    const value = await readCardMetaFieldViaApi({
+    const value = await readCardPrivateFieldViaApi({
       boardServerPort,
       boardId,
       cardId,
-      fieldName: FOUNDRY_THREAD_META_KEY,
+      fieldName: FOUNDRY_THREAD_PRIVATE_KEY,
     });
     return typeof value === 'string' && value.trim() ? value.trim() : '';
   } catch { return ''; }
@@ -373,11 +373,11 @@ await new Promise((resolve, reject) => {
             }
           }
           if (resolvedThreadId && resolvedThreadId !== existingThreadId) {
-            await writeCardMetaFieldViaApi({
+            await writeCardPrivateFieldViaApi({
               boardServerPort,
               boardId,
               cardId,
-              fieldName: FOUNDRY_THREAD_META_KEY,
+              fieldName: FOUNDRY_THREAD_PRIVATE_KEY,
               value: resolvedThreadId,
             });
           }
