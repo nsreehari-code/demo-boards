@@ -916,11 +916,14 @@ try {
   const t2ProbePrompt = `Probe protocol validation ${Date.now()}`;
   const t2TurnId = randomTurnId();
 
-  const t2SendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-    actionType: 'chat-send',
-    payload: {
-      text: `${ECHO_PROBE_MARKER}${t2ProbePrompt}${ECHO_PROBE_MARKER}`,
+  const t2SendRes = await httpJson('POST', `${BASE}/mcp-actions`, {
+    tool: 'chat-send',
+    args: {
+      card_id: CHAT_CARD_ID,
+      payload: {
+        text: `${ECHO_PROBE_MARKER}${t2ProbePrompt}${ECHO_PROBE_MARKER}`,
         'turn-id': t2TurnId,
+      },
     },
   });
   assert(t2SendRes.status === 200, `T3 chat-send returned ${t2SendRes.status}`);
@@ -1007,12 +1010,15 @@ try {
     const t2bEventStart = NS.chatEvents.length;
 
     const t2bPrompt = `probe echo file-upload validation ${Date.now()}`;
-    const t2bSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-      actionType: 'chat-send',
-      payload: {
-        text: `${ECHO_PROBE_MARKER}${t2bPrompt}${ECHO_PROBE_MARKER}`,
+    const t2bSendRes = await httpJson('POST', `${BASE}/mcp-actions`, {
+      tool: 'chat-send',
+      args: {
+        card_id: CHAT_CARD_ID,
+        payload: {
+          text: `${ECHO_PROBE_MARKER}${t2bPrompt}${ECHO_PROBE_MARKER}`,
           'turn-id': t2bTurnId,
-        files: [uploadedFile],
+          files: [uploadedFile],
+        },
       },
     });
     assert(t2bSendRes.status === 200, `T3b chat-send returned ${t2bSendRes.status}`);
@@ -1063,11 +1069,14 @@ try {
     const t2dPrompt = `probe generated attachment validation ${Date.now()}`;
     const t2dTurnId = randomTurnId();
     const t2dEventStart = NS.chatEvents.length;
-    const t2dSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-      actionType: 'chat-send',
-      payload: {
-        text: `${ECHO_PROBE_MARKER}[attach] ${t2dPrompt}${ECHO_PROBE_MARKER}`,
+    const t2dSendRes = await httpJson('POST', `${BASE}/mcp-actions`, {
+      tool: 'chat-send',
+      args: {
+        card_id: CHAT_CARD_ID,
+        payload: {
+          text: `${ECHO_PROBE_MARKER}[attach] ${t2dPrompt}${ECHO_PROBE_MARKER}`,
           'turn-id': t2dTurnId,
+        },
       },
     });
     assert(t2dSendRes.status === 200, `T3d chat-send returned ${t2dSendRes.status}`);
@@ -1133,11 +1142,14 @@ try {
     const t2aPrompt = 'Just answer what is the capital of France. No Fluff. No COmmentary.  No Markup Respond in lower case in one word.';
     const t2aTurnId = randomTurnId();
 
-    const t2aSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-      actionType: 'chat-send',
-      payload: {
-        text: t2aPrompt,
+    const t2aSendRes = await httpJson('POST', `${BASE}/mcp-actions`, {
+      tool: 'chat-send',
+      args: {
+        card_id: CHAT_CARD_ID,
+        payload: {
+          text: t2aPrompt,
           'turn-id': t2aTurnId,
+        },
       },
     });
     assert(t2aSendRes.status === 200, `T3a chat-send returned ${t2aSendRes.status}`);
@@ -1225,12 +1237,15 @@ try {
     const t2cEventStart = NS.chatEvents.length;
     const t2cPrompt = 'Answer the question in the attached file in one word';
 
-    const t2cSendRes = await httpJson('POST', `${BASE}/cards/${CHAT_CARD_ID}/actions`, {
-      actionType: 'chat-send',
-      payload: {
-        text: t2cPrompt,
+    const t2cSendRes = await httpJson('POST', `${BASE}/mcp-actions`, {
+      tool: 'chat-send',
+      args: {
+        card_id: CHAT_CARD_ID,
+        payload: {
+          text: t2cPrompt,
           'turn-id': t2cTurnId,
-        files: [t2cUploadedFile],
+          files: [t2cUploadedFile],
+        },
       },
     });
     assert(t2cSendRes.status === 200, `T3c chat-send returned ${t2cSendRes.status}`);

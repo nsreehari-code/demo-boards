@@ -378,10 +378,18 @@ const marketPricesSeedCard = cloneCardWithId(loadCardFixture('cardT-market-price
 const portfolioValueSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio-value.json'), PORTFOLIO_VALUE_CARD_ID);
 
 async function main() {
-  console.log('\n=== firebase controlface MCP smoke test ===');
+  const { hostConfig } = await getHostedRuntimeContext();
+  const modePrefix = hostConfig.storageAdapter === 'localfs' ? 'L' : 'F';
+  const modeLabel = hostConfig.storageAdapter === 'localfs' ? 'localfs' : 'firebase';
+  const formatTestId = (testId) => `${modePrefix}-${String(testId || '').trim().toUpperCase()}`;
+  const printedTests = requestedTests
+    ? Array.from(requestedTests).map((testId) => formatTestId(testId)).join(',')
+    : ['T0', 'T1', 'TQ', 'T2'].map((testId) => formatTestId(testId)).join(',');
+
+  console.log(`\n=== ${modeLabel} controlface MCP smoke test ===`);
   console.log(`target: ${API_BASE}`);
   console.log(`board:  ${BOARD_ID}`);
-  console.log(`tests:  ${requestedTests ? Array.from(requestedTests).join(',') : 'T0,T1,T2,TQ'}`);
+  console.log(`tests:  ${printedTests}`);
 
   const healthz = await probeHealthz(BOARD_SERVER_URL);
   if (!healthz.ok) {
@@ -401,7 +409,7 @@ async function main() {
 
   try {
     if (isTestSelected(requestedTests, 'T0')) {
-      console.log(`\n=== T0: seed ${PORTFOLIO_CARD_ID} and verify persistence + completed status ===`);
+      console.log(`\n=== ${formatTestId('T0')}: seed ${PORTFOLIO_CARD_ID} and verify persistence + completed status ===`);
 
       expectMcpSuccess(
         await callMcp('manage.upsert-card', {
@@ -423,7 +431,7 @@ async function main() {
         jsonText(canonicalizeJson(storedPortfolio)) === jsonText(canonicalizeJson(portfolioSeedCard)),
         `T0 stored card mismatch for ${PORTFOLIO_CARD_ID}`,
       );
-      console.log('[T0] stored card matches seeded card');
+      console.log(`[${formatTestId('T0')}] stored card matches seeded card`);
 
       const t0Poll = await pollBoardStatus(callMcp, 5, 1000, (statusData) => {
         const card = findBoardStatusCard(statusData, PORTFOLIO_CARD_ID);
@@ -433,11 +441,11 @@ async function main() {
         t0Poll.matched,
         `T0 timed out waiting for ${PORTFOLIO_CARD_ID} to reach completed: ${jsonText(t0Poll.statusData)}`,
       );
-      console.log(`[T0] completed in ${t0Poll.attemptsUsed} poll(s)`);
+      console.log(`[${formatTestId('T0')}] completed in ${t0Poll.attemptsUsed} poll(s)`);
     }
 
     if (isTestSelected(requestedTests, 'T1')) {
-      console.log(`\n=== T1: discover + preflight tests for ${MARKET_PRICES_CARD_ID} + ${PORTFOLIO_VALUE_CARD_ID} ===`);
+      console.log(`\n=== ${formatTestId('T1')}: discover + preflight tests for ${MARKET_PRICES_CARD_ID} + ${PORTFOLIO_VALUE_CARD_ID} ===`);
 
       const sourceKinds = expectMcpSuccess(
         await callMcp('discover.source-kinds', {}),
@@ -448,7 +456,7 @@ async function main() {
         sourceKinds.sourceKinds && typeof sourceKinds.sourceKinds === 'object' && Object.keys(sourceKinds.sourceKinds).length > 0,
         `T1 discover.source-kinds returned no source kinds: ${jsonText(sourceKinds)}`,
       );
-      console.log(`[T1] discover.source-kinds ok: ${Object.keys(sourceKinds.sourceKinds).length} kind(s)`);
+      console.log(`[${formatTestId('T1')}] discover.source-kinds ok: ${Object.keys(sourceKinds.sourceKinds).length} kind(s)`);
 
       const marketPricesPreflight = expectMcpSuccess(
         await callMcp('preflight.validate-candidate-card-definition', {
@@ -459,7 +467,7 @@ async function main() {
       assert(marketPricesPreflight?.cardId === MARKET_PRICES_CARD_ID, `T1 market-prices preflight cardId mismatch: ${jsonText(marketPricesPreflight)}`);
       assert(marketPricesPreflight?.isValid === true, `T1 market-prices preflight invalid: ${jsonText(marketPricesPreflight)}`);
       assert(Array.isArray(marketPricesPreflight?.issues), `T1 market-prices preflight issues shape invalid: ${jsonText(marketPricesPreflight)}`);
-      console.log('[T1] market-prices candidate preflight passed');
+      console.log(`[${formatTestId('T1')}] market-prices candidate preflight passed`);
 
       const storedPortfolioForPreflight = readStoredCard(
         expectMcpSuccess(
@@ -493,7 +501,7 @@ async function main() {
       if (marketPricesProbe?.latencyMs !== undefined) {
         assert(Number.isFinite(Number(marketPricesProbe.latencyMs)), `T1 market-prices source probe latencyMs shape invalid: ${jsonText(marketPricesProbe)}`);
       }
-      console.log('[T1] market-prices source probe preflight passed');
+      console.log(`[${formatTestId('T1')}] market-prices source probe preflight passed`);
 
       const marketPricesRun = expectMcpSuccess(
         await callMcp('preflight.run-single-source-in-candidate-card', {
@@ -507,7 +515,7 @@ async function main() {
       assert(typeof marketPricesRun?.ok === 'boolean', `T1 market-prices source run ok shape invalid: ${jsonText(marketPricesRun)}`);
       assert(Array.isArray(marketPricesRun?.issues), `T1 market-prices source run issues shape invalid: ${jsonText(marketPricesRun)}`);
       assert(marketPricesRun?.ok === true, `T1 market-prices source run failed: ${jsonText(marketPricesRun)}`);
-      console.log('[T1] market-prices source run preflight passed');
+      console.log(`[${formatTestId('T1')}] market-prices source run preflight passed`);
 
       const marketPricesCycle = expectMcpSuccess(
         await callMcp('preflight.run-one-cycle-with-candidate-card', {
@@ -535,7 +543,7 @@ async function main() {
       assert(marketPricesCycle.rendered_view.elements.length > 0, `T1 market-prices cycle rendered_view elements empty: ${jsonText(marketPricesCycle)}`);
       assert(Array.isArray(marketPricesCycle.rendered_view.elements[0]?.resolved), `T1 market-prices cycle rendered_view first resolved shape invalid: ${jsonText(marketPricesCycle)}`);
       assert(marketPricesCycle.rendered_view.elements[0].resolved.length > 0, `T1 market-prices cycle rendered_view first resolved empty: ${jsonText(marketPricesCycle)}`);
-      console.log('[T1] market-prices simulate-card-cycle preflight passed');
+      console.log(`[${formatTestId('T1')}] market-prices simulate-card-cycle preflight passed`);
 
       const portfolioValuePreflight = expectMcpSuccess(
         await callMcp('preflight.validate-candidate-card-definition', {
@@ -546,11 +554,50 @@ async function main() {
       assert(portfolioValuePreflight?.cardId === PORTFOLIO_VALUE_CARD_ID, `T1 portfolio-value preflight cardId mismatch: ${jsonText(portfolioValuePreflight)}`);
       assert(portfolioValuePreflight?.isValid === true, `T1 portfolio-value preflight invalid: ${jsonText(portfolioValuePreflight)}`);
       assert(Array.isArray(portfolioValuePreflight?.issues), `T1 portfolio-value preflight issues shape invalid: ${jsonText(portfolioValuePreflight)}`);
-      console.log('[T1] portfolio-value candidate preflight passed');
+      console.log(`[${formatTestId('T1')}] portfolio-value candidate preflight passed`);
+    }
+
+    if (isTestSelected(requestedTests, 'TQ')) {
+      console.log(`\n=== ${formatTestId('TQ')}: enqueue process-accumulated and verify queue runner drains it ===`);
+      const wakeup = await enqueueProcessAccumulatedWakeup(BOARD_ID);
+      console.log(`[${formatTestId('TQ')}] enqueued process-queue message ${wakeup.id}`);
+
+      let drained = false;
+      let attemptsUsed = 0;
+      let lastQueueDoc = null;
+      let sawLease = false;
+      const progress = createPollProgress(`process-queue message ${wakeup.id} to drain`);
+      for (let attempt = 1; attempt <= 40; attempt += 1) {
+        attemptsUsed = attempt;
+        progress.tick();
+        lastQueueDoc = await readProcessAccumulatedWakeup(BOARD_ID, wakeup.id);
+        if (!lastQueueDoc) {
+          drained = true;
+          break;
+        }
+        if (lastQueueDoc.dead === true) {
+          break;
+        }
+        if (lastQueueDoc.leaseToken) {
+          sawLease = true;
+        }
+        await sleep(500);
+      }
+      progress.done();
+
+      assert(
+        drained,
+        lastQueueDoc?.dead === true
+          ? `TQ process-queue wakeup dead-lettered instead of draining: ${jsonText(lastQueueDoc)}`
+          : sawLease
+            ? `TQ process-queue wakeup was leased by queue runner but not acked before timeout: ${jsonText(lastQueueDoc)}`
+          : `TQ process-queue wakeup was not drained by queue runner: ${jsonText(lastQueueDoc)}`,
+      );
+      console.log(`[${formatTestId('TQ')}] queue runner drained process-queue message in ${attemptsUsed} poll(s)`);
     }
 
     if (isTestSelected(requestedTests, 'T2')) {
-      console.log(`\n=== T2: re-upsert ${PORTFOLIO_CARD_ID}, seed ${MARKET_PRICES_CARD_ID} + ${PORTFOLIO_VALUE_CARD_ID}, and verify total value ===`);
+      console.log(`\n=== ${formatTestId('T2')}: re-upsert ${PORTFOLIO_CARD_ID}, seed ${MARKET_PRICES_CARD_ID} + ${PORTFOLIO_VALUE_CARD_ID}, and verify total value ===`);
 
       const [portfolioUpsertResult, marketPricesUpsertResult, portfolioValueUpsertResult] = await Promise.all([
         callMcp('manage.upsert-card', {
@@ -571,9 +618,9 @@ async function main() {
       expectMcpSuccess(marketPricesUpsertResult, 'T2 manage.upsert-card market-prices');
       expectMcpSuccess(portfolioValueUpsertResult, 'T2 manage.upsert-card portfolio-value');
       createdCardIds.push(PORTFOLIO_CARD_ID, MARKET_PRICES_CARD_ID, PORTFOLIO_VALUE_CARD_ID);
-      console.log('[T2] portfolio card re-upserted with additional holding row');
-      console.log('[T2] market-prices card upserted');
-      console.log('[T2] portfolio-value card upserted');
+      console.log(`[${formatTestId('T2')}] portfolio card re-upserted with additional holding row`);
+      console.log(`[${formatTestId('T2')}] market-prices card upserted`);
+      console.log(`[${formatTestId('T2')}] portfolio-value card upserted`);
 
       const t1Poll = await pollBoardStatus(callMcp, 10, 1000, (statusData) => {
         const marketCard = findBoardStatusCard(statusData, MARKET_PRICES_CARD_ID);
@@ -587,7 +634,7 @@ async function main() {
         t1Poll.matched,
         `T2 timed out waiting for dependent cards to complete: ${jsonText(t1Poll.statusData)}`,
       );
-      console.log(`[T2] dependent cards completed in ${t1Poll.attemptsUsed} poll(s)`);
+      console.log(`[${formatTestId('T2')}] dependent cards completed in ${t1Poll.attemptsUsed} poll(s)`);
 
       const storedPortfolio = readStoredCard(
         expectMcpSuccess(
@@ -621,47 +668,7 @@ async function main() {
         roundMoney(totalValue) === expectedTotal,
         `T2 totalValue mismatch: expected ${expectedTotal}, got ${roundMoney(totalValue)}`,
       );
-      console.log(`[T2] total portfolio value verified: ${expectedTotal}`);
-    }
-
-    if (isTestSelected(requestedTests, 'TQ')) {
-      console.log(`\n=== TQ: enqueue process-accumulated and verify queue runner drains it ===`);
-
-      const wakeup = await enqueueProcessAccumulatedWakeup(BOARD_ID);
-      console.log(`[TQ] enqueued process-queue message ${wakeup.id}`);
-
-      let drained = false;
-      let attemptsUsed = 0;
-      let lastQueueDoc = null;
-      let sawLease = false;
-      const progress = createPollProgress(`process-queue message ${wakeup.id} to drain`);
-      for (let attempt = 1; attempt <= 40; attempt += 1) {
-        attemptsUsed = attempt;
-        progress.tick();
-        lastQueueDoc = await readProcessAccumulatedWakeup(BOARD_ID, wakeup.id);
-        if (!lastQueueDoc) {
-          drained = true;
-          break;
-        }
-        if (lastQueueDoc.dead === true) {
-          break;
-        }
-        if (lastQueueDoc.leaseToken) {
-          sawLease = true;
-        }
-        await sleep(500);
-      }
-      progress.done();
-
-      assert(
-        drained,
-        lastQueueDoc?.dead === true
-          ? `TQ process-queue wakeup dead-lettered instead of draining: ${jsonText(lastQueueDoc)}`
-          : sawLease
-            ? `TQ process-queue wakeup was leased by queue runner but not acked before timeout: ${jsonText(lastQueueDoc)}`
-          : `TQ process-queue wakeup was not drained by queue runner: ${jsonText(lastQueueDoc)}`,
-      );
-      console.log(`[TQ] queue runner drained process-queue message in ${attemptsUsed} poll(s)`);
+      console.log(`[${formatTestId('T2')}] total portfolio value verified: ${expectedTotal}`);
     }
 
     console.log('\n=== Selected tests passed ===\n');
