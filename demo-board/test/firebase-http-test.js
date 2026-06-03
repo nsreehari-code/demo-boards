@@ -4,12 +4,14 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createFsQueueStorage, parseRef } from 'yaml-flow/board-live-cards-node';
 import { initializeFirebaseServices } from '../server/hosted-board-runtime/firebase-adapter/firebase-init.js';
 import { loadFirebaseHostConfig } from '../server/hosted-board-runtime/firebase-adapter/load-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const cliArgs = process.argv.slice(2);
+const DEFAULT_QUEUE_RUNNER_CONFIG_PATH = path.resolve(__dirname, '../server/hosted-board-runtime/queue-runner/queue-runner.config.json');
 
 function readCliOptionValue(args, optionName) {
   const optionIndex = args.indexOf(optionName);
@@ -206,24 +208,32 @@ function computeExpectedPortfolioValue(holdings, priceRows) {
   );
 }
 
-const QUEUE_RUNNER_CONFIG_PATH = path.resolve(__dirname, '../server/hosted-board-runtime/queue-runner/queue-runner.config.json');
-let hostedFirebaseContextPromise = null;
+function resolveHostedConfigPath(rawValue) {
+  if (!rawValue) return DEFAULT_QUEUE_RUNNER_CONFIG_PATH;
+  return path.isAbsolute(rawValue) ? rawValue : path.resolve(process.cwd(), rawValue);
+}
 
-async function getHostedFirebaseContext() {
-  if (!hostedFirebaseContextPromise) {
-    hostedFirebaseContextPromise = (async () => {
+const QUEUE_RUNNER_CONFIG_PATH = resolveHostedConfigPath(readCliOptionValue(cliArgs, '--hosted-config'));
+let hostedRuntimeContextPromise = null;
+
+async function getHostedRuntimeContext() {
+  if (!hostedRuntimeContextPromise) {
+    hostedRuntimeContextPromise = (async () => {
       const hostConfig = loadFirebaseHostConfig(QUEUE_RUNNER_CONFIG_PATH, []);
+      if (hostConfig.storageAdapter === 'localfs') {
+        return { hostConfig, firebaseServices: null };
+      }
       const firebaseServices = await initializeFirebaseServices(hostConfig.firebase);
       return { hostConfig, firebaseServices };
     })();
   }
-  return hostedFirebaseContextPromise;
+  return hostedRuntimeContextPromise;
 }
 
-async function cleanupHostedFirebaseContext() {
-  if (!hostedFirebaseContextPromise) return;
-  const pending = hostedFirebaseContextPromise;
-  hostedFirebaseContextPromise = null;
+async function cleanupHostedRuntimeContext() {
+  if (!hostedRuntimeContextPromise) return;
+  const pending = hostedRuntimeContextPromise;
+  hostedRuntimeContextPromise = null;
   try {
     const context = await pending;
     if (typeof context?.firebaseServices?.app?.delete === 'function') {
@@ -237,8 +247,79 @@ function makeQueueMessageId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
+function getHostedBoardConfig(hostConfig, boardId) {
+  const boardConfig = hostConfig?.boards?.[boardId];
+  if (!boardConfig) {
+    throw new Error(`Hosted config does not define board '${boardId}'`);
+  }
+  return boardConfig;
+}
+
+function getLocalFsProcessQueueDir(hostConfig, boardId) {
+  const boardConfig = getHostedBoardConfig(hostConfig, boardId);
+  const queueStoreRef = boardConfig?.refs?.queueStoreRef;
+  if (!queueStoreRef) {
+    throw new Error(`Hosted config for board '${boardId}' is missing queueStoreRef`);
+  }
+  const parsed = parseRef(queueStoreRef);
+  if (parsed.kind !== 'fs-path') {
+    throw new Error(`Localfs hosted config for board '${boardId}' must use an fs-path queueStoreRef`);
+  }
+  return path.join(parsed.value, 'process-accumulated');
+}
+
+function readJsonFileSafe(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function findLocalFsActiveQueueFile(queueDir, id) {
+  const activeDir = path.join(queueDir, 'active');
+  try {
+    for (const entry of fs.readdirSync(activeDir)) {
+      if (entry.endsWith(`-${id}.json`)) {
+        return path.join(activeDir, entry);
+      }
+    }
+  } catch {
+  }
+  return null;
+}
+
+function readLocalFsQueueRecord(queueDir, id) {
+  const leasedPath = path.join(queueDir, 'leased', `${id}.json`);
+  const deadPath = path.join(queueDir, 'dead', `${id}.json`);
+  const donePath = path.join(queueDir, 'done', `${id}.json`);
+  const stagedPath = path.join(queueDir, 'staged', `${id}.json`);
+  const activePath = findLocalFsActiveQueueFile(queueDir, id);
+
+  if (fs.existsSync(donePath)) return null;
+  if (fs.existsSync(deadPath)) {
+    const record = readJsonFileSafe(deadPath);
+    return record ? { ...record, dead: true } : { id, dead: true };
+  }
+  if (fs.existsSync(leasedPath)) return readJsonFileSafe(leasedPath);
+  if (activePath && fs.existsSync(activePath)) return readJsonFileSafe(activePath);
+  if (fs.existsSync(stagedPath)) return readJsonFileSafe(stagedPath);
+  return null;
+}
+
 async function enqueueProcessAccumulatedWakeup(boardId) {
-  const { firebaseServices } = await getHostedFirebaseContext();
+  const { hostConfig, firebaseServices } = await getHostedRuntimeContext();
+  if (hostConfig.storageAdapter === 'localfs') {
+    const queueDir = getLocalFsProcessQueueDir(hostConfig, boardId);
+    const queue = createFsQueueStorage(queueDir);
+    const dedupKey = `manual-process-accumulated:${makeQueueMessageId('dedup')}`;
+    const message = queue.enqueueIfAbsent
+      ? queue.enqueueIfAbsent({ boardRef: `manual:${boardId}` }, dedupKey)
+      : queue.enqueue({ boardRef: `manual:${boardId}` });
+    if (!message) throw new Error(`Failed to enqueue localfs process-accumulated wakeup for ${boardId}`);
+    return { id: message.id };
+  }
+
   const id = makeQueueMessageId('process-accumulated-test');
   const nowIso = new Date().toISOString();
   const queueDoc = {
@@ -258,7 +339,10 @@ async function enqueueProcessAccumulatedWakeup(boardId) {
 }
 
 async function readProcessAccumulatedWakeup(boardId, id) {
-  const { firebaseServices } = await getHostedFirebaseContext();
+  const { hostConfig, firebaseServices } = await getHostedRuntimeContext();
+  if (hostConfig.storageAdapter === 'localfs') {
+    return readLocalFsQueueRecord(getLocalFsProcessQueueDir(hostConfig, boardId), id);
+  }
   const snap = await firebaseServices.firestore.collection(`boards/${boardId}/process-queue`).doc(id).get();
   return snap.exists ? snap.data() ?? null : null;
 }
@@ -594,7 +678,7 @@ async function main() {
         console.error(`[cleanup] remove-card errored for ${cardId}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    await cleanupHostedFirebaseContext();
+    await cleanupHostedRuntimeContext();
   }
 }
 

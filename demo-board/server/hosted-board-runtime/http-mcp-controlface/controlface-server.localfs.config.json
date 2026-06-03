@@ -12,6 +12,10 @@
           "kind": "fs-path",
           "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/runtime/live"
         },
+        "boardRuntimeStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/runtime-board"
+        },
         "cardStoreRef": {
           "kind": "fs-path",
           "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/cards"
@@ -19,6 +23,10 @@
         "outputsStoreRef": {
           "kind": "fs-path",
           "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/outputs"
+        },
+        "queueStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/runtime"
         },
         "scratchStoreRef": {
           "kind": "fs-path",
@@ -35,6 +43,10 @@
         "artifactsStoreRef": {
           "kind": "fs-path",
           "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/files"
+        },
+        "fetchedSourcesStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/sources"
         }
       }
     }

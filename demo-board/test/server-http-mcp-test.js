@@ -11,7 +11,7 @@
  *   - MCP server running at port 7801
  *   The test attaches to the running server — it does NOT spawn its own.
  *
- * T0: resync → init-board → SSE initial payload → wait for all cards to complete
+ * T0: resync → /sse?one-shot bootstrap → SSE initial payload → wait for all cards to complete
  * T1: direct /mcp endpoint — PATCH holdings (+1 row) → verify recomputation
  * T1a: liveboards.* MCP tools — same mutation via MCP server at 7801
  *
@@ -841,12 +841,12 @@ try {
 
   // ── T0: init, SSE connect, wait for initial completion ──
 
-  console.log('\n=== T0 Step 1: init-board ===');
-  const initRes = await httpGet(`${BOARD_SERVER_URL}/api/boards/${BOARD_ID}/init-board`);
-  assert(initRes.status === 200, `init-board returned ${initRes.status}`);
-  console.log('[T0.1] init-board ok');
+  console.log('\n=== T0 Step 1: /sse?one-shot bootstrap ===');
+  const initRes = await httpGet(`${BOARD_SERVER_URL}/api/boards/${BOARD_ID}/sse?one-shot`);
+  assert(initRes.status === 200, `sse one-shot returned ${initRes.status}`);
+  console.log('[T0.1] sse one-shot bootstrap ok');
 
-  console.log('\n=== T0 Step 1.5: board-status after init-board ===');
+  console.log('\n=== T0 Step 1.5: board-status after one-shot bootstrap ===');
   const t0PostInitStatusRes = await httpGet(`${BASE}/board-status`);
   assert(t0PostInitStatusRes.status === 200, `post-init board-status returned ${t0PostInitStatusRes.status}`);
   const t0PostInitSummary = t0PostInitStatusRes.data?.statusSnapshot?.summary;

@@ -2140,7 +2140,6 @@ const runtime = createMultiBoardServerRuntime({
     const singleBoardRuntime = createSingleBoardServerRuntime({
       apiBasePath: `${apiBasePath}/${boardId}`,
       boardId,
-      chatStorage,
       boards,
       invocationAdapter,
       chatFlowRunner: flowRunner,
@@ -2891,7 +2890,7 @@ server.listen(PORT, HOST, () => {
   logBoardServerLine('  GET  /healthz                               <- process liveness probe');
   logBoardServerLine(`  GET  ${apiBasePath}                          <- list boards`);
   logBoardServerLine(`  POST ${apiBasePath}  {id, label?}            <- register board`);
-  logBoardServerLine(`  GET  ${apiBasePath}/:boardId/init-board`);
+  logBoardServerLine(`  GET  ${apiBasePath}/:boardId/sse?one-shot`);
   logBoardServerLine(`  GET  ${apiBasePath}/:boardId/sse`);
   logBoardServerLine(`  GET  ${apiBasePath}/:boardId/board-status`);
   logBoardServerLine(`  POST ${apiBasePath}/:boardId/reset-runtime-from-seed-cards`);

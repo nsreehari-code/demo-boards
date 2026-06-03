@@ -4,7 +4,7 @@ import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
+import { createHostedBoardQueueLaneRegistry, createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
 import { createHttpBoardCallbackTransport, startQueueLaneRunners } from 'yaml-flow/board-live-cards-node';
 import { buildBoardBundle as buildFirebaseBoardBundle } from '../firebase-adapter/build-board-bundle.js';
 import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js';
@@ -15,13 +15,7 @@ import { loadLegacyBoardChatRuntime } from '../host-shared/chat-agent-handler/le
 import { executeChatAgentRequest } from '../host-shared/chat-agent-handler/execute-chat-agent-request.js';
 import { createLogger } from '../host-shared/logging.js';
 import { loadTaskExecutorModule } from '../host-shared/worker-modules/task-executor-module.js';
-import {
-  applyLaneTuning,
-  createBoardWorkerLane,
-  createQueueStorageLane,
-  createWakeTrigger,
-  queueCollectionPath,
-} from '../host-shared/lanes/runtime.js';
+import { createWakeTrigger, queueCollectionPath } from '../host-shared/lanes/runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -87,28 +81,17 @@ async function postMcp(url, tool, args = {}) {
   return payload;
 }
 
-function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, webhooksUrl, controlplaneUrl, serverUrl, apiBasePrefix }) {
-  const tuning = runtime.queueLaneTuning ?? {};
-  const lanes = [];
+function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, serverUrl, apiBasePrefix }) {
   const chatRuntime = loadLegacyBoardChatRuntime(boardId, boardConfig, { serverUrl, apiBasePrefix });
+  const queueStoreRef = bundle.boardContextConfig.queueStoreRef;
+  if (!queueStoreRef) {
+    throw new Error(`Hosted queue-runner requires queueStoreRef for board ${boardId}`);
+  }
 
-  lanes.push(applyLaneTuning(createQueueStorageLane(
-    'process-accumulated',
-    bundle.boardAdapter.processAccumulatedStore(),
-    async () => {
-      await postMcp(webhooksUrl, 'webhook.process-accumulated');
-    },
-    (error, lease) => {
-      logger.error(
-        `[queue-runner] process-accumulated failed for ${boardId} (attempt ${lease.attempt}): ${String(error && error.message || error)}`,
-      );
-    },
-  ), tuning.processAccumulated));
-
-  lanes.push(applyLaneTuning(createBoardWorkerLane(
-    'chat-agent',
-    bundle.boardAdapter.chatAgentStore(),
-    async (request) => {
+  const laneRuntime = {
+    __drainProcessAccumulatedLane: runtime.__drainProcessAccumulatedLane,
+    queueLaneTuning: runtime.queueLaneTuning,
+    async handleChatAgentRequest(request) {
       const cardId = typeof request?.args?.cardId === 'string' ? request.args.cardId : '';
       try {
         await executeChatAgentRequest(request, boardId, chatRuntime);
@@ -118,41 +101,31 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
         }
       }
     },
-    (error, lease) => {
-      const cardId = typeof lease.message?.args?.cardId === 'string' ? lease.message.args.cardId : '';
-      logger.error(
-        `[queue-runner] chat-agent failed for ${boardId}${cardId ? `/${cardId}` : ''} (attempt ${lease.attempt}): ${String(error && error.message || error)}`,
-      );
-    },
-  ), tuning.chatAgent));
+  };
 
-  if (taskExecutor) {
-    lanes.push(applyLaneTuning(createBoardWorkerLane(
-      'task-executor',
-      bundle.boardAdapter.boardWorkerStore(),
-      async (request) => {
-        const executorRequest = request?.args && typeof request.args === 'object' && !Array.isArray(request.args)
-          ? {
-              ...request.args,
-              ...(request.output ? { output: request.output } : {}),
-              ...(request.diagnostics ? { diagnostics: request.diagnostics } : {}),
-              ...(request.callback ? { callback: request.callback } : {}),
-              ...(request.extra ? { extra: request.extra } : {}),
-            }
-          : request;
-        trace(`task-executor-handle-start board=${boardId} hasSourceDef=${Boolean(executorRequest?.source_def)} callback=${Boolean(executorRequest?.callback)} output=${Boolean(executorRequest?.output)}`);
-        await taskExecutor(executorRequest);
-        trace(`task-executor-handle-complete board=${boardId} hasSourceDef=${Boolean(executorRequest?.source_def)}`);
-      },
-      (error, lease) => {
-        logger.error(
-          `[queue-runner] task-executor failed for ${boardId} (attempt ${lease.attempt}): ${String(error && error.message || error)}`,
-        );
-      },
-    ), tuning.taskExecutor));
-  }
-
-  return lanes;
+  return createHostedBoardQueueLaneRegistry({
+    boardId,
+    queueStoreRef,
+    runtime: laneRuntime,
+    boardAdapter: bundle.boardAdapter,
+    logger,
+    executeTaskExecutorRequest: taskExecutor
+      ? async (args, request) => {
+          const executorRequest = args && typeof args === 'object' && !Array.isArray(args)
+            ? {
+                ...args,
+                ...(request.output ? { output: request.output } : {}),
+                ...(request.diagnostics ? { diagnostics: request.diagnostics } : {}),
+                ...(request.callback ? { callback: request.callback } : {}),
+                ...(request.extra ? { extra: request.extra } : {}),
+              }
+            : request;
+          trace(`task-executor-handle-start board=${boardId} hasSourceDef=${Boolean(executorRequest?.source_def)} callback=${Boolean(executorRequest?.callback)} output=${Boolean(executorRequest?.output)}`);
+          await taskExecutor(executorRequest);
+          trace(`task-executor-handle-complete board=${boardId} hasSourceDef=${Boolean(executorRequest?.source_def)}`);
+        }
+      : undefined,
+  });
 }
 
 async function main() {
@@ -199,20 +172,19 @@ async function main() {
       logger,
     });
 
-    const lanes = createExplicitQueueLanes({
+    const laneRegistry = createExplicitQueueLanes({
       boardId,
       boardConfig,
       bundle,
       runtime,
       logger,
       taskExecutor,
-      webhooksUrl,
       controlplaneUrl,
       serverUrl: callbackServerOrigin,
       apiBasePrefix: hostConfig.apiBasePrefix,
     });
 
-    const stopRunner = startQueueLaneRunners(lanes);
+    const stopRunner = startQueueLaneRunners(laneRegistry);
     stopSubscriptions.push(stopRunner);
     if (!keepAliveTimer) {
       keepAliveTimer = setInterval(() => {}, 1 << 30);

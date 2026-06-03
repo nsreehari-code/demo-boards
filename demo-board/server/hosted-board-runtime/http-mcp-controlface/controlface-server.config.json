@@ -22,6 +22,10 @@
           "kind": "firestore-board",
           "value": "boards/{{boardId}}"
         },
+        "boardRuntimeStoreRef": {
+          "kind": "firestore",
+          "value": "boards/{{boardId}}/runtime-board"
+        },
         "cardStoreRef": {
           "kind": "firestore",
           "value": "boards/{{boardId}}/cards"
@@ -29,6 +33,10 @@
         "outputsStoreRef": {
           "kind": "firestore",
           "value": "boards/{{boardId}}/runtime-out"
+        },
+        "queueStoreRef": {
+          "kind": "firestore",
+          "value": "boards/{{boardId}}/runtime"
         },
         "scratchStoreRef": {
           "kind": "firestore",
@@ -45,6 +53,10 @@
         "artifactsStoreRef": {
           "kind": "firebase-storage",
           "value": "boards/{{boardId}}/files"
+        },
+        "fetchedSourcesStoreRef": {
+          "kind": "firestore",
+          "value": "boards/{{boardId}}/sources"
         }
       }
     }

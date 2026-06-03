@@ -18,12 +18,15 @@
       "taskExecutorModule": "../../board-worker/task-executor.js",
       "refs": {
         "baseRef": { "kind": "firestore-board", "value": "boards/{{boardId}}" },
+        "boardRuntimeStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/runtime-board" },
         "cardStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/cards" },
         "outputsStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/runtime-out" },
+        "queueStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/runtime" },
         "scratchStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/scratch" },
         "archiveStoreRef": { "kind": "firestore-board", "value": "archive-{{boardId}}" },
         "chatStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/cards-chats" },
-        "artifactsStoreRef": { "kind": "firebase-storage", "value": "boards/{{boardId}}/files" }
+        "artifactsStoreRef": { "kind": "firebase-storage", "value": "boards/{{boardId}}/files" },
+        "fetchedSourcesStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/sources" }
       }
     }
   }

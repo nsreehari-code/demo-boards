@@ -231,11 +231,11 @@ function probeBoardServer(timeoutMs = 3_000) {
 async function cleanupAndInitBoard() {
   cleanupBoardWorkspaceFiles();
 
-  const initResult = await httpGet(`${BOARD_SERVER_URL}/api/boards/${BOARD_ID}/init-board`);
+  const initResult = await httpGet(`${BOARD_SERVER_URL}/api/boards/${BOARD_ID}/sse?one-shot`);
   if (initResult.status !== 200) {
-    throw new Error(`init-board returned ${initResult.status}: ${JSON.stringify(initResult.data)}`);
+    throw new Error(`sse one-shot returned ${initResult.status}: ${JSON.stringify(initResult.data)}`);
   }
-  console.log('[resync] init-board ok');
+  console.log('[resync] sse one-shot bootstrap ok');
 
   return initResult;
 }
@@ -757,12 +757,12 @@ try {
 
   // ── T0: init, SSE connect, wait for initial completion ──
 
-  console.log('\n=== T0 Step 1: init-board ===');
-  const initRes = await httpGet(`${BOARD_SERVER_URL}/api/boards/${BOARD_ID}/init-board`);
-  assert(initRes.status === 200, `init-board returned ${initRes.status}`);
-  console.log('[T0.1] init-board ok');
+  console.log('\n=== T0 Step 1: /sse?one-shot bootstrap ===');
+  const initRes = await httpGet(`${BOARD_SERVER_URL}/api/boards/${BOARD_ID}/sse?one-shot`);
+  assert(initRes.status === 200, `sse one-shot returned ${initRes.status}`);
+  console.log('[T0.1] sse one-shot bootstrap ok');
 
-  console.log('\n=== T0 Step 1.5: board-status after init-board ===');
+  console.log('\n=== T0 Step 1.5: board-status after one-shot bootstrap ===');
   const t0PostInitStatusRes = await httpGet(`${BASE}/board-status`);
   assert(t0PostInitStatusRes.status === 200, `post-init board-status returned ${t0PostInitStatusRes.status}`);
   const t0PostInitSummary = t0PostInitStatusRes.data?.statusSnapshot?.summary;

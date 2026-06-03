@@ -3,12 +3,15 @@ import path from 'node:path';
 
 const REF_PREFIX = 'b64:';
 const BOARD_REF_FIELDS = Object.freeze([
+  'boardRuntimeStoreRef',
   'cardStoreRef',
   'outputsStoreRef',
+  'queueStoreRef',
   'scratchStoreRef',
   'archiveStoreRef',
   'chatStoreRef',
   'artifactsStoreRef',
+  'fetchedSourcesStoreRef',
 ]);
 
 function toBase64Url(raw) {
