@@ -5,22 +5,22 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
 import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
-import { buildBoardBundle } from '../server-firebase-shared/build-board-bundle.js';
-import { initializeFirebaseServices } from '../server-firebase-shared/firebase-init.js';
-import { loadLegacyBoardChatRuntime } from '../server-firebase-shared/legacy-chat-runtime.js';
-import { loadFirebaseHostConfig } from '../server-firebase-shared/load-config.js';
+import { buildBoardBundle as buildFirebaseBoardBundle } from '../firebase-adapter/build-board-bundle.js';
+import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js';
+import { loadFirebaseHostConfig, resolveConfigRelativePath } from '../firebase-adapter/load-config.js';
+import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
+import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
+import { loadLegacyBoardChatRuntime } from '../host-shared/chat-agent-handler/legacy-chat-runtime.js';
+import { createLogger } from '../host-shared/logging.js';
+import {
+  createHostedImmediateTaskExecutorHook,
+  createHostedImmediateTaskExecutorRef,
+  loadTaskExecutorModule,
+} from '../host-shared/worker-modules/task-executor-module.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, 'controlface-server.config.json');
-
-function createLogger(scope) {
-  return {
-    info: (msg, ...args) => console.log(`[${scope}] ${msg}`, ...args),
-    warn: (msg, ...args) => console.warn(`[${scope}] ${msg}`, ...args),
-    error: (msg, ...args) => console.error(`[${scope}] ${msg}`, ...args),
-  };
-}
 
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -34,21 +34,44 @@ function sendJson(res, status, payload) {
   res.end(body);
 }
 
-function buildBoardRuntimes(hostConfig, firebaseServices) {
+async function buildBoardRuntimes(hostConfig, adapterServices) {
   const runtimes = new Map();
+  const buildBoardBundle = hostConfig.storageAdapter === 'localfs'
+    ? buildLocalFsBoardBundle
+    : buildFirebaseBoardBundle;
   for (const [boardId, boardConfig] of Object.entries(hostConfig.boards)) {
     const callbackBaseUrl = `http://${hostConfig.host}:${hostConfig.port}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/mcp-webhooks`;
-    const bundle = buildBoardBundle(
-      boardId,
-      boardConfig,
-      firebaseServices,
-      {},
-      { callbackTransport: createHttpBoardCallbackTransport(callbackBaseUrl) },
-    );
     const chatRuntime = loadLegacyBoardChatRuntime(boardId, boardConfig, {
       serverUrl: `http://${hostConfig.host}:${hostConfig.port}`,
       apiBasePrefix: hostConfig.apiBasePrefix,
     });
+    const executeTaskExecutorRequest = await loadTaskExecutorModule(
+      boardId,
+      boardConfig,
+      resolveConfigRelativePath,
+      hostConfig.configDir,
+    );
+    const bundle = buildBoardBundle(
+      boardId,
+      boardConfig,
+      adapterServices,
+      {},
+      {
+        callbackTransport: createHttpBoardCallbackTransport(callbackBaseUrl),
+        configDir: hostConfig.configDir,
+        nonCoreTaskExecutor: createHostedImmediateTaskExecutorHook(
+          executeTaskExecutorRequest,
+          chatRuntime.executionExtra,
+        ),
+        nonCoreTaskExecutorRef: createHostedImmediateTaskExecutorRef(
+          boardId,
+          boardConfig,
+          resolveConfigRelativePath,
+          hostConfig.configDir,
+        ),
+        resolveConfigRelativePath,
+      },
+    );
     const runtime = createSingleBoardServerRuntime({
       apiBasePath: `${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}`,
       boardId,
@@ -74,8 +97,10 @@ function buildBoardRuntimes(hostConfig, firebaseServices) {
 
 async function main() {
   const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH);
-  const firebaseServices = await initializeFirebaseServices(hostConfig.firebase);
-  const boardRuntimes = buildBoardRuntimes(hostConfig, firebaseServices);
+  const adapterServices = hostConfig.storageAdapter === 'localfs'
+    ? await initializeLocalFsServices(hostConfig.localfs)
+    : await initializeFirebaseServices(hostConfig.firebase);
+  const boardRuntimes = await buildBoardRuntimes(hostConfig, adapterServices);
 
   const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') {
@@ -114,12 +139,12 @@ async function main() {
   });
 
   server.listen(hostConfig.port, hostConfig.host, () => {
-    console.log(`[controlface-firebase] Listening on http://${hostConfig.host}:${hostConfig.port}`);
-    console.log(`[controlface-firebase] Boards: ${Array.from(boardRuntimes.keys()).join(', ')}`);
+    console.log(`[controlface] Listening on http://${hostConfig.host}:${hostConfig.port}`);
+    console.log(`[controlface] Boards: ${Array.from(boardRuntimes.keys()).join(', ')}`);
   });
 }
 
 main().catch((error) => {
-  console.error(`[controlface-firebase] Failed to start: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`[controlface] Failed to start: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });

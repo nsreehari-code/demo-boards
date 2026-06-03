@@ -5,28 +5,23 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const boardDir = path.resolve(__dirname, '..');
-const controlfaceDir = path.join(boardDir, 'server-controlface-firebase');
-const queueRunnerDir = path.join(boardDir, 'server-queue-runner-firebase');
+const runtimeDir = path.join(boardDir, 'server', 'hosted-board-runtime');
+const controlfaceEntry = path.join(runtimeDir, 'http-mcp-controlface', 'controlface-server.js');
+const queueRunnerEntry = path.join(runtimeDir, 'queue-runner', 'queue-runner.js');
 
-for (const dirPath of [controlfaceDir, queueRunnerDir]) {
-  if (!fs.existsSync(dirPath)) {
-    console.error(`[start-firebase-hosts] Missing ${dirPath}`);
+for (const entryPath of [controlfaceEntry, queueRunnerEntry]) {
+  if (!fs.existsSync(entryPath)) {
+    console.error(`[start-firebase-hosts] Missing ${entryPath}`);
     process.exit(1);
   }
 }
 
-const npmCliPath = process.env.npm_execpath;
 const sharedEnv = { ...process.env };
 let shuttingDown = false;
 
-if (!npmCliPath || !fs.existsSync(npmCliPath)) {
-  console.error('[start-firebase-hosts] Unable to resolve npm CLI path from npm_execpath');
-  process.exit(1);
-}
-
-function startPackage(dirPath, label) {
-  const child = spawn(process.execPath, [npmCliPath, 'start'], {
-    cwd: dirPath,
+function startRuntime(entryPath, label) {
+  const child = spawn(process.execPath, [entryPath], {
+    cwd: runtimeDir,
     env: sharedEnv,
     stdio: 'inherit',
   });
@@ -38,8 +33,8 @@ function startPackage(dirPath, label) {
   return child;
 }
 
-const controlface = startPackage(controlfaceDir, 'controlface');
-const queueRunner = startPackage(queueRunnerDir, 'queue-runner');
+const controlface = startRuntime(controlfaceEntry, 'controlface');
+const queueRunner = startRuntime(queueRunnerEntry, 'queue-runner');
 
 function shutdown() {
   if (shuttingDown) return;

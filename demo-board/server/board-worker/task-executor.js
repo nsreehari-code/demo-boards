@@ -63,6 +63,15 @@ const SOURCE_DEF_FLOWS_FILE = path.join(WORKER_DIR, 'source_def_flows.json');
 const EXECUTOR_NAME = 'board-worker';
 const LOG_PREFIX = `[${EXECUTOR_NAME}]`;
 
+function traceEnabled() {
+  return String(process.env.DEBUG_QUEUE_RUNNER_TRACE || '').trim() === '1';
+}
+
+function trace(message) {
+  if (!traceEnabled()) return;
+  console.log(`[board-worker-trace] ${message}`);
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 }
@@ -297,6 +306,8 @@ async function runSourceFetchSubcommand(argv) {
     failRef(`Cannot resolve source_def: ${String(err && err.message || err)}`, callback);
   }
 
+  trace(`run-source-fetch-start bindTo=${typeof sourceDef?.bindTo === 'string' ? sourceDef.bindTo : ''} kindHint=${typeof sourceDef?.kind === 'string' ? sourceDef.kind : ''} callback=${Boolean(callback)} outRef=${outRef?.value || ''}`);
+
   let kind;
   let flowResult;
   try {
@@ -305,8 +316,11 @@ async function runSourceFetchSubcommand(argv) {
     flowResult = resolved.flowResult;
   } catch (err) {
     const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
+    trace(`run-source-fetch-error bindTo=${typeof sourceDef?.bindTo === 'string' ? sourceDef.bindTo : ''} message=${String(err && err.message || err)}`);
     failRef(`source invocation failed: ${String(err && err.message || err)}${detail}`, callback);
   }
+
+  trace(`run-source-fetch-complete bindTo=${typeof sourceDef?.bindTo === 'string' ? sourceDef.bindTo : ''} kind=${kind} wroteOutputDirectly=${Boolean(flowResult?.wroteOutputDirectly)}`);
 
   if (!flowResult?.wroteOutputDirectly) {
     try {

@@ -1,0 +1,41 @@
+{
+  "storageAdapter": "localfs",
+  "serverOrigin": "http://127.0.0.1:7831",
+  "apiBasePrefix": "/api/boards",
+  "boards": {
+    "live": {
+      "label": "Live",
+      "taskExecutorModule": "../../board-worker/task-executor.js",
+      "refs": {
+        "baseRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/runtime/live"
+        },
+        "cardStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/cards"
+        },
+        "outputsStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/outputs"
+        },
+        "scratchStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/scratch"
+        },
+        "archiveStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/archive"
+        },
+        "chatStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/chat"
+        },
+        "artifactsStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/files"
+        }
+      }
+    }
+  }
+}

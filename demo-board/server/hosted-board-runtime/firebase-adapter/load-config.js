@@ -151,6 +151,9 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
   return {
     configPath,
     configDir,
+    storageAdapter: typeof config.storageAdapter === 'string' && config.storageAdapter.trim()
+      ? config.storageAdapter.trim().toLowerCase()
+      : 'firebase',
     host: typeof config.host === 'string' && config.host.trim() ? config.host.trim() : '127.0.0.1',
     port: Number.isFinite(Number(config.port)) ? Number(config.port) : 7810,
     serverOrigin: typeof config.serverOrigin === 'string' && config.serverOrigin.trim()

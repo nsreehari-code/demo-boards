@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const BOARD_ROOT = path.resolve(__dirname, '..');
+const BOARD_ROOT = path.resolve(__dirname, '../../../..');
 const SERVER_CONFIG_PATH = path.resolve(BOARD_ROOT, 'server-config.json');
 const DEFAULT_WATCHPARTY_FILES_DIR = 'watchparty-files-for-chat';
 const CHAT_FLOW_ROOT = path.resolve(BOARD_ROOT, 'server', 'chat-flow');

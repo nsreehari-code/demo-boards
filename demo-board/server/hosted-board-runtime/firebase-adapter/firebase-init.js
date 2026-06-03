@@ -4,10 +4,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const requireFromShared = createRequire(import.meta.url);
+const requireFromAdapter = createRequire(import.meta.url);
 const firebaseResolutionPaths = [
-  path.resolve(__dirname, '../server-controlface-firebase'),
-  path.resolve(__dirname, '../server-queue-runner-firebase'),
+  path.resolve(__dirname, '..'),
   process.cwd(),
 ];
 
@@ -16,9 +15,9 @@ let firebaseCompatPromise = null;
 async function loadFirebaseCompat() {
   if (!firebaseCompatPromise) {
     firebaseCompatPromise = (async () => {
-      const appModulePath = requireFromShared.resolve('firebase/compat/app', { paths: firebaseResolutionPaths });
-      const firestoreModulePath = requireFromShared.resolve('firebase/compat/firestore', { paths: firebaseResolutionPaths });
-      const storageModulePath = requireFromShared.resolve('firebase/compat/storage', { paths: firebaseResolutionPaths });
+      const appModulePath = requireFromAdapter.resolve('firebase/compat/app', { paths: firebaseResolutionPaths });
+      const firestoreModulePath = requireFromAdapter.resolve('firebase/compat/firestore', { paths: firebaseResolutionPaths });
+      const storageModulePath = requireFromAdapter.resolve('firebase/compat/storage', { paths: firebaseResolutionPaths });
 
       const firebaseAppMod = await import(pathToFileURL(appModulePath).href);
       await import(pathToFileURL(firestoreModulePath).href);

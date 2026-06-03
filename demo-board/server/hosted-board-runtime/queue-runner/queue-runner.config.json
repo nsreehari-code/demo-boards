@@ -1,5 +1,5 @@
 {
-  "serverOrigin": "http://127.0.0.1:7810",
+  "serverOrigin": "http://127.0.0.1:7799",
   "apiBasePrefix": "/api/boards",
   "firebase": {
     "appName": "finbook-492706-demo-boards-queue-runner",
@@ -15,7 +15,7 @@
   "boards": {
     "live": {
       "label": "Live",
-      "taskExecutorModule": "../server/board-worker/task-executor.js",
+      "taskExecutorModule": "../../board-worker/task-executor.js",
       "refs": {
         "baseRef": {
           "kind": "firestore-board",
