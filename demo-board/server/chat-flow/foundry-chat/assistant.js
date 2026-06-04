@@ -20,6 +20,7 @@ import {
   resolveAssistantDebugEnabled,
   resolveAssistantDebugFile,
   resolveBoardLogsDir,
+  resolveStreamableMcpServerUrl,
   readCardPrivateFieldViaApi,
   writeCardPrivateFieldViaApi,
 } from '../copilot-chat/shared.js';
@@ -60,6 +61,8 @@ const DEBUG_FILE_OVERRIDE = resolveAssistantDebugFile();
 const BOARD_LOGS_DIR = resolveBoardLogsDir(boardId);
 const DEBUG_LOG_FILE = DEBUG_FILE_OVERRIDE
   || path.join(BOARD_LOGS_DIR, 'foundry-assistant-debug.jsonl');
+const INVOKE_STDERR_LOG_FILE = path.join(BOARD_LOGS_DIR, 'foundry-invoke.stderr.log');
+const LIFECYCLE_LOG_FILE = path.join(BOARD_LOGS_DIR, 'foundry-assistant.lifecycle.log');
 
 function resolvePythonExecutable() {
   const explicit = typeof process.env.PYTHON_EXECUTABLE === 'string'
@@ -97,6 +100,64 @@ function appendDebug(stage, details = {}) {
     );
   } catch {}
 }
+
+function persistInvokeFailureLog(kind, details = {}) {
+  try {
+    fs.mkdirSync(path.dirname(INVOKE_STDERR_LOG_FILE), { recursive: true });
+    const lines = [
+      `ts=${new Date().toISOString()}`,
+      `pid=${process.pid}`,
+      `kind=${kind}`,
+      `boardId=${boardId || ''}`,
+      `cardId=${cardId || ''}`,
+      `turnId=${turnId || ''}`,
+    ];
+    if (details.message) lines.push(`message=${String(details.message)}`);
+    if (details.stderr) {
+      lines.push('stderr<<EOF');
+      lines.push(String(details.stderr));
+      lines.push('EOF');
+    }
+    if (details.stdout) {
+      lines.push('stdout<<EOF');
+      lines.push(String(details.stdout));
+      lines.push('EOF');
+    }
+    fs.appendFileSync(INVOKE_STDERR_LOG_FILE, `${lines.join('\n')}\n\n`, 'utf-8');
+  } catch {}
+}
+
+function persistLifecycleLog(stage, details = {}) {
+  try {
+    fs.mkdirSync(path.dirname(LIFECYCLE_LOG_FILE), { recursive: true });
+    const lines = [
+      `ts=${new Date().toISOString()}`,
+      `pid=${process.pid}`,
+      `stage=${stage}`,
+      `boardId=${boardId || ''}`,
+      `cardId=${cardId || ''}`,
+      `turnId=${turnId || ''}`,
+    ];
+    for (const [key, value] of Object.entries(details)) {
+      if (value === undefined || value === null || value === '') continue;
+      lines.push(`${key}=${String(value)}`);
+    }
+    fs.appendFileSync(LIFECYCLE_LOG_FILE, `${lines.join('\n')}\n\n`, 'utf-8');
+  } catch {}
+}
+
+process.on('uncaughtException', (err) => {
+  persistInvokeFailureLog('uncaught-exception', {
+    message: err?.stack || err?.message || String(err),
+  });
+  throw err;
+});
+
+process.on('unhandledRejection', (reason) => {
+  persistInvokeFailureLog('unhandled-rejection', {
+    message: reason?.stack || reason?.message || String(reason),
+  });
+});
 
 function resolveBoardServerPort(explicitServerUrl) {
   try {
@@ -230,9 +291,17 @@ function formatChatTranscript(messages) {
 }
 
 async function loadPromptChatMessages() {
-  const turnScoped = await readEnhancedChatMessages(boardId, cardId, 30000, { turnId, logId });
+  const turnScoped = await readEnhancedChatMessages(boardId, cardId, 30000, {
+    turnId,
+    logId,
+    mcpServerUrl,
+  });
   if (Array.isArray(turnScoped) && turnScoped.length > 0) return turnScoped;
-  return readChatMessagesViaMcp(boardId, cardId, { logId, turnId });
+  return readChatMessagesViaMcp(boardId, cardId, {
+    logId,
+    turnId,
+    mcpServerUrl,
+  });
 }
 
 function buildSystemInstructions(skillsBlock) {
@@ -266,6 +335,13 @@ requireRequiredStrings({
   foundryEndpoint,
   foundryChatAgentId,
 }, 'foundry-chat assistant');
+
+persistLifecycleLog('start', {
+  foundryEndpoint,
+  foundryChatAgentId,
+  mcpServerUrl,
+  serverUrl,
+});
 
 appendDebug('foundry-assistant:start', {
   boardId, cardId, turnId, foundryEndpoint, foundryChatAgentId, chatTimeoutMs,
@@ -305,9 +381,15 @@ const existingThreadId = await (async () => {
     return typeof value === 'string' && value.trim() ? value.trim() : '';
   } catch { return ''; }
 })();
-const normalizedMcpServerUrl = mcpServerUrl.trim();
+persistLifecycleLog('thread-id-loaded', {
+  existingThreadId: existingThreadId || '(empty)',
+});
+const normalizedMcpServerUrl = resolveStreamableMcpServerUrl(mcpServerUrl).trim();
 
 const promptChatMessages = await loadPromptChatMessages();
+persistLifecycleLog('prompt-chat-loaded', {
+  promptChatMessagesCount: Array.isArray(promptChatMessages) ? promptChatMessages.length : 0,
+});
 const transcript = formatChatTranscript(promptChatMessages);
 const skillsBlock = loadInstructionsAndSkills();
 const systemInstructions = buildSystemInstructions(skillsBlock);
@@ -315,6 +397,11 @@ const systemInstructions = buildSystemInstructions(skillsBlock);
 const userPrompt = ['## Current turn transcript', '', transcript].join('\n');
 
 appendDebug('foundry-assistant:promptBuilt', {
+  transcriptLength: transcript.length,
+  skillsBlockLength: skillsBlock.length,
+  systemInstructionsLength: systemInstructions.length,
+});
+persistLifecycleLog('prompt-built', {
   transcriptLength: transcript.length,
   skillsBlockLength: skillsBlock.length,
   systemInstructionsLength: systemInstructions.length,
@@ -342,8 +429,13 @@ const invokeRequest = {
 
 const python = resolvePythonExecutable();
 appendDebug('foundry-assistant:pythonResolved', { python });
+persistLifecycleLog('invoke-ready', {
+  python,
+  outputFile: outputFile || '(none)',
+});
 
 await new Promise((resolve, reject) => {
+  persistLifecycleLog('spawning-invoke', { python });
   const child = spawn(python, [INVOKE_PY], {
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
@@ -363,10 +455,20 @@ await new Promise((resolve, reject) => {
   });
   const timeoutId = setTimeout(() => {
     try { child.kill(); } catch {}
+    persistInvokeFailureLog('timeout', {
+      message: `foundry-chat invoke.py timed out after ${chatTimeoutMs}ms`,
+      stderr: stderrBuf,
+      stdout: stdoutBuf,
+    });
     reject(new Error(`foundry-chat invoke.py timed out after ${chatTimeoutMs}ms`));
   }, chatTimeoutMs);
   child.on('error', (err) => {
     clearTimeout(timeoutId);
+    persistInvokeFailureLog('spawn-error', {
+      message: err?.stack || err?.message || String(err),
+      stderr: stderrBuf,
+      stdout: stdoutBuf,
+    });
     reject(err);
   });
   child.on('close', (code) => {
@@ -404,6 +506,17 @@ await new Promise((resolve, reject) => {
       })();
       return;
     }
+    persistInvokeFailureLog('nonzero-exit', {
+      message: `invoke.py exited with code ${code}`,
+      stderr: stderrBuf,
+      stdout: stdoutBuf,
+    });
+    appendDebug('foundry-assistant:invokeFailed', {
+      code,
+      stderr: stderrBuf,
+      stdoutTail: stdoutBuf.slice(-2000),
+      invokeStderrLogFile: INVOKE_STDERR_LOG_FILE,
+    });
     reject(new Error(stderrBuf.trim() || `invoke.py exited with code ${code}`));
   });
   child.stdin.end(JSON.stringify(invokeRequest));

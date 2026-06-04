@@ -200,20 +200,13 @@
       }
     },
     "cleanup_failure": {
-      "description": "Write a failure system message before clearing processing through the control-plane",
+      "description": "Skip stale failure-message route and clear processing through the control-plane",
       "expects_data": ["serverUrl", "boardId", "cardId", "turnId"],
       "handler": {
-        "type": "ref",
-        "howToRun": "http:post",
-        "whatToRun": {
-          "kind": "http-url",
-          "value": ""
-        },
-        "meta": "chat-handler",
-        "argsMassaging": {
-          "urlTemplate": "serverUrl & '/test-req/boards/' & boardId & '/chat/system-message'",
-          "bodyTemplate": "{ 'cardId': cardId, 'text': 'AI response failed - the assistant could not generate a reply. Check server configuration and logs.', 'turn': turnId, 'files': [] }"
-        }
+        "type": "compute-jsonata",
+        "expr": [
+          "result = \"success\""
+        ]
       },
       "transitions": {
         "success": "assistant_clear_processing_failed",

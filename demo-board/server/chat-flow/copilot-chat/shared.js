@@ -58,6 +58,22 @@ function resolveMcpServerUrl(explicitUrl = '') {
   return envOverride || configuredUrl || DEFAULT_MCP_SERVER_URL;
 }
 
+export function resolveStreamableMcpServerUrl(explicitUrl = '') {
+  const normalizedExplicitUrl = typeof explicitUrl === 'string' ? explicitUrl.trim() : '';
+  if (normalizedExplicitUrl) {
+    try {
+      const parsedUrl = new URL(normalizedExplicitUrl);
+      if (!/\/api\/boards\/[^/]+\/mcp(?:-controlplane)?$/i.test(parsedUrl.pathname)) {
+        return normalizedExplicitUrl;
+      }
+    } catch {
+      return normalizedExplicitUrl;
+    }
+  }
+
+  return resolveMcpServerUrl('');
+}
+
 function normalizeToolNameForServer(toolName, mcpServerUrl) {
   const normalizedToolName = typeof toolName === 'string' ? toolName.trim() : '';
   if (!normalizedToolName) {
