@@ -95,6 +95,37 @@ function readJsonFile(filePath) {
   return parsed;
 }
 
+function mergeConfigObjects(base, override) {
+  const left = base && typeof base === 'object' && !Array.isArray(base) ? base : {};
+  const right = override && typeof override === 'object' && !Array.isArray(override) ? override : {};
+  return {
+    ...left,
+    ...right,
+    firebase: {
+      ...((left.firebase && typeof left.firebase === 'object' && !Array.isArray(left.firebase)) ? left.firebase : {}),
+      ...((right.firebase && typeof right.firebase === 'object' && !Array.isArray(right.firebase)) ? right.firebase : {}),
+    },
+    localfs: {
+      ...((left.localfs && typeof left.localfs === 'object' && !Array.isArray(left.localfs)) ? left.localfs : {}),
+      ...((right.localfs && typeof right.localfs === 'object' && !Array.isArray(right.localfs)) ? right.localfs : {}),
+    },
+  };
+}
+
+function resolveProcessConfig(config, processName) {
+  if (!processName) return config;
+  const processConfig = config?.[processName];
+  if (!processConfig || typeof processConfig !== 'object' || Array.isArray(processConfig)) {
+    return config;
+  }
+  const {
+    controlface: _omitControlface,
+    queueRunner: _omitQueueRunner,
+    ...sharedConfig
+  } = config;
+  return mergeConfigObjects(sharedConfig, processConfig);
+}
+
 function requireNonEmptyString(value, label) {
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error(`${label} must be a non-empty string`);
@@ -132,6 +163,18 @@ function buildBoardConfigs(config) {
       taskExecutorModule: typeof source.taskExecutorModule === 'string' && source.taskExecutorModule.trim()
         ? source.taskExecutorModule.trim()
         : '',
+      chat: source.chat && typeof source.chat === 'object' && !Array.isArray(source.chat)
+        ? source.chat
+        : {},
+      setup: source.setup && typeof source.setup === 'object' && !Array.isArray(source.setup)
+        ? source.setup
+        : {},
+      regular: source.regular && typeof source.regular === 'object' && !Array.isArray(source.regular)
+        ? source.regular
+        : {},
+      'copilot-workdirs-setup': Array.isArray(source['copilot-workdirs-setup'])
+        ? source['copilot-workdirs-setup'].filter((entry) => entry && typeof entry === 'object')
+        : [],
       queueWakeup: source.queueWakeup && typeof source.queueWakeup === 'object' && !Array.isArray(source.queueWakeup)
         ? source.queueWakeup
         : {},
@@ -145,9 +188,10 @@ function buildBoardConfigs(config) {
   return boards;
 }
 
-export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv.slice(2)) {
+export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv.slice(2), processName = '') {
   const configPath = parseCliConfigPath(defaultConfigPath, cliArgs);
-  const config = readJsonFile(configPath);
+  const rawConfig = readJsonFile(configPath);
+  const config = resolveProcessConfig(rawConfig, processName);
   const configDir = path.dirname(configPath);
   const boards = buildBoardConfigs(config);
 
@@ -159,12 +203,24 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
       : 'firebase',
     host: typeof config.host === 'string' && config.host.trim() ? config.host.trim() : '127.0.0.1',
     port: Number.isFinite(Number(config.port)) ? Number(config.port) : 7810,
+    mcpServerUrl: typeof config.mcpServerUrl === 'string' && config.mcpServerUrl.trim()
+      ? config.mcpServerUrl.trim()
+      : '',
     serverOrigin: typeof config.serverOrigin === 'string' && config.serverOrigin.trim()
       ? config.serverOrigin.trim().replace(/\/$/, '')
       : '',
     apiBasePrefix: typeof config.apiBasePrefix === 'string' && config.apiBasePrefix.trim()
       ? config.apiBasePrefix.trim().replace(/\/$/, '')
       : '/api/boards',
+    chatFlowTimeoutMs: Number.isFinite(Number(config.chatFlowTimeoutMs)) ? Number(config.chatFlowTimeoutMs) : undefined,
+    chatInvokeRefTimeoutMs: Number.isFinite(Number(config.chatInvokeRefTimeoutMs)) ? Number(config.chatInvokeRefTimeoutMs) : undefined,
+    chatCopilotTimeoutMs: Number.isFinite(Number(config.chatCopilotTimeoutMs)) ? Number(config.chatCopilotTimeoutMs) : undefined,
+    watchparty: config.watchparty && typeof config.watchparty === 'object' && !Array.isArray(config.watchparty)
+      ? config.watchparty
+      : {},
+    foundryAgents: config.foundryAgents && typeof config.foundryAgents === 'object' && !Array.isArray(config.foundryAgents)
+      ? config.foundryAgents
+      : {},
     firebase: config.firebase && typeof config.firebase === 'object' && !Array.isArray(config.firebase)
       ? config.firebase
       : {},

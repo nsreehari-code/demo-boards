@@ -8,6 +8,7 @@ const boardDir = path.resolve(__dirname, '..');
 const runtimeDir = path.join(boardDir, 'server', 'hosted-board-runtime');
 const controlfaceEntry = path.join(runtimeDir, 'http-mcp-controlface', 'controlface-server.js');
 const queueRunnerEntry = path.join(runtimeDir, 'queue-runner', 'queue-runner.js');
+const localfsConfigArgv = ['--config', './hosted-board-runtime.localfs.config.json'];
 
 for (const entryPath of [controlfaceEntry, queueRunnerEntry]) {
   if (!fs.existsSync(entryPath)) {
@@ -20,7 +21,7 @@ const sharedEnv = { ...process.env };
 let shuttingDown = false;
 
 function startRuntime(entryPath, label) {
-  const child = spawn(process.execPath, [entryPath], {
+  const child = spawn(process.execPath, [entryPath, ...localfsConfigArgv], {
     cwd: runtimeDir,
     env: sharedEnv,
     stdio: 'inherit',

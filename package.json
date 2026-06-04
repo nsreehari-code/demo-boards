@@ -21,7 +21,7 @@
     "setup:check:workiq-only": "node scripts/setup-check-copilot-workiq.mjs --workiq-only",
     "setup:check:copilot-workiq": "node scripts/setup-check-copilot-workiq.mjs",
     "mcp:start": "npm --prefix mcp-server run start:http",
-    "stop": "node -e \"const {execSync}=require('child_process');['7801','7810','8000'].forEach(p=>{try{execSync('npx kill-port '+p,{stdio:'ignore'})}catch{}});console.log('stopped ports 7801, 7810 and 8000')\""
+    "stop": "node -e \"const {execSync}=require('child_process');['7801','7799','8000'].forEach(p=>{try{execSync('npx kill-port '+p,{stdio:'ignore'})}catch{}});console.log('stopped ports 7801, 7799 and 8000')\""
   },
   "keywords": [],
   "author": "",

@@ -1,0 +1,105 @@
+{
+  "storageAdapter": "localfs",
+  "mcpServerUrl": "http://127.0.0.1:7801/mcp",
+  "apiBasePrefix": "/api/boards",
+  "controlface": {
+    "host": "127.0.0.1",
+    "port": 7799
+  },
+  "queueRunner": {
+    "serverOrigin": "http://127.0.0.1:7799"
+  },
+  "foundryAgents": {
+    "endpoint": "https://sz-foundry.services.ai.azure.com/api/projects/sz-project",
+    "chatAgentId": "asst_IMDJiVnL9fS0QbttDXKxN5lF",
+    "chatExposedMcpToolPrefixes": ["liveboards.", "lore."]
+  },
+  "boards": {
+    "live": {
+      "label": "Live",
+      "chat": {
+        "assistant": "foundry",
+        "copilot": {
+          "custom-workspace-stems": ["gandalf"]
+        }
+      },
+      "setup": {
+        "setupRoot": "../../../workspaces/live/case-workspace",
+        "aiWorkspaceRoot": "copilot-workspaces",
+        "cardStore": "cards-store",
+        "artifactsStore": "cards-files",
+        "boardRuntime": "runtime",
+        "boardOutputsStore": "board-outputs",
+        "chatStore": "cards-chats",
+        "scratchStore": "scratch",
+        "archivalStore": "runtime-archive"
+      },
+      "regular": {
+        "seedCardsDir": "../../boards/live/cards",
+        "taskExecutorPath": "../board-worker/task-executor.js",
+        "chatHandlerFlowPath": "../chat-flow/flow-steps.json"
+      },
+      "copilot-workdirs-setup": [
+        {
+          "copilot-root": "default",
+          "instructionsDirs": ["../../server/chat-flow/instructions", "../../boards/live/copilot/default/instructions"],
+          "agentsDirs": ["../../server/chat-flow/copilot-chat/agents", "../../boards/live/copilot/default/agents"],
+          "agentsSkills": ["../../server/chat-flow/skills", "../../boards/live/copilot/default/skills"],
+          "agentsHooks": ["../../server/chat-flow/copilot-chat/hooks", "../../boards/live/copilot/default/hooks"],
+          "copyScripts": ["../../scripts/cli"]
+        },
+        {
+          "copilot-root": "gandalf",
+          "instructionsDirs": ["../../server/chat-flow/instructions", "../../boards/live/copilot/gandalf/instructions"],
+          "agentsDirs": ["../../server/chat-flow/copilot-chat/agents", "../../boards/live/copilot/gandalf/agents"],
+          "agentsSkills": ["../../server/chat-flow/skills", "../../boards/live/copilot/gandalf/skills"],
+          "agentsHooks": ["../../server/chat-flow/copilot-chat/hooks", "../../boards/live/copilot/gandalf/hooks"],
+          "copyScripts": ["../../scripts/cli"]
+        }
+      ],
+      "taskExecutorModule": "../board-worker/task-executor.js",
+      "refs": {
+        "baseRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/runtime/live"
+        },
+        "boardRuntimeStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/runtime-board"
+        },
+        "cardStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/cards"
+        },
+        "outputsStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/outputs"
+        },
+        "queueStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/runtime"
+        },
+        "scratchStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/scratch"
+        },
+        "archiveStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/archive"
+        },
+        "chatStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/chat"
+        },
+        "artifactsStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/files"
+        },
+        "fetchedSourcesStoreRef": {
+          "kind": "fs-path",
+          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/sources"
+        }
+      }
+    }
+  }
+}

@@ -9,10 +9,10 @@ const workspaceDir = process.cwd();
 const args = process.argv.slice(2);
 const boardDirArg = args.find(a => !a.startsWith('--')) || 'demo-board';
 const boardDir = path.resolve(workspaceDir, boardDirArg);
-const firebaseHostsLauncherPath = path.join(boardDir, 'scripts', 'start-firebase-hosts.cjs');
+const runtimeLauncherPath = path.join(boardDir, 'scripts', 'start-firebase-hosts.cjs');
 
-if (!fs.existsSync(firebaseHostsLauncherPath)) {
-  console.error(`[start-server] Missing ${firebaseHostsLauncherPath}. Pass a valid board directory, for example "demo-board".`);
+if (!fs.existsSync(runtimeLauncherPath)) {
+  console.error(`[start-server] Missing ${runtimeLauncherPath}. Pass a valid board directory, for example "demo-board".`);
   process.exit(1);
 }
 
@@ -30,7 +30,6 @@ if (!fs.existsSync(frontendDir)) {
 const sharedEnv = {
   ...process.env,
 };
-const backendHost = String(sharedEnv.DEMO_SERVER_HOST || '127.0.0.1').trim() || '127.0.0.1';
 
 function isPortReachable(port, host = '127.0.0.1', timeoutMs = 500) {
   return new Promise((resolve) => {
@@ -63,7 +62,7 @@ async function handleMcpExit(code) {
 }
 
 console.log(`[start-server] board dir: ${boardDir}`);
-console.log(`[start-server] backend:  http://${backendHost}:7810`);
+console.log(`[start-server] controlface: launched from ${path.relative(workspaceDir, runtimeLauncherPath)}`);
 console.log('[start-server] mcp:      http://127.0.0.1:7801/mcp');
 console.log('[start-server] frontend: http://127.0.0.1:8000');
 
@@ -73,7 +72,7 @@ const mcp = spawn(process.execPath, [mcpServerPath, '--transport', 'streamable-h
   stdio: 'inherit',
 });
 
-const backend = spawn(process.execPath, [firebaseHostsLauncherPath], {
+const hostedRuntime = spawn(process.execPath, [runtimeLauncherPath], {
   cwd: boardDir,
   env: sharedEnv,
   stdio: 'inherit',
@@ -93,12 +92,12 @@ function shutdown(signal) {
   shuttingDown = true;
 
   if (!mcp.killed) mcp.kill('SIGTERM');
-  if (!backend.killed) backend.kill('SIGTERM');
+  if (!hostedRuntime.killed) hostedRuntime.kill('SIGTERM');
   if (frontend && !frontend.killed) frontend.kill('SIGTERM');
 
   setTimeout(() => {
     if (!mcp.killed) mcp.kill('SIGKILL');
-    if (!backend.killed) backend.kill('SIGKILL');
+    if (!hostedRuntime.killed) hostedRuntime.kill('SIGKILL');
     if (frontend && !frontend.killed) frontend.kill('SIGKILL');
     process.exit(0);
   }, 1200);
@@ -112,9 +111,9 @@ mcp.on('exit', (code) => {
   void handleMcpExit(code);
 });
 
-backend.on('exit', (code) => {
+hostedRuntime.on('exit', (code) => {
   if (!shuttingDown) {
-    console.error(`[start-server] backend exited with code ${code ?? 0}`);
+    console.error(`[start-server] hosted runtime exited with code ${code ?? 0}`);
     shutdown();
   }
 });

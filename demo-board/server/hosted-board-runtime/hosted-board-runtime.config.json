@@ -1,9 +1,7 @@
 {
-  "host": "127.0.0.1",
-  "port": 7799,
+  "storageAdapter": "firebase",
   "apiBasePrefix": "/api/boards",
   "firebase": {
-    "appName": "finbook-492706-demo-boards-controlface",
     "firebaseConfig": {
       "apiKey": "AIzaSyADBND0SZRr44OYpF1AoSPtGOibzn2SbEY",
       "authDomain": "finbook-492706.firebaseapp.com",
@@ -13,10 +11,24 @@
       "appId": "1:737512322617:web:7106e2f53d8b2785107fe8"
     }
   },
+  "mcpServerUrl": "http://127.0.0.1:7801/mcp",
+  "controlface": {
+    "host": "127.0.0.1",
+    "port": 7799,
+    "firebase": {
+      "appName": "finbook-492706-demo-boards-controlface"
+    }
+  },
+  "queueRunner": {
+    "serverOrigin": "http://127.0.0.1:7799",
+    "firebase": {
+      "appName": "finbook-492706-demo-boards-queue-runner"
+    }
+  },
   "boards": {
     "live": {
       "label": "Live",
-      "taskExecutorModule": "../../board-worker/task-executor.js",
+      "taskExecutorModule": "../board-worker/task-executor.js",
       "refs": {
         "baseRef": {
           "kind": "firestore-board",
@@ -51,7 +63,7 @@
           "value": "boards/{{boardId}}/cards-chats"
         },
         "artifactsStoreRef": {
-          "kind": "firebase-storage",
+          "kind": "firestore",
           "value": "boards/{{boardId}}/files"
         },
         "fetchedSourcesStoreRef": {

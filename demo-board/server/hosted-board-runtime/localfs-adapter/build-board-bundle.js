@@ -51,21 +51,56 @@ function ensureBoardDirs(refs) {
   ensureFsPathDir(refs.artifactsStoreRef);
 }
 
+function normalizeKindValueRef(ref) {
+  if (!ref) return undefined;
+  return typeof ref === 'string' ? parseRef(ref) : ref;
+}
+
+function normalizeSerializedRef(ref) {
+  return typeof ref === 'string' ? ref : serializeRef(ref);
+}
+
 export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, runtimeHooks = {}, options = {}) {
   const refs = boardConfig?.refs;
-  if (!refs?.baseRef || refs.baseRef.kind !== 'fs-path' || !refs.baseRef.value) {
-    throw new Error(`localfs board ${boardId} requires refs.baseRef as an fs-path object`);
+  const baseRef = normalizeKindValueRef(refs?.baseRef);
+  if (!baseRef || baseRef.kind !== 'fs-path' || !baseRef.value) {
+    throw new Error(`localfs board ${boardId} requires refs.baseRef as an fs-path ref`);
   }
 
+  const serializedRefs = {
+    baseRef,
+    boardRuntimeStoreRef: normalizeSerializedRef(refs.boardRuntimeStoreRef),
+    cardStoreRef: normalizeSerializedRef(refs.cardStoreRef),
+    outputsStoreRef: normalizeSerializedRef(refs.outputsStoreRef),
+    queueStoreRef: normalizeSerializedRef(refs.queueStoreRef),
+    scratchStoreRef: normalizeSerializedRef(refs.scratchStoreRef),
+    archiveStoreRef: normalizeSerializedRef(refs.archiveStoreRef),
+    chatStoreRef: normalizeSerializedRef(refs.chatStoreRef),
+    artifactsStoreRef: normalizeSerializedRef(refs.artifactsStoreRef),
+    fetchedSourcesStoreRef: normalizeSerializedRef(refs.fetchedSourcesStoreRef),
+  };
+
   ensureBoardDirs(refs);
+
+  const taskExecutorModulePath = typeof boardConfig?.taskExecutorModule === 'string' && boardConfig.taskExecutorModule.trim()
+    && typeof options.resolveConfigRelativePath === 'function'
+    ? options.resolveConfigRelativePath(options.configDir, boardConfig.taskExecutorModule)
+    : '';
+  const localSyncTaskExecutorRef = makeLocalTaskExecutorRef(taskExecutorModulePath, { boardId });
 
   const adapterOpts = {
     suppressSpawn: true,
     onWarn: (message) => console.warn(`[localfs-adapter] ${message}`),
     ...(options.callbackTransport ? { callbackTransport: options.callbackTransport } : {}),
   };
-  const boardAdapter = createFsBoardPlatformAdapter(refs.baseRef, adapterOpts);
-  const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(refs.baseRef, adapterOpts);
+  const nonCoreAdapterOpts = {
+    ...adapterOpts,
+    ...(localSyncTaskExecutorRef
+      ? { resolveRef: (ref) => (isHostedTaskExecutorRef(ref) ? localSyncTaskExecutorRef : ref) }
+      : {}),
+  };
+  const boardAdapter = createFsBoardPlatformAdapter(baseRef, adapterOpts);
+  const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(baseRef, nonCoreAdapterOpts);
 
   const requestProcessAccumulated = typeof runtimeHooks.requestProcessAccumulated === 'function'
     ? runtimeHooks.requestProcessAccumulated
@@ -73,31 +108,22 @@ export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, ru
   boardAdapter.requestProcessAccumulated = requestProcessAccumulated;
   nonCoreAdapter.requestProcessAccumulated = requestProcessAccumulated;
 
-  const taskExecutorModulePath = typeof boardConfig?.taskExecutorModule === 'string' && boardConfig.taskExecutorModule.trim()
-    && typeof options.resolveConfigRelativePath === 'function'
-    ? options.resolveConfigRelativePath(options.configDir, boardConfig.taskExecutorModule)
-    : '';
-  const localSyncTaskExecutorRef = makeLocalTaskExecutorRef(taskExecutorModulePath, { boardId });
-  if (localSyncTaskExecutorRef) {
-    const invokeExecutor = nonCoreAdapter.invokeExecutor.bind(nonCoreAdapter);
-    nonCoreAdapter.invokeExecutor = (ref, subcommand, execOpts) => {
-      const resolvedRef = isHostedTaskExecutorRef(ref) ? localSyncTaskExecutorRef : ref;
-      return invokeExecutor(resolvedRef, subcommand, execOpts);
-    };
-  }
-
-  const nonCore = createBoardLiveCardsNonCorePublic(refs.baseRef, nonCoreAdapter);
+  const hostedTaskExecutorRef = makeHostedTaskExecutorRef(boardId);
+  const nonCore = createBoardLiveCardsNonCorePublic(baseRef, nonCoreAdapter, {
+    boardRuntimeStoreRef: serializedRefs.boardRuntimeStoreRef,
+    taskExecutorRef: hostedTaskExecutorRef,
+  });
 
   return {
-    refs,
+    refs: serializedRefs,
     boardAdapter,
     nonCore,
     boardContextConfig: {
       label: boardConfig.label || boardId,
       boardAdapter,
       nonCore,
-      taskExecutorRef: makeHostedTaskExecutorRef(boardId),
-      ...refs,
+      taskExecutorRef: hostedTaskExecutorRef,
+      ...serializedRefs,
     },
   };
 }

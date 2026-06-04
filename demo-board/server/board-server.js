@@ -42,6 +42,7 @@ import {
   createStepMachine,
   loadStepFlow,
 } from 'yaml-flow/step-machine-public';
+import { prepareCopilotWorkspaceForBoard } from './workspace-setup/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const SERVER_DIR = path.dirname(__filename);
@@ -1813,18 +1814,14 @@ function buildBoardContextConfig(label, boardSetupPaths, boardRuntimeRefs, taskE
     notifyChannel,
     ...(callbackTransport ? { callbackTransport } : {}),
   });
+  const localSyncTaskExecutorRef = makeLocalTaskExecutorRef(taskExecPath, executionExtra);
   const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(baseRef, BOARD_ROOT, {
     onWarn: console.warn,
     ...(callbackTransport ? { callbackTransport } : {}),
+    ...(localSyncTaskExecutorRef
+      ? { resolveRef: (ref) => (isHostedTaskExecutorRef(ref) ? localSyncTaskExecutorRef : ref) }
+      : {}),
   });
-  const localSyncTaskExecutorRef = makeLocalTaskExecutorRef(taskExecPath, executionExtra);
-  if (localSyncTaskExecutorRef) {
-    const invokeExecutor = nonCoreAdapter.invokeExecutor.bind(nonCoreAdapter);
-    nonCoreAdapter.invokeExecutor = (ref, subcommand, execOpts) => {
-      const syncRef = isHostedTaskExecutorRef(ref) ? localSyncTaskExecutorRef : ref;
-      return invokeExecutor(syncRef, subcommand, execOpts);
-    };
-  }
   boardAdapter.requestProcessAccumulated = () => {};
   nonCoreAdapter.requestProcessAccumulated = () => {};
 
@@ -2122,14 +2119,13 @@ const runtime = createMultiBoardServerRuntime({
     );
     const boards = [baseCfg];
 
-    demoPrepSetup({
+    prepareCopilotWorkspaceForBoard({
       boardId,
-      cfg,
+      boardConfig: cfg,
+      configDir: BOARD_ROOT,
+      hostConfig: serverConfig,
       cardsDir,
-      boardSetupRoot: boardSetupPaths.setupRoot,
-      aiWorkspaceRoot,
-      baseRef,
-      scratchDir: scratchStorePath,
+      log: logBoardServerLine,
     });
 
     const broker = createWatchpartyBroker();
@@ -2219,169 +2215,6 @@ const runtime = createMultiBoardServerRuntime({
   },
 });
 
-// ---------------------------------------------------------------------------
-// Host setup — prepares Copilot workspaces under the board setup root.
-// ---------------------------------------------------------------------------
-
-function demoPrepSetup({ boardId, cfg, cardsDir, boardSetupRoot, aiWorkspaceRoot, baseRef, scratchDir }) {
-  ensureDirectoryExists(boardSetupRoot, `boards.${boardId}.setup.setupRoot`);
-  void baseRef;
-
-  const workspaceSetup = Array.isArray(cfg?.['copilot-workdirs-setup'])
-    ? cfg['copilot-workdirs-setup'].filter((entry) => entry && typeof entry === 'object')
-    : [];
-
-  if (workspaceSetup.length > 0) {
-    const copilotWorkspaceRoot = aiWorkspaceRoot;
-    fs.mkdirSync(copilotWorkspaceRoot, { recursive: true });
-
-    for (const entry of workspaceSetup) {
-      const copilotRoot = typeof entry['copilot-root'] === 'string' ? entry['copilot-root'].trim() : '';
-      if (!copilotRoot) continue;
-
-      const workspaceRoot = path.join(copilotWorkspaceRoot, copilotRoot);
-      const githubRoot = path.join(workspaceRoot, '.github');
-      const instructionsTarget = path.join(githubRoot, 'copilot-instructions.md');
-      const legacyInstructionsTarget = path.join(workspaceRoot, 'copilot-instructions.md');
-      const agentsTarget = path.join(workspaceRoot, '.github', 'agents');
-      const hooksTarget = path.join(workspaceRoot, '.github', 'hooks');
-      const skillsTarget = path.join(workspaceRoot, '.github', 'skills');
-      const scriptsTarget = path.join(workspaceRoot, '.github', 'scripts');
-      const configTarget = path.join(workspaceRoot, 'config.json');
-
-      fs.mkdirSync(workspaceRoot, { recursive: true });
-      fs.mkdirSync(githubRoot, { recursive: true });
-      fs.mkdirSync(agentsTarget, { recursive: true });
-      fs.mkdirSync(hooksTarget, { recursive: true });
-      fs.mkdirSync(skillsTarget, { recursive: true });
-      fs.mkdirSync(scriptsTarget, { recursive: true });
-
-      const logCopiedFiles = (label, dirPath, copiedCount) => {
-        logBoardServerLine(
-          `copilot workspace "${copilotRoot}" ${label} dir: ${dirPath} (${copiedCount} files copied)`,
-        );
-      };
-
-      const instructionDirs = Array.isArray(entry.instructionsDirs) ? entry.instructionsDirs : [];
-      const instructionParts = [];
-      for (const dir of instructionDirs) {
-        const resolvedDir = resolveFromConfig(dir);
-        if (!resolvedDir || !fs.existsSync(resolvedDir)) {
-          logCopiedFiles('instructionsDirs', resolvedDir, 0);
-          continue;
-        }
-        const files = listFilesInDir(resolvedDir);
-        for (const filePath of files) {
-          instructionParts.push(fs.readFileSync(filePath, 'utf-8').trimEnd());
-        }
-        logCopiedFiles('instructionsDirs', resolvedDir, files.length);
-      }
-
-      if (instructionParts.length > 0) {
-        fs.writeFileSync(instructionsTarget, instructionParts.join('\n===============\n') + '\n', 'utf-8');
-        fs.rmSync(legacyInstructionsTarget, { force: true });
-      } else {
-        fs.rmSync(instructionsTarget, { force: true });
-        fs.rmSync(legacyInstructionsTarget, { force: true });
-      }
-
-      const agentsDirs = Array.isArray(entry.agentsDirs) ? entry.agentsDirs : [];
-      const resolvedAgentsDirs = agentsDirs
-        .map((dir) => resolveFromConfig(dir))
-        .filter(Boolean);
-      syncFlatFilesIntoDir(agentsTarget, resolvedAgentsDirs);
-      for (const dir of agentsDirs) {
-        const resolvedDir = resolveFromConfig(dir);
-        if (!resolvedDir || !fs.existsSync(resolvedDir)) {
-          logCopiedFiles('agentsDirs', resolvedDir, 0);
-          continue;
-        }
-        const files = listFilesRecursive(resolvedDir);
-        logCopiedFiles('agentsDirs', resolvedDir, files.length);
-      }
-
-      const agentsHooks = Array.isArray(entry.agentsHooks) ? entry.agentsHooks : [];
-      const resolvedAgentsHooks = agentsHooks
-        .map((dir) => resolveFromConfig(dir))
-        .filter(Boolean);
-      syncFlatFilesIntoDir(hooksTarget, resolvedAgentsHooks);
-      for (const dir of agentsHooks) {
-        const resolvedDir = resolveFromConfig(dir);
-        if (!resolvedDir || !fs.existsSync(resolvedDir)) {
-          logCopiedFiles('agentsHooks', resolvedDir, 0);
-          continue;
-        }
-        const files = listFilesRecursive(resolvedDir);
-        logCopiedFiles('agentsHooks', resolvedDir, files.length);
-      }
-
-      const agentsSkills = Array.isArray(entry.agentsSkills) ? entry.agentsSkills : [];
-      const resolvedAgentsSkills = agentsSkills
-        .map((dir) => resolveFromConfig(dir))
-        .filter(Boolean);
-      syncRecursiveFilesIntoDir(skillsTarget, resolvedAgentsSkills);
-      for (const dir of agentsSkills) {
-        const resolvedDir = resolveFromConfig(dir);
-        if (!resolvedDir || !fs.existsSync(resolvedDir)) {
-          logCopiedFiles('agentsSkills', resolvedDir, 0);
-          continue;
-        }
-        const files = listFilesRecursive(resolvedDir);
-        logCopiedFiles('agentsSkills', resolvedDir, files.length);
-      }
-
-      const copyScriptDirs = Array.isArray(entry.copyScripts)
-        ? entry.copyScripts
-            .map((dir) => resolveFromConfig(dir))
-            .filter(Boolean)
-        : [];
-      logBoardServerLine(
-        `copilot workspace "${copilotRoot}" copyScripts: ${copyScriptDirs.length > 0 ? copyScriptDirs.join(', ') : '(none)'}`,
-      );
-      syncFlatFilesIntoDir(scriptsTarget, copyScriptDirs);
-      fs.writeFileSync(
-        configTarget,
-        `${JSON.stringify({
-          board_id: boardId,
-          mcp_server_url: resolveLiveboardsMcpServerUrl(),
-          scratch_dir: scratchDir,
-        }, null, 2)}\n`,
-        'utf8',
-      );
-      for (const scriptsDir of copyScriptDirs) {
-        if (!scriptsDir || !fs.existsSync(scriptsDir)) {
-          logCopiedFiles('copyScripts', scriptsDir, 0);
-          continue;
-        }
-        let copiedCount = 0;
-        for (const fileName of fs.readdirSync(scriptsDir)) {
-          const sourcePath = path.join(scriptsDir, fileName);
-          const stat = fs.statSync(sourcePath);
-          if (!stat.isFile()) continue;
-          copiedCount += 1;
-        }
-        logCopiedFiles('copyScripts', scriptsDir, copiedCount);
-      }
-    }
-    return;
-  }
-
-  if (!cardsDir) return;
-
-  const srcDir = path.dirname(cardsDir);
-  const agentInstructionFiles = ['agent-instructions.md', 'agent-instructions-cardlayout.md'];
-  const parts = [];
-  for (const fname of agentInstructionFiles) {
-    const fpath = path.join(srcDir, fname);
-    if (fs.existsSync(fpath)) parts.push(fs.readFileSync(fpath, 'utf-8').trimEnd());
-  }
-  if (parts.length > 0) {
-    const githubRoot = path.join(boardSetupRoot, '.github');
-    fs.mkdirSync(githubRoot, { recursive: true });
-    fs.writeFileSync(path.join(githubRoot, 'copilot-instructions.md'), parts.join('\n\n') + '\n', 'utf-8');
-    fs.rmSync(path.join(boardSetupRoot, 'copilot-instructions.md'), { force: true });
-  }
-}
 
 function jsonReply(res, status, payload) {
   const body = JSON.stringify(payload);
