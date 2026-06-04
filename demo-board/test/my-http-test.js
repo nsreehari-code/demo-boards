@@ -701,6 +701,14 @@ async function main() {
     if (!chatSseClientId) {
       chatSseClientId = `hosted-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     }
+    if (chatSseWorker && !sseState.initialPayload) {
+      try {
+        await chatSseWorker.terminate();
+      } catch {
+        // Best-effort worker teardown before reconnect.
+      }
+      chatSseWorker = null;
+    }
     if (!chatSseWorker) {
       chatSseWorker = new Worker(SSE_WORKER_SCRIPT, {
         workerData: { sseUrl: `${API_BASE}/sse?clientId=${encodeURIComponent(chatSseClientId)}` },

@@ -49,6 +49,9 @@ const DEBUG_LOG_FILE = DEBUG_FILE_OVERRIDE
   || path.join(BOARD_LOGS_DIR, 'assistant-debug.jsonl');
 const agentOutputFile = watchPartyFilesForChatDir ? resolveAgentOutputFilePath(watchPartyFilesForChatDir, cardId) : '';
 const agentWatchpartyCardDir = watchPartyFilesForChatDir ? resolveAgentWatchpartyCardDir(watchPartyFilesForChatDir, cardId) : '';
+const scratchDir = boardSetupRoot
+  ? path.join(boardSetupRoot, 'scratch')
+  : path.join(BOARD_LOGS_DIR, 'scratch');
 
 function normalizeWorkspaceStem(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -488,23 +491,19 @@ async function runCopilotWithValidationRetries(prompt, workingDir, cardIdValue) 
 }
 
 requireRequiredStrings({
-  baseRef,
   cardId,
   logId,
   turnId,
   aiWorkspaceRoot,
-  cardStoreRef,
-  scratchStoreRef,
+  boardSetupRoot,
 }, 'assistant');
 
 appendDebug('assistant:start', {
   boardId,
   cardId,
   turnId,
-  baseRef,
   aiWorkspaceRoot,
-  cardStoreRef,
-  scratchStoreRef,
+  boardSetupRoot,
   scratchDir,
   chatCopilotTimeoutMs,
 });
