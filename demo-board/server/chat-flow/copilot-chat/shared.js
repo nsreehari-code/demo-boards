@@ -1,9 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { parseRef, serializeRef } from 'yaml-flow/board-worker-adapter';
 
 const DEFAULT_MCP_SERVER_URL = 'http://127.0.0.1:7801/mcp';
@@ -39,7 +36,19 @@ export function resolveAssistantDebugFile() {
   return value;
 }
 
-function resolveLiveboardsMcpServerUrl() {
+function sanitizePathToken(value, fallback = 'unknown') {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || fallback;
+}
+
+export function resolveBoardLogsDir(boardId) {
+  return path.join(BOARD_ROOT, 'logs', sanitizePathToken(boardId, 'board'));
+}
+
+function resolveMcpServerUrl(explicitUrl = '') {
+  if (typeof explicitUrl === 'string' && explicitUrl.trim()) {
+    return explicitUrl.trim();
+  }
   const envOverride = typeof process.env.DEMO_BOARDS_MCP_SERVER_URL === 'string'
     ? process.env.DEMO_BOARDS_MCP_SERVER_URL.trim()
     : '';
@@ -47,6 +56,32 @@ function resolveLiveboardsMcpServerUrl() {
     ? serverConfig.mcpServerUrl.trim()
     : '';
   return envOverride || configuredUrl || DEFAULT_MCP_SERVER_URL;
+}
+
+function normalizeToolNameForServer(toolName, mcpServerUrl) {
+  const normalizedToolName = typeof toolName === 'string' ? toolName.trim() : '';
+  if (!normalizedToolName) {
+    return normalizedToolName;
+  }
+  if (!normalizedToolName.startsWith('liveboards.')) {
+    return normalizedToolName;
+  }
+
+  const normalizedUrl = typeof mcpServerUrl === 'string' ? mcpServerUrl.trim() : '';
+  if (!normalizedUrl) {
+    return normalizedToolName;
+  }
+
+  try {
+    const parsedUrl = new URL(normalizedUrl);
+    if (/\/api\/boards\/[^/]+\/mcp(?:-controlplane)?$/i.test(parsedUrl.pathname)) {
+      return normalizedToolName.slice('liveboards.'.length);
+    }
+  } catch {
+    return normalizedToolName;
+  }
+
+  return normalizedToolName;
 }
 
 function resolveFsPathRef(ref, fieldName) {
@@ -99,39 +134,21 @@ function appendRequiredLogId(args, logId, contextLabel) {
   };
 }
 
-export async function callLiveboardsTool(toolName, args = {}) {
-  const transport = new StreamableHTTPClientTransport(new URL(resolveLiveboardsMcpServerUrl()));
-  const client = new Client({ name: 'demo-board-chat-flow', version: '0.1.0' }, { capabilities: {} });
-
-  try {
-    await client.connect(transport);
-    const result = await client.callTool({ name: toolName, arguments: args });
-    if (result?.isError) {
-      const errorText = Array.isArray(result?.content)
-        ? result.content.map((entry) => (typeof entry?.text === 'string' ? entry.text : '')).join('')
-        : '';
-      throw new Error(errorText || `${toolName} failed`);
-    }
-
-    if (result && Object.prototype.hasOwnProperty.call(result, 'structuredContent')) {
-      return result.structuredContent;
-    }
-
-    const text = Array.isArray(result?.content)
-      ? result.content.map((entry) => (typeof entry?.text === 'string' ? entry.text : '')).join('')
-      : '';
-    if (!text) {
-      return null;
-    }
-    try {
-      return JSON.parse(text);
-    } catch {
-      return text;
-    }
-  } finally {
-    try { await client.close(); } catch {}
-    try { await transport.close(); } catch {}
+export async function callLiveboardsTool(toolName, args = {}, options = {}) {
+  const mcpServerUrl = resolveMcpServerUrl(options?.mcpServerUrl);
+  const response = await fetch(mcpServerUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool: normalizeToolNameForServer(toolName, mcpServerUrl), args }),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const errorText = payload && typeof payload === 'object' && typeof payload.error === 'string'
+      ? payload.error
+      : `${toolName} failed`;
+    throw new Error(errorText);
   }
+  return payload;
 }
 
 export async function readChatMessagesViaMcp(boardId, cardId, options = {}) {
@@ -146,7 +163,7 @@ export async function readChatMessagesViaMcp(boardId, cardId, options = {}) {
       ? { tail_turns_before_id: options.tailTurnsBeforeId.trim() }
       : {}),
   }, options?.logId, 'liveboards chat read');
-  const result = await callLiveboardsTool('liveboards.inspect.chat-messages-on-cards', args);
+  const result = await callLiveboardsTool('liveboards.inspect.chat-messages-on-cards', args, options);
   if (result?.status !== 'success') {
     throw new Error(`liveboards.inspect.chat-messages-on-cards returned unexpected payload: ${JSON.stringify(result)}`);
   }
@@ -162,7 +179,7 @@ export async function readAttachmentTextViaMcp(boardId, cardId, fileIndex, optio
   const result = await callLiveboardsTool('liveboards.inspect.file-contents', appendRequiredLogId({
     card_id: cardId,
     file_idx: fileIndex,
-  }, options?.logId, 'liveboards attachment read'));
+  }, options?.logId, 'liveboards attachment read'), options);
   const resource = Array.isArray(result)
     ? result.find((entry) => entry?.type === 'resource' && typeof entry?.resource?.blob === 'string')
     : null;
@@ -185,7 +202,7 @@ export async function stageAssistantReplyViaMcp(boardId, cardId, turnId, text, f
     turn_id: turnId,
     text,
     files: Array.isArray(files) ? files : [],
-  }, options?.logId, 'liveboards assistant reply stage'));
+  }, options?.logId, 'liveboards assistant reply stage'), options);
   if (result?.status !== 'success') {
     throw new Error(`liveboards.stage-ai-response-and-any-attachments returned unexpected payload: ${JSON.stringify(result)}`);
   }
@@ -429,107 +446,6 @@ function inferDisplayNameFromStagedFileName(fileName) {
   return match?.[1] || fileName;
 }
 
-function collectStagedAttachmentPayloads(containerDir) {
-  return listStagedAttachmentFiles(containerDir).map((fileName) => {
-    const displayName = inferDisplayNameFromStagedFileName(fileName);
-    const text = fs.readFileSync(path.join(containerDir, fileName), 'utf8');
-    return { file_name: displayName, content_type: inferMimeTypeFromFileName(displayName), text };
-  });
-}
-
-export function createFinalResponseContainer(scratchStoreRef, cardId, scopeName = 'assistant-final-response') {
-  requireRequiredStrings({ scratchStoreRef, cardId }, 'final response container');
-  const scratchDir = resolveStoreDir(scratchStoreRef, 'scratchStoreRef');
-  const containerDir = path.join(scratchDir, scopeName, cardId, randomUUID());
-  fs.mkdirSync(containerDir, { recursive: true });
-  return {
-    containerDir,
-    responseFilePath: path.join(containerDir, FINAL_RESPONSE_FILE_NAME),
-  };
-}
-
-export function clearFinalResponseContainer(containerDir) {
-  try {
-    if (!fs.existsSync(containerDir)) {
-      return;
-    }
-    fs.rmSync(containerDir, { recursive: true, force: true });
-
-    let parentDir = path.dirname(containerDir);
-    for (let depth = 0; depth < 2; depth += 1) {
-      if (!parentDir || !fs.existsSync(parentDir)) {
-        break;
-      }
-      if (fs.readdirSync(parentDir).length > 0) {
-        break;
-      }
-      fs.rmSync(parentDir, { recursive: true, force: true });
-      parentDir = path.dirname(parentDir);
-    }
-  } catch {}
-}
-
-export function stageFinalResponsePayload(containerDir, payload) {
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-    throw new Error('final response payload must be an object');
-  }
-
-  requireNonEmptyString(payload.text, 'text', 'final response payload');
-  const files = Array.isArray(payload.files) ? payload.files : [];
-  fs.mkdirSync(containerDir, { recursive: true });
-
-  const responseFilePath = path.join(containerDir, FINAL_RESPONSE_FILE_NAME);
-  fs.writeFileSync(responseFilePath, payload.text, 'utf8');
-
-  const stagedFiles = files.map((fileEntry, index) => {
-    const fileName = pickStagedFileName(index, fileEntry);
-    const filePath = path.join(containerDir, fileName);
-    fs.writeFileSync(filePath, readFileEntryContent(fileEntry), 'utf8');
-    return {
-      fileName,
-      filePath,
-    };
-  });
-
-  return {
-    responseFilePath,
-    stagedFiles,
-  };
-}
-
-export function readStagedFinalResponse(responseFilePath) {
-  try {
-    if (!fs.existsSync(responseFilePath)) {
-      return '';
-    }
-
-    const stagedText = fs.readFileSync(responseFilePath, 'utf-8');
-    return stagedText.trim().length > 0 ? stagedText : '';
-  } catch {
-    return '';
-  }
-}
-
-export async function publishFinalResponseFromContainer({
-  boardId = '',
-  cardId = '',
-  containerDir = '',
-  replyText = '',
-  timeoutMs = 30000,
-  turnId = '',
-  logId = '',
-} = {}) {
-  requireRequiredStrings({ boardId, cardId, containerDir, replyText, turnId }, 'final response publish');
-
-  const files = collectStagedAttachmentPayloads(containerDir);
-  await stageAssistantReplyViaMcp(boardId, cardId, turnId, replyText, files, { logId, timeoutMs });
-  clearFinalResponseContainer(containerDir);
-
-  return {
-    publishedAttachmentCount: files.length,
-  };
-}
-
 export function resolveStoreDir(storeRef, fieldName) {
   return resolveFsPathRef(storeRef, fieldName);
 }
@@ -558,12 +474,64 @@ async function callBoardControlplaneTool({ boardServerPort, boardId, tool, args 
   return payload;
 }
 
+async function callBoardControlplaneToolByUrl({ mcpControlplaneUrl, tool, args = {} }) {
+  if (!mcpControlplaneUrl || !tool) {
+    throw new Error('board controlplane call requires mcpControlplaneUrl and tool');
+  }
+  const res = await fetch(mcpControlplaneUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool, args }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(typeof payload?.error === 'string' && payload.error.trim() ? payload.error : `${tool} failed`);
+  }
+  return payload;
+}
+
+function boardMcpControlplaneUrlFromMcpServerUrl(mcpServerUrl, boardId) {
+  if (typeof mcpServerUrl !== 'string' || !mcpServerUrl.trim() || !boardId) {
+    return '';
+  }
+  try {
+    const parsed = new URL(mcpServerUrl.trim());
+    parsed.pathname = parsed.pathname.replace(/\/mcp(?:-controlplane)?$/, '/mcp-controlplane');
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
 export async function readCardPrivateFieldViaApi({ boardServerPort, boardId, cardId, fieldName }) {
   if (!boardServerPort || !boardId || !cardId || !fieldName) return undefined;
   try {
     const payload = await callBoardControlplaneTool({
       boardServerPort,
       boardId,
+      tool: 'getstate.card-private',
+      args: {
+        board_id: boardId,
+        card_id: cardId,
+        key: fieldName,
+      },
+    });
+    if (payload?.status !== 'success' || payload?.data?.exists !== true) {
+      return undefined;
+    }
+    return payload.data.value;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function readCardPrivateFieldViaMcpControlplane({ mcpServerUrl, boardId, cardId, fieldName }) {
+  if (!mcpServerUrl || !boardId || !cardId || !fieldName) return undefined;
+  const mcpControlplaneUrl = boardMcpControlplaneUrlFromMcpServerUrl(mcpServerUrl, boardId);
+  if (!mcpControlplaneUrl) return undefined;
+  try {
+    const payload = await callBoardControlplaneToolByUrl({
+      mcpControlplaneUrl,
       tool: 'getstate.card-private',
       args: {
         board_id: boardId,

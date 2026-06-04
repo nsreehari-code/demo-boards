@@ -19,7 +19,7 @@ import {
   requireRequiredStrings,
   resolveAssistantDebugEnabled,
   resolveAssistantDebugFile,
-  resolveStoreDir,
+  resolveBoardLogsDir,
   readCardPrivateFieldViaApi,
   writeCardPrivateFieldViaApi,
 } from '../copilot-chat/shared.js';
@@ -33,7 +33,6 @@ const CHAT_FLOW_DIR = path.resolve(HERE, '..');
 const INSTRUCTIONS_DIR = path.join(CHAT_FLOW_DIR, 'instructions');
 const SKILLS_DIR = path.join(CHAT_FLOW_DIR, 'skills');
 const INVOKE_PY = path.join(HERE, 'invoke.py');
-const SERVER_CONFIG_FILE = path.resolve(HERE, '..', '..', '..', 'server-config.json');
 
 const extra = readJsonStdin();
 const {
@@ -41,9 +40,10 @@ const {
   cardId = '',
   logId = '',
   turnId = '',
-  baseRef = '',
+  serverUrl = '',
+  mcpServerUrl = '',
   aiWorkspaceRoot = '',
-  scratchStoreRef = '',
+  boardSetupRoot = '',
   watchPartyFilesForChatDir = '',
   foundryEndpoint = '',
   foundryChatAgentId = '',
@@ -57,9 +57,34 @@ const chatTimeoutMs = Number.isFinite(Number(rawTimeoutMs)) && Number(rawTimeout
 
 const DEBUG_FLAG = resolveAssistantDebugEnabled();
 const DEBUG_FILE_OVERRIDE = resolveAssistantDebugFile();
-const scratchDir = scratchStoreRef ? resolveStoreDir(scratchStoreRef, 'scratchStoreRef') : '';
+const BOARD_LOGS_DIR = resolveBoardLogsDir(boardId);
 const DEBUG_LOG_FILE = DEBUG_FILE_OVERRIDE
-  || (scratchDir ? path.join(scratchDir, 'assistant-debug.jsonl') : '');
+  || path.join(BOARD_LOGS_DIR, 'foundry-assistant-debug.jsonl');
+
+function resolvePythonExecutable() {
+  const explicit = typeof process.env.PYTHON_EXECUTABLE === 'string'
+    ? process.env.PYTHON_EXECUTABLE.trim()
+    : '';
+  if (explicit) {
+    return explicit;
+  }
+
+  const virtualEnv = typeof process.env.VIRTUAL_ENV === 'string'
+    ? process.env.VIRTUAL_ENV.trim()
+    : '';
+  if (virtualEnv) {
+    const candidates = process.platform === 'win32'
+      ? [path.join(virtualEnv, 'Scripts', 'python.exe')]
+      : [path.join(virtualEnv, 'bin', 'python3'), path.join(virtualEnv, 'bin', 'python')];
+    for (const candidate of candidates) {
+      if (candidate && fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return process.platform === 'win32' ? 'python' : 'python3';
+}
 
 function appendDebug(stage, details = {}) {
   if (!DEBUG_FLAG || !DEBUG_LOG_FILE) return;
@@ -73,25 +98,16 @@ function appendDebug(stage, details = {}) {
   } catch {}
 }
 
-function loadMcpServerUrl() {
+function resolveBoardServerPort(explicitServerUrl) {
   try {
-    const cfg = JSON.parse(fs.readFileSync(SERVER_CONFIG_FILE, 'utf-8'));
-    const url = typeof cfg.mcpServerUrl === 'string' ? cfg.mcpServerUrl.trim() : '';
-    if (!url) throw new Error('server-config.json mcpServerUrl is not set');
-    return url;
-  } catch (err) {
-    throw new Error(`Cannot read mcpServerUrl from server-config.json: ${err?.message || err}`);
-  }
-}
-
-function loadBoardServerPort() {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(SERVER_CONFIG_FILE, 'utf-8'));
-    const port = Number(cfg.port);
-    if (!Number.isFinite(port) || port <= 0) throw new Error('server-config.json port is not a positive number');
+    const parsedUrl = new URL(String(explicitServerUrl || '').trim());
+    const port = Number(parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80));
+    if (!Number.isFinite(port) || port <= 0) {
+      throw new Error('serverUrl port is not a positive number');
+    }
     return port;
   } catch (err) {
-    throw new Error(`Cannot read port from server-config.json: ${err?.message || err}`);
+    throw new Error(`Cannot resolve board server port from serverUrl: ${err?.message || err}`);
   }
 }
 
@@ -245,7 +261,8 @@ requireRequiredStrings({
   cardId,
   logId,
   turnId,
-  scratchStoreRef,
+  serverUrl,
+  mcpServerUrl,
   foundryEndpoint,
   foundryChatAgentId,
 }, 'foundry-chat assistant');
@@ -276,7 +293,7 @@ if (outputFile) {
 }
 
 const FOUNDRY_THREAD_PRIVATE_KEY = 'chat.foundry_thread_id';
-const boardServerPort = loadBoardServerPort();
+const boardServerPort = resolveBoardServerPort(serverUrl);
 const existingThreadId = await (async () => {
   try {
     const value = await readCardPrivateFieldViaApi({
@@ -288,7 +305,7 @@ const existingThreadId = await (async () => {
     return typeof value === 'string' && value.trim() ? value.trim() : '';
   } catch { return ''; }
 })();
-const mcpServerUrl = loadMcpServerUrl();
+const normalizedMcpServerUrl = mcpServerUrl.trim();
 
 const promptChatMessages = await loadPromptChatMessages();
 const transcript = formatChatTranscript(promptChatMessages);
@@ -312,7 +329,7 @@ const invokeRequest = {
   board_id: boardId,
   log_id: logId,
   turn_id: turnId,
-  mcp_server_url: mcpServerUrl,
+  mcp_server_url: normalizedMcpServerUrl,
   exposed_mcp_tool_prefixes: Array.isArray(foundryChatExposedMcpToolPrefixes)
     ? foundryChatExposedMcpToolPrefixes
         .filter((entry) => typeof entry === 'string' && entry.trim())
@@ -323,7 +340,8 @@ const invokeRequest = {
   timeout_seconds: Math.floor(chatTimeoutMs / 1000),
 };
 
-const python = process.platform === 'win32' ? 'python' : 'python3';
+const python = resolvePythonExecutable();
+appendDebug('foundry-assistant:pythonResolved', { python });
 
 await new Promise((resolve, reject) => {
   const child = spawn(python, [INVOKE_PY], {

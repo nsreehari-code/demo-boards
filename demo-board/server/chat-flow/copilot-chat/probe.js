@@ -3,13 +3,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  createFinalResponseContainer,
-  publishFinalResponseFromContainer,
+  readEnhancedChatMessages,
   readJsonStdin,
   requireRequiredStrings,
-  resolveCopilotWorkspaceDir,
   stageAssistantReplyViaMcp,
-  stageFinalResponsePayload,
 } from './shared.js';
 import { getAgentOutputFileName } from './watchparty.js';
 
@@ -19,14 +16,19 @@ const PROBE_ATTACHMENT_PREFIX = '[attach]';
 function normalizeProbeMessageText(text) {
   const trimmed = typeof text === 'string' ? text.trim() : '';
   const markerLength = PROBE_MARKER.length;
+  let normalized = trimmed;
   if (
     trimmed.length >= (markerLength * 2)
     && trimmed.startsWith(PROBE_MARKER)
     && trimmed.endsWith(PROBE_MARKER)
   ) {
-    return trimmed.slice(markerLength, trimmed.length - markerLength).trim();
+    normalized = trimmed.slice(markerLength, trimmed.length - markerLength).trim();
   }
-  return trimmed;
+  const stemMatch = /^([A-Za-z0-9_-]+)__(.*)$/s.exec(normalized);
+  if (stemMatch) {
+    return stemMatch[2].trim();
+  }
+  return normalized;
 }
 
 function buildProbeResponse(text) {
@@ -53,35 +55,61 @@ function buildProbeResponse(text) {
   };
 }
 
+async function resolveProbeUserText(options) {
+  const inlineUserText = typeof options?.userText === 'string' ? options.userText.trim() : '';
+  if (inlineUserText) {
+    return inlineUserText;
+  }
+
+  const messages = await readEnhancedChatMessages(options.boardId, options.cardId, 30000, {
+    turnId: options.turnId,
+    logId: options.logId,
+    mcpServerUrl: options.mcpServerUrl,
+  });
+
+  if (typeof options?.lastChatEntryId === 'string' && options.lastChatEntryId.trim()) {
+    const exactMatch = messages.find((message) => (
+      message
+      && message.id === options.lastChatEntryId.trim()
+      && message.role === 'user'
+      && typeof message.text === 'string'
+      && message.text.trim()
+    ));
+    if (exactMatch) {
+      return exactMatch.text.trim();
+    }
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === 'user' && typeof message.text === 'string' && message.text.trim()) {
+      return message.text.trim();
+    }
+  }
+
+  throw new Error('Missing required probe input: userText');
+}
+
 const extra = readJsonStdin();
 const {
   boardId = '',
-  baseRef = '',
+  mcpServerUrl = '',
+  serverUrl = '',
   aiWorkspaceRoot = '',
-  cardStoreRef = '',
   cardId = '',
   logId = '',
-  scratchStoreRef = '',
   turnId = '',
   userText = '',
+  lastChatEntryId = '',
   watchPartyFilesForChatDir = '',
 } = extra;
 
 requireRequiredStrings({
-  aiWorkspaceRoot,
-  cardStoreRef,
   boardId,
   cardId,
   logId,
-  userText,
   watchPartyFilesForChatDir,
 }, 'probe');
-
-function canUseManagedFinalResponseFlow() {
-  return [boardId, scratchStoreRef, turnId].every(
-    (value) => typeof value === 'string' && value.trim().length > 0,
-  );
-}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -106,34 +134,26 @@ async function writeWatchpartyFrames(dirPath, cId, replyText) {
 }
 
 try {
-  const workingDir = resolveCopilotWorkspaceDir(aiWorkspaceRoot, cardStoreRef, cardId, 'probe');
-  const probeResponse = buildProbeResponse(userText);
+  const resolvedUserText = await resolveProbeUserText({
+    boardId,
+    cardId,
+    turnId,
+    logId,
+    mcpServerUrl,
+    userText,
+    lastChatEntryId,
+  });
+  const probeResponse = buildProbeResponse(resolvedUserText);
   await writeWatchpartyFrames(watchPartyFilesForChatDir, cardId, probeResponse.replyText);
-  if (canUseManagedFinalResponseFlow()) {
-    const { containerDir } = createFinalResponseContainer(scratchStoreRef, cardId, 'probe-final-response');
-    stageFinalResponsePayload(containerDir, {
-      text: probeResponse.replyText,
-      files: probeResponse.files,
-    });
-    await publishFinalResponseFromContainer({
-      boardId,
-      cardId,
-      containerDir,
-      replyText: probeResponse.replyText,
-      turnId,
-      logId,
-    });
-  } else {
-    await stageAssistantReplyViaMcp(
-      boardId,
-      cardId,
-      turnId,
-      probeResponse.replyText,
-      probeResponse.files,
-      { logId },
-    );
-  }
-  void workingDir;
+  await sleep(2000);
+  await stageAssistantReplyViaMcp(
+    boardId,
+    cardId,
+    turnId,
+    probeResponse.replyText,
+    probeResponse.files,
+    { logId, mcpServerUrl },
+  );
   // The flow only consumes success or error from this process. Reply text must not be returned here.
   process.stdout.write(JSON.stringify({ assistantHandled: true }));
 } catch (err) {

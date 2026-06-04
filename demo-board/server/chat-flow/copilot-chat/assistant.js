@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import {
   readChatMessagesViaMcp,
   readEnhancedChatMessages,
+  readCardPrivateFieldViaMcpControlplane,
   readJsonStdin,
   requireRequiredStrings,
   resolveAssistantDebugEnabled,
   resolveAssistantDebugFile,
-  resolveCopilotWorkspaceDir,
-  resolveStoreDir,
+  resolveBoardLogsDir,
   stageAssistantReplyViaMcp,
 } from './shared.js';
 import {
@@ -28,11 +27,11 @@ const {
   cardId = '',
   logId = '',
   turnId = '',
-  baseRef = '',
   aiWorkspaceRoot = '',
-  cardStoreRef = '',
-  scratchStoreRef = '',
+  boardSetupRoot = '',
+  mcpServerUrl = '',
   watchPartyFilesForChatDir = '',
+  copilotCustomWorkspaceStems = [],
   chatCopilotTimeoutMs: rawChatCopilotTimeoutMs = 300000,
 } = extra;
 
@@ -41,16 +40,48 @@ const chatCopilotTimeoutMs = Number.isFinite(Number(rawChatCopilotTimeoutMs)) &&
   : 300000;
 const bypassCopilotForTest = process.env.DEMO_T3A_BYPASS === '1';
 const ENABLE_DEBUG_LOGGING = typeof process.env.ENABLE_DEBUG_LOGGING === 'string' ? process.env.ENABLE_DEBUG_LOGGING.trim() : '';
-const DEBUG_LOG_PATH = ENABLE_DEBUG_LOGGING || path.join(os.tmpdir(), 'demo-board-t3a-assistant-debug.log');
 
 const DEBUG_FLAG = resolveAssistantDebugEnabled();
 const DEBUG_FILE_OVERRIDE = resolveAssistantDebugFile();
-
-const scratchDir = scratchStoreRef ? resolveStoreDir(scratchStoreRef, 'scratchStoreRef') : '';
+const BOARD_LOGS_DIR = resolveBoardLogsDir(boardId);
+const DEBUG_LOG_PATH = DEBUG_FILE_OVERRIDE || path.join(BOARD_LOGS_DIR, 'copilot-assistant-debug.log');
 const DEBUG_LOG_FILE = DEBUG_FILE_OVERRIDE
-  || (scratchDir ? path.join(scratchDir, 'assistant-debug.jsonl') : '');
+  || path.join(BOARD_LOGS_DIR, 'assistant-debug.jsonl');
 const agentOutputFile = watchPartyFilesForChatDir ? resolveAgentOutputFilePath(watchPartyFilesForChatDir, cardId) : '';
 const agentWatchpartyCardDir = watchPartyFilesForChatDir ? resolveAgentWatchpartyCardDir(watchPartyFilesForChatDir, cardId) : '';
+
+function normalizeWorkspaceStem(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function resolveCopilotWorkspaceDirByStem(aiWorkspaceRootPath, workspaceStem, contextLabel = 'assistant') {
+  requireRequiredStrings({ aiWorkspaceRoot: aiWorkspaceRootPath, workspaceStem }, contextLabel);
+  if (!fs.existsSync(aiWorkspaceRootPath)) {
+    throw new Error(`Missing required ${contextLabel} input: aiWorkspaceRoot directory`);
+  }
+  const workingDir = path.join(aiWorkspaceRootPath, workspaceStem);
+  if (!fs.existsSync(workingDir)) {
+    throw new Error(`Missing required ${contextLabel} input: copilot workspace ${workspaceStem}`);
+  }
+  return workingDir;
+}
+
+async function resolveWorkspaceStem() {
+  const configuredStems = Array.isArray(copilotCustomWorkspaceStems)
+    ? copilotCustomWorkspaceStems.map((value) => normalizeWorkspaceStem(value)).filter(Boolean)
+    : [];
+  const knownStems = new Set(['default', ...configuredStems]);
+  const privateStem = normalizeWorkspaceStem(await readCardPrivateFieldViaMcpControlplane({
+    mcpServerUrl,
+    boardId,
+    cardId,
+    fieldName: 'copilot-ws',
+  }));
+  if (privateStem && knownStems.has(privateStem)) {
+    return privateStem;
+  }
+  return 'default';
+}
 
 function DBG_LOG(stage, details = {}) {
   if (!ENABLE_DEBUG_LOGGING) {
@@ -253,6 +284,7 @@ async function loadPromptChatMessages(currentCardId) {
   const turnScopedMessages = await readEnhancedChatMessages(boardId, currentCardId, 30000, {
     turnId,
     logId,
+    mcpServerUrl,
   });
 
   if (Array.isArray(turnScopedMessages) && turnScopedMessages.length > 0) {
@@ -262,6 +294,7 @@ async function loadPromptChatMessages(currentCardId) {
   return readChatMessagesViaMcp(boardId, currentCardId, {
     logId,
     turnId,
+    mcpServerUrl,
   });
 }
 
@@ -418,6 +451,7 @@ async function readAssistantMessageForTurn(cardIdValue) {
   const turnMessages = await readChatMessagesViaMcp(boardId, cardIdValue, {
     logId,
     turnId,
+    mcpServerUrl,
   });
   return findAssistantMessage(turnMessages);
 }
@@ -478,17 +512,18 @@ DBG_LOG('assistant:start', {
   boardId,
   cardId,
   turnId,
-  scratchStoreRef,
   aiWorkspaceRoot,
   enableDebugLogging: ENABLE_DEBUG_LOGGING,
 });
 
-const workingDir = resolveCopilotWorkspaceDir(aiWorkspaceRoot, cardStoreRef, cardId, 'assistant');
+const workspaceStem = await resolveWorkspaceStem();
+const workingDir = resolveCopilotWorkspaceDirByStem(aiWorkspaceRoot, workspaceStem, 'assistant');
 const promptChatMessages = await loadPromptChatMessages(cardId);
 const turnTranscript = formatChatTranscript(promptChatMessages, cardId);
 const prompt = buildPrompt(cardId, logId, turnTranscript);
 appendDebug('assistant:promptBuilt', {
   workingDir,
+  workspaceStem,
   promptMessageCount: Array.isArray(promptChatMessages) ? promptChatMessages.length : 0,
   historyDumpLength: turnTranscript.length,
   promptLength: prompt.length,
@@ -501,7 +536,7 @@ try {
     appendDebug('assistant:testBypass', {
       replyText: 'paris',
     });
-    await stageAssistantReplyViaMcp(boardId, cardId, turnId, 'paris', [], { logId });
+    await stageAssistantReplyViaMcp(boardId, cardId, turnId, 'paris', [], { logId, mcpServerUrl });
     process.stdout.write(JSON.stringify({ assistantHandled: true, bypassed: true }));
     process.exit(0);
   }

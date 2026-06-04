@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
 import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
@@ -10,17 +12,306 @@ import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js
 import { loadFirebaseHostConfig, resolveConfigRelativePath } from '../firebase-adapter/load-config.js';
 import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
 import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
-import { loadLegacyBoardChatRuntime } from '../host-shared/chat-agent-handler/legacy-chat-runtime.js';
+import { buildHostedChatAgentRuntime } from '../host-shared/chat-agent-handler/execute-chat-agent-request.js';
 import { createLogger } from '../host-shared/logging.js';
+import { deriveCardIdFromLogId, resolveAgentToolsLogFilePath } from '../../chat-flow/copilot-chat/watchparty.js';
 import {
-  createHostedImmediateTaskExecutorHook,
   createHostedImmediateTaskExecutorRef,
   loadTaskExecutorModule,
 } from '../host-shared/worker-modules/task-executor-module.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DEFAULT_CONFIG_PATH = path.resolve(__dirname, 'controlface-server.config.json');
+const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.config.json');
+const BOARD_ROOT = path.resolve(__dirname, '../../..');
+const CONTROLFACE_LOG_PATH = path.join(BOARD_ROOT, 'logs', 'control-face.log');
+
+function normalizeText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function matchBoardRoute(apiBasePrefix, pathname) {
+  const prefix = String(apiBasePrefix || '').replace(/\/$/, '');
+  const pattern = new RegExp(`^${escapeRegex(prefix)}/([^/]+)(?:/|$)`);
+  return pattern.exec(pathname);
+}
+
+function joinParts(parts) {
+  return parts.filter((part) => typeof part === 'string' && part.trim()).join(' ');
+}
+
+function defaultBoardId(boardRuntimes) {
+  return Array.from(boardRuntimes.keys())[0] || '';
+}
+
+function normalizeControlfaceScope(routeKind, boardId, boardRuntimes) {
+  const resolvedBoardId = normalizeText(boardId) || defaultBoardId(boardRuntimes) || 'controlface';
+  if (routeKind === 'healthz') return `${resolvedBoardId}:healthz`;
+  if (routeKind === 'mcp' || routeKind === 'mcp-controlplane' || routeKind === 'mcp-actions') return `${resolvedBoardId}:mcp`;
+  if (routeKind) return `${resolvedBoardId}:${routeKind}`;
+  return `${resolvedBoardId}:api`;
+}
+
+function formatControlfacePickupMessage(req, parsedUrl, details = {}) {
+  const method = normalizeText(req?.method) || 'GET';
+  if (details.routeKind === 'healthz') {
+    return method;
+  }
+  if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions') {
+    return joinParts([method, normalizeText(details.toolName), normalizeText(details.cardId), normalizeText(details.turnId)]);
+  }
+  return joinParts([method, parsedUrl?.pathname || '/']);
+}
+
+function formatControlfaceCompletionMessage(req, parsedUrl, details = {}, statusCode = 0) {
+  const method = normalizeText(req?.method) || 'GET';
+  const status = String(statusCode || 0);
+  if (details.routeKind === 'healthz') {
+    return joinParts([method, status, normalizeText(details.errorMessage)]);
+  }
+  if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions') {
+    return joinParts([method, normalizeText(details.toolName), normalizeText(details.cardId), normalizeText(details.turnId), status, normalizeText(details.errorMessage)]);
+  }
+  return joinParts([method, parsedUrl?.pathname || '/', status, normalizeText(details.errorMessage)]);
+}
+
+function titleCase(text) {
+  return String(text || '')
+    .split(/[._\-\s]+/g)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+    .trim();
+}
+
+function resolveMcpToolSemanticName(toolName) {
+  const normalized = typeof toolName === 'string' ? toolName.trim() : '';
+  if (!normalized) {
+    return 'Unknown MCP Tool';
+  }
+  return titleCase(normalized) || 'Unknown MCP Tool';
+}
+
+function normalizeMcpToolName(toolName) {
+  const normalized = typeof toolName === 'string' ? toolName.trim() : '';
+  if (!normalized) return '';
+  return normalized.replace(/^liveboards\./, '');
+}
+
+function normalizeMcpArgs(body) {
+  if (body?.args && typeof body.args === 'object' && !Array.isArray(body.args)) {
+    return body.args;
+  }
+  if (body?.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments)) {
+    return body.arguments;
+  }
+  return {};
+}
+
+function stripLogIdFromArgs(args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return { strippedArgs: {}, logId: '' };
+  }
+  const { log_id, ...rest } = args;
+  return {
+    strippedArgs: rest,
+    logId: typeof log_id === 'string' ? log_id.trim() : '',
+  };
+}
+
+function stripLogIdFromMcpBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { strippedBody: {}, logId: '' };
+  }
+
+  const strippedBody = { ...body };
+  let logId = '';
+
+  if (body.args && typeof body.args === 'object' && !Array.isArray(body.args)) {
+    const stripped = stripLogIdFromArgs(body.args);
+    strippedBody.args = stripped.strippedArgs;
+    logId = stripped.logId;
+  }
+
+  if (body.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments)) {
+    const stripped = stripLogIdFromArgs(body.arguments);
+    strippedBody.arguments = stripped.strippedArgs;
+    if (!logId) {
+      logId = stripped.logId;
+    }
+  }
+
+  return { strippedBody, logId };
+}
+
+function readMcpArg(args, ...keys) {
+  for (const key of keys) {
+    if (!key) continue;
+    if (Object.prototype.hasOwnProperty.call(args, key)) {
+      return args[key];
+    }
+  }
+  return undefined;
+}
+
+function formatChatHistoryScope(args) {
+  if (readMcpArg(args, 'all-turns', 'allTurns') === true) {
+    return 'across all turns';
+  }
+  const tailTurns = readMcpArg(args, 'tail-turns', 'tailTurns', 'tail');
+  const n = Number.isInteger(tailTurns)
+    ? tailTurns
+    : Number.parseInt(String(tailTurns ?? ''), 10);
+  if (Number.isInteger(n) && n > 0) {
+    return `across the last ${n} message${n === 1 ? '' : 's'}`;
+  }
+  return null;
+}
+
+function joinPhrases(parts) {
+  const filtered = parts.filter((part) => typeof part === 'string' && part.trim().length > 0);
+  if (filtered.length === 0) return '';
+  if (filtered.length === 1) return ` ${filtered[0]}`;
+  if (filtered.length === 2) return ` ${filtered[0]} and ${filtered[1]}`;
+  return ` ${filtered.slice(0, -1).join(', ')} and ${filtered[filtered.length - 1]}`;
+}
+
+function phraseForCard(cardId) {
+  const text = cardId === undefined || cardId === null ? '' : String(cardId).trim();
+  return text ? `for ${text}` : null;
+}
+
+function phraseForFileIdx(idx) {
+  if (idx === undefined || idx === null || idx === '') return null;
+  return `file no. ${idx}`;
+}
+
+function phraseForFileName(name) {
+  const text = name === undefined || name === null ? '' : String(name).trim();
+  return text ? `file '${text}'` : null;
+}
+
+function phraseForAttachments(count) {
+  if (!Number.isInteger(count) || count <= 0) return 'with no attachments';
+  return `with ${count} attachment${count === 1 ? '' : 's'}`;
+}
+
+function formatMcpLogDetails(toolName, body) {
+  const normalizedToolName = normalizeMcpToolName(toolName);
+  const args = normalizeMcpArgs(body);
+  const parts = [];
+  const cardId = readMcpArg(args, 'card_id', 'cardId');
+
+  switch (normalizedToolName) {
+    case 'inspect.board-runtime-status':
+    case 'discover.source-kinds':
+      break;
+    case 'inspect.card-definition-and-runtime':
+    case 'manage.read-card':
+    case 'manage.upsert-card':
+    case 'manage.remove-card':
+    case 'provide-final-reply-to-user':
+      parts.push(phraseForCard(cardId));
+      break;
+    case 'inspect.chat-messages-on-cards':
+      parts.push(phraseForCard(cardId));
+      parts.push(formatChatHistoryScope(args));
+      break;
+    case 'inspect.file-contents':
+      parts.push(phraseForCard(cardId));
+      parts.push(phraseForFileIdx(readMcpArg(args, 'file_idx', 'fileIdx')));
+      break;
+    case 'manage.upload-card-file':
+      parts.push(phraseForCard(cardId));
+      parts.push(phraseForFileName(readMcpArg(args, 'file_name', 'fileName')));
+      break;
+    case 'stage-ai-response-and-any-attachments': {
+      parts.push(phraseForCard(cardId));
+      const files = readMcpArg(args, 'files');
+      const attachmentCount = Array.isArray(files) ? files.length : 0;
+      parts.push(phraseForAttachments(attachmentCount));
+      break;
+    }
+    default:
+      if (normalizedToolName.startsWith('preflight.')) {
+        parts.push(phraseForCard(cardId));
+      }
+      break;
+  }
+
+  return joinPhrases(parts);
+}
+
+function formatWatchpartyToolMessage(phase, toolName, body) {
+  const semanticName = resolveMcpToolSemanticName(toolName);
+  const details = formatMcpLogDetails(toolName, body);
+  return `${phase} '${semanticName}'${details}`;
+}
+
+function appendWatchpartyToolsLog(chatRuntime, logId, phase, toolName, body) {
+  const sanitizedCardId = deriveCardIdFromLogId(logId);
+  if (!sanitizedCardId) {
+    return;
+  }
+
+  const watchPartyFilesForChatDir = typeof chatRuntime?.executionExtra?.watchPartyFilesForChatDir === 'string'
+    ? chatRuntime.executionExtra.watchPartyFilesForChatDir.trim()
+    : '';
+  if (!watchPartyFilesForChatDir) {
+    return;
+  }
+
+  const outputPath = resolveAgentToolsLogFilePath(watchPartyFilesForChatDir, sanitizedCardId);
+  const line = formatWatchpartyToolMessage(phase, toolName, body);
+
+  try {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.appendFileSync(outputPath, `${line}\n`, 'utf8');
+  } catch {
+    // Watchparty tool logging must never block request handling.
+  }
+}
+
+function readRawRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function parseJsonObjectOrEmpty(buffer) {
+  try {
+    const text = Buffer.isBuffer(buffer) ? buffer.toString('utf8') : String(buffer || '');
+    if (!text.trim()) {
+      return {};
+    }
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function createReplayableRequest(req, rawBodyBuffer) {
+  const replayReq = Readable.from(rawBodyBuffer.length > 0 ? [rawBodyBuffer] : []);
+  replayReq.method = req.method;
+  replayReq.url = req.url;
+  replayReq.headers = req.headers;
+  replayReq.httpVersion = req.httpVersion;
+  return replayReq;
+}
+
+function escapeRegex(text) {
+  return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchLoggedMcpRoute(apiBasePrefix, pathname) {
+  const prefix = String(apiBasePrefix || '').replace(/\/$/, '');
+  const pattern = new RegExp(`^${escapeRegex(prefix)}/([^/]+)/(mcp|mcp-controlplane|mcp-actions)$`);
+  return pattern.exec(pathname);
+}
 
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -35,17 +326,24 @@ function sendJson(res, status, payload) {
 }
 
 async function buildBoardRuntimes(hostConfig, adapterServices) {
+  const processLogger = createLogger('controlface', { filePath: CONTROLFACE_LOG_PATH });
   const runtimes = new Map();
   const buildBoardBundle = hostConfig.storageAdapter === 'localfs'
     ? buildLocalFsBoardBundle
     : buildFirebaseBoardBundle;
   for (const [boardId, boardConfig] of Object.entries(hostConfig.boards)) {
     const callbackBaseUrl = `http://${hostConfig.host}:${hostConfig.port}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/mcp-webhooks`;
-    const chatRuntime = loadLegacyBoardChatRuntime(boardId, boardConfig, {
+    const chatRuntime = buildHostedChatAgentRuntime(boardId, boardConfig, {
       serverUrl: `http://${hostConfig.host}:${hostConfig.port}`,
       apiBasePrefix: hostConfig.apiBasePrefix,
+      configDir: hostConfig.configDir,
+      watchparty: hostConfig.watchparty,
+      foundryAgents: hostConfig.foundryAgents,
+      chatFlowTimeoutMs: hostConfig.chatFlowTimeoutMs,
+      chatInvokeRefTimeoutMs: hostConfig.chatInvokeRefTimeoutMs,
+      chatCopilotTimeoutMs: hostConfig.chatCopilotTimeoutMs,
     });
-    const executeTaskExecutorRequest = await loadTaskExecutorModule(
+    await loadTaskExecutorModule(
       boardId,
       boardConfig,
       resolveConfigRelativePath,
@@ -59,15 +357,12 @@ async function buildBoardRuntimes(hostConfig, adapterServices) {
       {
         callbackTransport: createHttpBoardCallbackTransport(callbackBaseUrl),
         configDir: hostConfig.configDir,
-        nonCoreTaskExecutor: createHostedImmediateTaskExecutorHook(
-          executeTaskExecutorRequest,
-          chatRuntime.executionExtra,
-        ),
-        nonCoreTaskExecutorRef: createHostedImmediateTaskExecutorRef(
+        taskExecutorRef: createHostedImmediateTaskExecutorRef(
           boardId,
           boardConfig,
           resolveConfigRelativePath,
           hostConfig.configDir,
+          chatRuntime.executionExtra,
         ),
         resolveConfigRelativePath,
       },
@@ -88,22 +383,39 @@ async function buildBoardRuntimes(hostConfig, adapterServices) {
         },
       },
       executionExtra: chatRuntime.executionExtra,
-      logger: createLogger(`controlface:${boardId}`),
+      logger: processLogger.child(`${boardId}:controlface`),
     });
-    runtimes.set(boardId, runtime);
+    runtimes.set(boardId, { runtime, chatRuntime });
   }
   return runtimes;
 }
 
 async function main() {
-  const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH);
+  const processLogger = createLogger('controlface', { filePath: CONTROLFACE_LOG_PATH });
+  const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'controlface');
   const adapterServices = hostConfig.storageAdapter === 'localfs'
     ? await initializeLocalFsServices(hostConfig.localfs)
     : await initializeFirebaseServices(hostConfig.firebase);
   const boardRuntimes = await buildBoardRuntimes(hostConfig, adapterServices);
 
   const server = http.createServer(async (req, res) => {
+    let requestDetails = null;
+    let requestLogger = processLogger.child('controlface:api');
+    const parsedBaseUrl = new URL(req.url || '/', `http://${hostConfig.host}:${hostConfig.port}`);
+    let completionLogged = false;
+    const logCompletionOnce = () => {
+      if (completionLogged || !requestDetails) {
+        return;
+      }
+      completionLogged = true;
+      requestLogger.info(formatControlfaceCompletionMessage(req, parsedBaseUrl, requestDetails, res.statusCode || 0));
+    };
+
     if (req.method === 'OPTIONS') {
+      requestDetails = {};
+      requestLogger.info(formatControlfacePickupMessage(req, parsedBaseUrl, requestDetails));
+      res.once('finish', logCompletionOnce);
+      res.once('close', logCompletionOnce);
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'content-type,x-file-name',
@@ -113,8 +425,13 @@ async function main() {
       return;
     }
 
-    const parsedUrl = new URL(req.url || '/', `http://${hostConfig.host}:${hostConfig.port}`);
+    const parsedUrl = parsedBaseUrl;
     if (req.method === 'GET' && parsedUrl.pathname === '/healthz') {
+      requestDetails = { routeKind: 'healthz' };
+      requestLogger = processLogger.child(normalizeControlfaceScope('healthz', '', boardRuntimes));
+      requestLogger.info(formatControlfacePickupMessage(req, parsedUrl, requestDetails));
+      res.once('finish', logCompletionOnce);
+      res.once('close', logCompletionOnce);
       sendJson(res, 200, {
         ok: true,
         boards: Array.from(boardRuntimes.keys()),
@@ -123,7 +440,67 @@ async function main() {
     }
 
     try {
-      for (const runtime of boardRuntimes.values()) {
+      const mcpRouteMatch = req.method === 'POST'
+        ? matchLoggedMcpRoute(hostConfig.apiBasePrefix, parsedUrl.pathname)
+        : null;
+      if (mcpRouteMatch) {
+        const boardId = decodeURIComponent(mcpRouteMatch[1] || '').trim();
+        const routeKind = normalizeText(mcpRouteMatch[2]);
+        const entry = boardRuntimes.get(boardId);
+        if (entry) {
+          const rawBody = await readRawRequestBody(req);
+          const body = parseJsonObjectOrEmpty(rawBody);
+          const { strippedBody, logId } = stripLogIdFromMcpBody(body);
+          const toolName = typeof strippedBody?.tool === 'string' ? strippedBody.tool.trim() : '';
+          const args = normalizeMcpArgs(strippedBody);
+          requestDetails = {
+            boardId,
+            routeKind,
+            toolName,
+            cardId: normalizeText(readMcpArg(args, 'card_id', 'cardId')),
+            turnId: normalizeText(readMcpArg(args, 'turn_id', 'turnId', 'turn')),
+          };
+          requestLogger = processLogger.child(normalizeControlfaceScope(routeKind, boardId, boardRuntimes));
+          requestLogger.info(formatControlfacePickupMessage(req, parsedUrl, requestDetails));
+          res.once('finish', logCompletionOnce);
+          res.once('close', logCompletionOnce);
+
+          appendWatchpartyToolsLog(entry.chatRuntime, logId, 'Invoking', toolName, strippedBody);
+
+          let watchpartyCompletionLogged = false;
+          const logWatchpartyCompletionOnce = () => {
+            if (watchpartyCompletionLogged) {
+              return;
+            }
+            watchpartyCompletionLogged = true;
+            appendWatchpartyToolsLog(entry.chatRuntime, logId, 'Completed', toolName, strippedBody);
+          };
+          res.once('finish', logWatchpartyCompletionOnce);
+          res.once('close', logWatchpartyCompletionOnce);
+
+          const replayBody = Buffer.from(JSON.stringify(strippedBody), 'utf8');
+          const replayReq = createReplayableRequest(req, replayBody);
+          if (replayReq.headers && typeof replayReq.headers === 'object') {
+            replayReq.headers = { ...replayReq.headers, 'content-length': String(replayBody.length) };
+          }
+          if (await entry.runtime.handleRuntimeApi(replayReq, res, parsedUrl)) {
+            return;
+          }
+        }
+      }
+
+      if (!requestDetails) {
+        const boardMatch = matchBoardRoute(hostConfig.apiBasePrefix, parsedUrl.pathname);
+        requestDetails = boardMatch
+          ? { boardId: decodeURIComponent(boardMatch[1] || '').trim() }
+          : {};
+        requestLogger = processLogger.child(normalizeControlfaceScope('', requestDetails.boardId, boardRuntimes));
+        requestLogger.info(formatControlfacePickupMessage(req, parsedUrl, requestDetails));
+        res.once('finish', logCompletionOnce);
+        res.once('close', logCompletionOnce);
+      }
+
+      for (const { runtime } of boardRuntimes.values()) {
         if (await runtime.handleRuntimeApi(req, res, parsedUrl)) {
           return;
         }
@@ -134,17 +511,25 @@ async function main() {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (!requestDetails) {
+        requestDetails = {};
+        requestLogger.info(formatControlfacePickupMessage(req, parsedUrl, requestDetails));
+        res.once('finish', logCompletionOnce);
+        res.once('close', logCompletionOnce);
+      }
+      requestDetails.errorMessage = message;
       sendJson(res, 500, { error: message });
     }
   });
 
   server.listen(hostConfig.port, hostConfig.host, () => {
-    console.log(`[controlface] Listening on http://${hostConfig.host}:${hostConfig.port}`);
-    console.log(`[controlface] Boards: ${Array.from(boardRuntimes.keys()).join(', ')}`);
+    processLogger.info(`Listening on http://${hostConfig.host}:${hostConfig.port}`);
+    processLogger.info(`Boards: ${Array.from(boardRuntimes.keys()).join(', ')}`);
   });
 }
 
 main().catch((error) => {
-  console.error(`[controlface] Failed to start: ${error instanceof Error ? error.message : String(error)}`);
+  const processLogger = createLogger('controlface', { filePath: CONTROLFACE_LOG_PATH });
+  processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });

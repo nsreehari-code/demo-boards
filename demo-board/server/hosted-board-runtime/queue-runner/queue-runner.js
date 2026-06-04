@@ -11,15 +11,100 @@ import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js
 import { loadFirebaseHostConfig, resolveConfigRelativePath } from '../firebase-adapter/load-config.js';
 import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
 import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
-import { loadLegacyBoardChatRuntime } from '../host-shared/chat-agent-handler/legacy-chat-runtime.js';
-import { executeChatAgentRequest } from '../host-shared/chat-agent-handler/execute-chat-agent-request.js';
+import { buildHostedChatAgentRuntime, executeChatAgentRequest } from '../host-shared/chat-agent-handler/execute-chat-agent-request.js';
 import { createLogger } from '../host-shared/logging.js';
 import { loadTaskExecutorModule } from '../host-shared/worker-modules/task-executor-module.js';
 import { createWakeTrigger, queueCollectionPath } from '../host-shared/lanes/runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DEFAULT_CONFIG_PATH = path.resolve(__dirname, 'queue-runner.config.json');
+const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.config.json');
+const BOARD_ROOT = path.resolve(__dirname, '../../..');
+const QUEUE_RUNNER_LOG_PATH = path.join(BOARD_ROOT, 'logs', 'queue-runner.log');
+
+function normalizeText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readCardId(request) {
+  return normalizeText(request?.args?.cardId)
+    || normalizeText(request?.args?.card_id)
+    || normalizeText(request?.output?.cardId)
+    || normalizeText(request?.output?.card_id);
+}
+
+function joinParts(parts) {
+  return parts.filter((part) => typeof part === 'string' && part.trim()).join(' ');
+}
+
+function summarizeTaskExecutorRequest(request, lease) {
+  const sourceDef = request?.source_def && typeof request.source_def === 'object' && !Array.isArray(request.source_def)
+    ? request.source_def
+    : request?.args?.source_def && typeof request.args.source_def === 'object' && !Array.isArray(request.args.source_def)
+      ? request.args.source_def
+      : {};
+  return joinParts([
+    readCardId(request),
+    normalizeText(sourceDef?.kind),
+    normalizeText(sourceDef?.bindTo),
+    normalizeText(sourceDef?.outputFile),
+  ]);
+}
+
+function summarizeChatAgentRequest(request, lease) {
+  const probe = normalizeText(request?.args?.probe);
+  return joinParts([
+    readCardId(request),
+    normalizeText(request?.args?.turnId) || normalizeText(request?.args?.turn_id) || normalizeText(request?.args?.turn),
+    probe ? `probe ${probe}` : '',
+    'chat-handler',
+  ]);
+}
+
+function summarizeProcessAccumulatedRequest(message, lease) {
+  return '';
+}
+
+function summarizeLaneRequest(laneId, message, lease) {
+  if (laneId === 'task-executor') {
+    return summarizeTaskExecutorRequest(message, lease);
+  }
+  if (laneId === 'chat-agent') {
+    return summarizeChatAgentRequest(message, lease);
+  }
+  return summarizeProcessAccumulatedRequest(message, lease);
+}
+
+function instrumentLaneRegistry(registry, boardId, processLogger) {
+  return {
+    ...registry,
+    lanes: Array.isArray(registry?.lanes)
+      ? registry.lanes.map((lane) => {
+          const laneLogger = processLogger.child(`${boardId}:${lane.id}`);
+          const originalHandle = lane.handle?.bind(lane);
+          if (typeof originalHandle !== 'function') {
+            return lane;
+          }
+          return {
+            ...lane,
+            async handle(message, lease) {
+              const details = summarizeLaneRequest(lane.id, message, lease);
+              laneLogger.info(joinParts(['picked-up', details]));
+              try {
+                const result = await originalHandle(message, lease);
+                laneLogger.info(joinParts(['success', details]));
+                return result;
+              } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                laneLogger.error(joinParts(['failed', details, errorMessage]));
+                throw error;
+              }
+            },
+          };
+        })
+      : [],
+  };
+}
 
 function traceEnabled() {
   return String(process.env.DEBUG_QUEUE_RUNNER_TRACE || '').trim() === '1';
@@ -28,6 +113,13 @@ function traceEnabled() {
 function trace(message) {
   if (!traceEnabled()) return;
   console.log(`[queue-runner-trace] ${message}`);
+}
+
+function isDummyTaskExecutorRequest(args) {
+  return args
+    && typeof args === 'object'
+    && !Array.isArray(args)
+    && args.subcommand === 'tt-dummy';
 }
 
 async function postMcp(url, tool, args = {}) {
@@ -82,7 +174,16 @@ async function postMcp(url, tool, args = {}) {
 }
 
 function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, serverUrl, apiBasePrefix }) {
-  const chatRuntime = loadLegacyBoardChatRuntime(boardId, boardConfig, { serverUrl, apiBasePrefix });
+  const chatRuntime = buildHostedChatAgentRuntime(boardId, boardConfig, {
+    serverUrl,
+    apiBasePrefix,
+    configDir: runtime.configDir,
+    watchparty: runtime.watchparty,
+    foundryAgents: runtime.foundryAgents,
+    chatFlowTimeoutMs: runtime.chatFlowTimeoutMs,
+    chatInvokeRefTimeoutMs: runtime.chatInvokeRefTimeoutMs,
+    chatCopilotTimeoutMs: runtime.chatCopilotTimeoutMs,
+  });
   const queueStoreRef = bundle.boardContextConfig.queueStoreRef;
   if (!queueStoreRef) {
     throw new Error(`Hosted queue-runner requires queueStoreRef for board ${boardId}`);
@@ -111,6 +212,11 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
     logger,
     executeTaskExecutorRequest: taskExecutor
       ? async (args, request) => {
+          if (isDummyTaskExecutorRequest(args)) {
+            const marker = typeof args.marker === 'string' ? args.marker : '';
+            console.log(`[queue-runner] tt-dummy-picked-up board=${boardId}${marker ? ` marker=${marker}` : ''}`);
+            return;
+          }
           const executorRequest = args && typeof args === 'object' && !Array.isArray(args)
             ? {
                 ...args,
@@ -129,7 +235,8 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
 }
 
 async function main() {
-  const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH);
+  const processLogger = createLogger('queue-runner', { filePath: QUEUE_RUNNER_LOG_PATH });
+  const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'queueRunner');
   const adapterServices = hostConfig.storageAdapter === 'localfs'
     ? await initializeLocalFsServices(hostConfig.localfs)
     : await initializeFirebaseServices(hostConfig.firebase);
@@ -140,8 +247,8 @@ async function main() {
     : buildFirebaseBoardBundle;
 
   for (const [boardId, boardConfig] of Object.entries(hostConfig.boards)) {
-    const logger = createLogger(`queue:${boardId}`);
-    const callbackServerOrigin = hostConfig.serverOrigin || 'http://127.0.0.1:7810';
+    const logger = processLogger.child(`${boardId}:queue`);
+    const callbackServerOrigin = hostConfig.serverOrigin || 'http://127.0.0.1:7799';
     const apiBaseUrl = `${callbackServerOrigin}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}`;
     const webhooksUrl = `${apiBaseUrl}/mcp-webhooks`;
     const controlplaneUrl = `${apiBaseUrl}/mcp-controlplane`;
@@ -172,17 +279,25 @@ async function main() {
       logger,
     });
 
-    const laneRegistry = createExplicitQueueLanes({
+    const laneRegistry = instrumentLaneRegistry(createExplicitQueueLanes({
       boardId,
       boardConfig,
       bundle,
-      runtime,
+      runtime: {
+        ...runtime,
+        configDir: hostConfig.configDir,
+        watchparty: hostConfig.watchparty,
+        foundryAgents: hostConfig.foundryAgents,
+        chatFlowTimeoutMs: hostConfig.chatFlowTimeoutMs,
+        chatInvokeRefTimeoutMs: hostConfig.chatInvokeRefTimeoutMs,
+        chatCopilotTimeoutMs: hostConfig.chatCopilotTimeoutMs,
+      },
       logger,
       taskExecutor,
       controlplaneUrl,
       serverUrl: callbackServerOrigin,
       apiBasePrefix: hostConfig.apiBasePrefix,
-    });
+    }), boardId, processLogger);
 
     const stopRunner = startQueueLaneRunners(laneRegistry);
     stopSubscriptions.push(stopRunner);
@@ -191,7 +306,7 @@ async function main() {
     }
   }
 
-  console.log(`[queue-runner] Watching ${Object.keys(hostConfig.boards).length} board(s)`);
+  processLogger.info(`Watching ${Object.keys(hostConfig.boards).length} board(s)`);
 
   function shutdown() {
     if (keepAliveTimer) {
@@ -212,6 +327,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`[queue-runner] Failed to start: ${error instanceof Error ? error.message : String(error)}`);
+  const processLogger = createLogger('queue-runner', { filePath: QUEUE_RUNNER_LOG_PATH });
+  processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });

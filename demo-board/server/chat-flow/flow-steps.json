@@ -10,15 +10,13 @@
   "steps": {
     "validate_input_data": {
       "description": "Declare the values entering from input_data and validate the required external flow inputs before internal steps run",
-      "expects_data": ["boardId", "cardId", "logId", "turnId", "baseRef", "aiWorkspaceRoot", "boardSetupRoot", "cardStoreRef", "scratchStoreRef", "chatFlowRoot", "userText", "chatCopilotTimeoutMs", "chatAssistant", "foundryEndpoint", "foundryChatAgentId", "foundryChatExposedMcpToolPrefixes"],
+      "expects_data": ["boardId", "cardId", "logId", "turnId", "serverUrl", "mcpServerUrl", "aiWorkspaceRoot", "boardSetupRoot", "chatFlowRoot", "probe", "chatCopilotTimeoutMs", "chatAssistant", "foundryEndpoint", "foundryChatAgentId", "foundryChatExposedMcpToolPrefixes", "copilotCustomWorkspaceStems"],
       "input_validations": [
         "$type(cardId) = \"string\" and $length(cardId) > 0",
         "$type(logId) = \"string\" and $length(logId) > 0",
         "$type(turnId) = \"string\" and $length(turnId) > 0",
         "$type(boardSetupRoot) = \"string\" and $length(boardSetupRoot) > 0",
-        "$type(scratchStoreRef) = \"string\" and $length(scratchStoreRef) > 0",
-        "$type(chatFlowRoot) = \"string\" and $length(chatFlowRoot) > 0",
-        "$type(userText) = \"string\" and $length($trim(userText)) > 0"
+        "$type(chatFlowRoot) = \"string\" and $length(chatFlowRoot) > 0"
       ],
       "handler": {
         "type": "compute-jsonata",
@@ -34,7 +32,7 @@
     },
     "assistant_mark_processing_started": {
       "description": "Mark chat processing through the board control-plane before assistant dispatch",
-      "expects_data": ["boardId", "cardId", "chatFlowRoot"],
+      "expects_data": ["boardId", "cardId", "serverUrl", "chatFlowRoot"],
       "handler": {
         "type": "ref",
         "howToRun": "local-process",
@@ -44,7 +42,7 @@
         },
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/chat-processing-controlplane.js'"],
-          "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'state': 'started' }"
+          "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'serverUrl': serverUrl, 'state': 'started' }"
         },
         "meta": "chat-handler"
       },
@@ -55,22 +53,16 @@
       }
     },
     "select_assistant": {
-      "description": "Normalize the incoming user text, detect the probe marker, and choose the downstream assistant",
-      "expects_data": ["userText", "chatCopilotTimeoutMs", "chatAssistant"],
+      "description": "Choose the downstream assistant based on the queued probe assistant override and configured assistant",
+      "expects_data": ["probe", "chatCopilotTimeoutMs", "chatAssistant"],
       "produces_data": ["chatCopilotTimeoutMs", "selectedAssistant"],
-      "input_validations": [
-        "$type(userText) = \"string\" and $length($trim(userText)) > 0"
-      ],
       "handler": {
         "type": "compute-jsonata",
         "expr": [
-          "data._marker = \"__probe__echo__probe__\"",
-          "data._markerLen = $length(data._marker)",
-          "data._rawMessageText = $trim(expects_data.userText)",
-          "data._isEchoProbe = $length(data._rawMessageText) >= (data._markerLen * 2) and $substring(data._rawMessageText, 0, data._markerLen) = data._marker and $substring(data._rawMessageText, $length(data._rawMessageText) - data._markerLen) = data._marker",
           "data.chatCopilotTimeoutMs = ($parsePositiveInt := function($value) { ($type($value) = \"number\" and $value > 0) ? $floor($value) : (($type($value) = \"string\" and $count($match($trim($value), /^[0-9]+$/)) > 0 and $number($trim($value)) > 0) ? $floor($number($trim($value))) : null) }; $fallbackTimeout := $parsePositiveInt(expects_data.chatCopilotTimeoutMs); $fallbackTimeout ? $fallbackTimeout : 300000)",
+          "data._probe = $type(expects_data.probe) = \"string\" and $length($trim(expects_data.probe)) > 0 ? $lowercase($trim(expects_data.probe)) : \"\"",
           "data._configuredAssistant = $type(expects_data.chatAssistant) = \"string\" and $length($trim(expects_data.chatAssistant)) > 0 ? $lowercase($trim(expects_data.chatAssistant)) : \"copilot\"",
-          "data.selectedAssistant = data._isEchoProbe ? \"probe\" : (data._configuredAssistant in [\"copilot\", \"foundry\", \"probe\"] ? data._configuredAssistant : \"copilot\")",
+          "data.selectedAssistant = (data._probe = \"echo\") ? \"probe\" : (data._probe in [\"copilot\", \"foundry\", \"probe\"] ? data._probe : (data._configuredAssistant in [\"copilot\", \"foundry\", \"probe\"] ? data._configuredAssistant : \"copilot\"))",
           "result = data.selectedAssistant"
         ]
       },
@@ -85,15 +77,14 @@
     "copilot_assistant": {
       "description": "Run the Copilot-backed assistant logic, which persists its own assistant reply into chat storage",
       "server_reply_contract_comment": "No reply text is expected back from assistant.js. The assistant must write user-visible replies through chat store only and exit success or error.",
-      "expects_data": ["boardId", "cardId", "logId", "turnId", "baseRef", "aiWorkspaceRoot", "boardSetupRoot", "cardStoreRef", "scratchStoreRef", "chatFlowRoot", "watchPartyFilesForChatDir", "chatCopilotTimeoutMs"],
+      "expects_data": ["boardId", "cardId", "logId", "turnId", "mcpServerUrl", "aiWorkspaceRoot", "boardSetupRoot", "chatFlowRoot", "watchPartyFilesForChatDir", "chatCopilotTimeoutMs", "copilotCustomWorkspaceStems"],
       "produces_data": ["assistantHandled"],
       "input_validations": [
+        "$type(mcpServerUrl) = \"string\" and $length(mcpServerUrl) > 0",
         "$type(aiWorkspaceRoot) = \"string\" and $length(aiWorkspaceRoot) > 0",
         "$type(boardSetupRoot) = \"string\" and $length(boardSetupRoot) > 0",
-        "$type(cardStoreRef) = \"string\" and $length(cardStoreRef) > 0",
         "$type(logId) = \"string\" and $length(logId) > 0",
         "$type(turnId) = \"string\" and $length(turnId) > 0",
-        "$type(scratchStoreRef) = \"string\" and $length(scratchStoreRef) > 0",
         "$type(chatFlowRoot) = \"string\" and $length(chatFlowRoot) > 0",
         "$type(watchPartyFilesForChatDir) = \"string\" and $length(watchPartyFilesForChatDir) > 0"
       ],
@@ -106,7 +97,7 @@
         },
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/copilot-chat/assistant.js'"],
-          "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'logId': logId, 'turnId': turnId, 'baseRef': baseRef, 'aiWorkspaceRoot': aiWorkspaceRoot, 'boardSetupRoot': boardSetupRoot, 'cardStoreRef': cardStoreRef, 'scratchStoreRef': scratchStoreRef, 'chatFlowRoot': chatFlowRoot, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs }"
+          "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'logId': logId, 'turnId': turnId, 'mcpServerUrl': mcpServerUrl, 'aiWorkspaceRoot': aiWorkspaceRoot, 'boardSetupRoot': boardSetupRoot, 'chatFlowRoot': chatFlowRoot, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs, 'copilotCustomWorkspaceStems': copilotCustomWorkspaceStems }"
         },
         "meta": "chat-handler"
       },
@@ -119,15 +110,14 @@
     "foundry_assistant": {
       "description": "Run the Foundry-backed assistant logic, which persists its own assistant reply into chat storage via the same final-reply MCP path",
       "server_reply_contract_comment": "No reply text is expected back from foundry-chat/assistant.js. The assistant must write user-visible replies through the shared final-reply MCP tool and exit success or error.",
-      "expects_data": ["boardId", "cardId", "logId", "turnId", "baseRef", "aiWorkspaceRoot", "boardSetupRoot", "cardStoreRef", "scratchStoreRef", "chatFlowRoot", "watchPartyFilesForChatDir", "chatCopilotTimeoutMs", "foundryEndpoint", "foundryChatAgentId", "foundryChatExposedMcpToolPrefixes"],
+      "expects_data": ["boardId", "cardId", "logId", "turnId", "serverUrl", "mcpServerUrl", "aiWorkspaceRoot", "boardSetupRoot", "chatFlowRoot", "watchPartyFilesForChatDir", "chatCopilotTimeoutMs", "foundryEndpoint", "foundryChatAgentId", "foundryChatExposedMcpToolPrefixes"],
       "produces_data": ["assistantHandled"],
       "input_validations": [
+        "$type(serverUrl) = \"string\" and $length(serverUrl) > 0",
+        "$type(mcpServerUrl) = \"string\" and $length(mcpServerUrl) > 0",
         "$type(aiWorkspaceRoot) = \"string\" and $length(aiWorkspaceRoot) > 0",
-        "$type(boardSetupRoot) = \"string\" and $length(boardSetupRoot) > 0",
-        "$type(cardStoreRef) = \"string\" and $length(cardStoreRef) > 0",
         "$type(logId) = \"string\" and $length(logId) > 0",
         "$type(turnId) = \"string\" and $length(turnId) > 0",
-        "$type(scratchStoreRef) = \"string\" and $length(scratchStoreRef) > 0",
         "$type(chatFlowRoot) = \"string\" and $length(chatFlowRoot) > 0",
         "$type(watchPartyFilesForChatDir) = \"string\" and $length(watchPartyFilesForChatDir) > 0",
         "$type(foundryEndpoint) = \"string\" and $length(foundryEndpoint) > 0",
@@ -142,7 +132,7 @@
         },
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/foundry-chat/assistant.js'"],
-          "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'logId': logId, 'turnId': turnId, 'baseRef': baseRef, 'aiWorkspaceRoot': aiWorkspaceRoot, 'boardSetupRoot': boardSetupRoot, 'cardStoreRef': cardStoreRef, 'scratchStoreRef': scratchStoreRef, 'chatFlowRoot': chatFlowRoot, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs, 'foundryEndpoint': foundryEndpoint, 'foundryChatAgentId': foundryChatAgentId, 'foundryChatExposedMcpToolPrefixes': foundryChatExposedMcpToolPrefixes }"
+          "stdinTemplate": "{ 'boardId': boardId, 'cardId': cardId, 'logId': logId, 'turnId': turnId, 'serverUrl': serverUrl, 'mcpServerUrl': mcpServerUrl, 'aiWorkspaceRoot': aiWorkspaceRoot, 'boardSetupRoot': boardSetupRoot, 'chatFlowRoot': chatFlowRoot, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir, 'chatCopilotTimeoutMs': chatCopilotTimeoutMs, 'foundryEndpoint': foundryEndpoint, 'foundryChatAgentId': foundryChatAgentId, 'foundryChatExposedMcpToolPrefixes': foundryChatExposedMcpToolPrefixes }"
         },
         "meta": "chat-handler"
       },
@@ -155,19 +145,17 @@
     "probe_assistant": {
       "description": "Run the deterministic probe assistant logic, which stages its final reply through the shared final-response flow when refs are available",
       "server_reply_contract_comment": "No reply text is expected back from probe.js. The probe must write the final user-visible reply through the shared final-response container flow and exit success or error.",
-      "expects_data": ["boardId", "baseRef", "aiWorkspaceRoot", "cardStoreRef", "cardId", "logId", "scratchStoreRef", "turnId", "chatFlowRoot", "userText", "watchPartyFilesForChatDir"],
+      "expects_data": ["boardId", "serverUrl", "mcpServerUrl", "aiWorkspaceRoot", "cardId", "logId", "turnId", "chatFlowRoot", "lastChatEntryId", "watchPartyFilesForChatDir"],
       "produces_data": ["assistantHandled"],
       "input_validations": [
         "$type(boardId) = \"string\" and $length(boardId) > 0",
-        "$type(baseRef) = \"string\" and $length(baseRef) > 0",
+        "$type(serverUrl) = \"string\" and $length(serverUrl) > 0",
+        "$type(mcpServerUrl) = \"string\" and $length(mcpServerUrl) > 0",
         "$type(aiWorkspaceRoot) = \"string\" and $length(aiWorkspaceRoot) > 0",
-        "$type(cardStoreRef) = \"string\" and $length(cardStoreRef) > 0",
         "$type(cardId) = \"string\" and $length(cardId) > 0",
         "$type(logId) = \"string\" and $length(logId) > 0",
-        "$type(scratchStoreRef) = \"string\" and $length(scratchStoreRef) > 0",
         "$type(turnId) = \"string\" and $length(turnId) > 0",
         "$type(chatFlowRoot) = \"string\" and $length(chatFlowRoot) > 0",
-        "$type(userText) = \"string\" and $length($trim(userText)) > 0",
         "$type(watchPartyFilesForChatDir) = \"string\" and $length(watchPartyFilesForChatDir) > 0"
       ],
       "handler": {
@@ -179,7 +167,7 @@
         },
         "argsMassaging": {
           "cmdTemplate": ["chatFlowRoot & '/copilot-chat/probe.js'"],
-          "stdinTemplate": "{ 'boardId': boardId, 'baseRef': baseRef, 'aiWorkspaceRoot': aiWorkspaceRoot, 'cardStoreRef': cardStoreRef, 'cardId': cardId, 'logId': logId, 'scratchStoreRef': scratchStoreRef, 'turnId': turnId, 'userText': userText, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir }"
+          "stdinTemplate": "{ 'boardId': boardId, 'serverUrl': serverUrl, 'mcpServerUrl': mcpServerUrl, 'aiWorkspaceRoot': aiWorkspaceRoot, 'cardId': cardId, 'logId': logId, 'turnId': turnId, 'lastChatEntryId': lastChatEntryId, 'watchPartyFilesForChatDir': watchPartyFilesForChatDir }"
         },
         "meta": "chat-handler"
       },

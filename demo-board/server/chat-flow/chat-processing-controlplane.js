@@ -1,48 +1,39 @@
 #!/usr/bin/env node
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { readJsonStdin, requireRequiredStrings, setChatProcessingViaApi } from './copilot-chat/shared.js';
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER_CONFIG_FILE = path.resolve(HERE, '..', '..', 'server-config.json');
-
-function loadBoardServerPort() {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(SERVER_CONFIG_FILE, 'utf-8'));
-    const port = Number(cfg.port);
-    if (!Number.isFinite(port) || port <= 0) {
-      throw new Error('server-config.json port is not a positive number');
-    }
-    return port;
-  } catch (err) {
-    throw new Error(`Cannot read port from server-config.json: ${err?.message || err}`);
-  }
-}
+import { readJsonStdin, requireRequiredStrings } from './copilot-chat/shared.js';
 
 const input = readJsonStdin();
 const {
   boardId = '',
   cardId = '',
+  serverUrl = '',
   state = '',
 } = input;
 
-requireRequiredStrings({ boardId, cardId, state }, 'chat processing controlplane');
+requireRequiredStrings({ boardId, cardId, serverUrl, state }, 'chat processing controlplane');
 
 if (state !== 'started' && state !== 'done') {
   throw new Error(`Unsupported chat processing state: ${state}`);
 }
 
-const ok = await setChatProcessingViaApi({
-  boardServerPort: loadBoardServerPort(),
-  boardId,
-  cardId,
-  active: state === 'started',
+const response = await fetch(`${serverUrl.replace(/\/$/, '')}/api/boards/${encodeURIComponent(boardId)}/mcp-controlplane`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    tool: state === 'started' ? 'setstate.chat-processing-started' : 'setstate.chat-processing-done',
+    args: {
+      board_id: boardId,
+      card_id: cardId,
+    },
+  }),
 });
 
-if (!ok) {
-  throw new Error(`Failed to set chat processing state to ${state}`);
+const payload = await response.json().catch(() => ({}));
+if (!response.ok || payload?.status === 'fail' || payload?.status === 'error') {
+  const errorMessage = typeof payload?.error === 'string' && payload.error.trim()
+    ? payload.error.trim()
+    : `Failed to set chat processing state to ${state}`;
+  throw new Error(errorMessage);
 }
 
 process.stdout.write(JSON.stringify({ ok: true, state }));
