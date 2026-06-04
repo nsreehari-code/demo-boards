@@ -520,7 +520,7 @@ const cliBoardId = readCliOptionValue(cliArgs, '--board-id') || readCliOptionVal
 const requestedTests = parseRequestedTests(readCliOptionValue(cliArgs, '--run-tests'));
 
 const BOARD_ID = cliBoardId || 'live';
-const BOARD_SERVER_URL = portArg ? `http://127.0.0.1:${portArg}` : 'http://127.0.0.1:7831';
+const BOARD_SERVER_URL = portArg ? `http://127.0.0.1:${portArg}` : 'http://127.0.0.1:7799';
 const API_BASE = `${BOARD_SERVER_URL}/api/boards/${encodeURIComponent(BOARD_ID)}`;
 
 const PORTFOLIO_CARD_ID = 'card-portfolio-tc1-9008';
