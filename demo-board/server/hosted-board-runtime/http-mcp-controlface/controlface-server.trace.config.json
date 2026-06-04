@@ -26,7 +26,7 @@
         "scratchStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/scratch" },
         "archiveStoreRef": { "kind": "firestore-board", "value": "archive-{{boardId}}" },
         "chatStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/cards-chats" },
-        "artifactsStoreRef": { "kind": "firebase-storage", "value": "boards/{{boardId}}/files" },
+        "artifactsStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/files" },
         "fetchedSourcesStoreRef": { "kind": "firestore", "value": "boards/{{boardId}}/sources" }
       }
     }

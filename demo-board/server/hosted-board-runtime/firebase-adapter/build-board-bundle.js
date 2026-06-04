@@ -1,6 +1,9 @@
 import { createFirestoreBoardRuntimeBundle } from 'yaml-flow/firestore-storage';
-import { wrapWithFirebaseStorageBlobs } from 'yaml-flow/firebase-storage';
-import { serializeRef } from 'yaml-flow/board-live-cards-node';
+import {
+  createHostedAsyncBoardNonCorePublic,
+  createNonCoreExecutorDispatcher,
+  serializeRef,
+} from 'yaml-flow/board-live-cards-node';
 
 function makeHostedTaskExecutorRef(boardId) {
   return {
@@ -12,35 +15,32 @@ function makeHostedTaskExecutorRef(boardId) {
 }
 
 export function buildBoardBundle(boardId, boardConfig, firebaseServices, runtimeHooks = {}, options = {}) {
-  const { refs, boardAdapter, nonCore } = createFirestoreBoardRuntimeBundle(
+  const { refs, boardAdapter } = createFirestoreBoardRuntimeBundle(
     firebaseServices.firestore,
     boardId,
     {
       refs: boardConfig.refs,
       requestProcessAccumulated: runtimeHooks.requestProcessAccumulated,
       publishBoardChangeNotifications: runtimeHooks.publishBoardChangeNotifications,
-      nonCoreTaskExecutor: options.nonCoreTaskExecutor,
-      nonCoreTaskExecutorRef: options.nonCoreTaskExecutorRef,
     },
   );
-
-  const composedBoardAdapter = wrapWithFirebaseStorageBlobs(
-    boardAdapter,
-    firebaseServices.storage,
-    boardId,
-  );
+  const dispatcher = createNonCoreExecutorDispatcher({ resolveCliDir: () => process.cwd() });
+  const nonCore = createHostedAsyncBoardNonCorePublic(boardAdapter, {
+    invokeExecutor: dispatcher.invokeExecutor,
+    ...(options.taskExecutorRef ? { taskExecutorRef: options.taskExecutorRef } : {}),
+  });
 
   if (options.callbackTransport) {
-    composedBoardAdapter.callbackTransport = options.callbackTransport;
+    boardAdapter.callbackTransport = options.callbackTransport;
   }
 
   return {
     refs,
-    boardAdapter: composedBoardAdapter,
+    boardAdapter,
     nonCore,
     boardContextConfig: {
       label: boardConfig.label || boardId,
-      boardAdapter: composedBoardAdapter,
+      boardAdapter,
       nonCore,
       taskExecutorRef: makeHostedTaskExecutorRef(boardId),
       ...refs,
