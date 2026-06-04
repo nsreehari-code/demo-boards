@@ -1,5 +1,5 @@
 {
-  "id": "card-portfolio",
+  "id": "card-portfolio-tc1",
   "meta": {
     "title": "My Portfolio",
     "tags": [
@@ -9,7 +9,7 @@
   },
   "provides": [
     {
-      "bindTo": "holdings",
+      "bindTo": "holdings_tc1",
       "ref": "card_data.holdings"
     }
   ],

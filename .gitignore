@@ -26,3 +26,9 @@ stderr.txt
 demo-board/test/live.test.board-ws-tmp/
 demo-board/test/live-test-board-ws/
 
+demo-board/.hosted-localfs/
+demo-board/*.log
+demo-board/nul
+demo-board/server/hosted-board-runtime/*.log
+demo-board/server/hosted-board-runtime/.runtime-pids.json
+

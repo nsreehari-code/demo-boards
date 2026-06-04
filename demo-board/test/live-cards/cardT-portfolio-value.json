@@ -1,18 +1,18 @@
 {
-  "id": "card-portfolio-value",
+  "id": "portfolio-value-tc3",
   "meta": {
     "title": "Portfolio Value",
     "tags": ["portfolio", "value"],
     "desc": "Computes total portfolio value, gainers/losers summary, and per-position P&L from holdings and live market quotes."
   },
-  "requires": ["holdings", "quotes"],
+  "requires": ["holdings_tc1", "quotes_tc2"],
   "provides": [
-    { "bindTo": "positions", "ref": "computed_values.positions" }
+    { "bindTo": "positions_tc3", "ref": "computed_values.positions" }
   ],
   "compute": [
     {
       "bindTo": "positions",
-      "expr": "($hMap := $merge(requires.holdings.{ticker: $}); $map(requires.quotes.quoteResponse.result, function($q) { ($h := $lookup($hMap, $q.symbol); $qty := $h.quantity; $cb := $h.cost_basis; $val := $round($q.regularMarketPrice * $qty, 2); $cost := $round($cb * $qty, 2); $chg := $round($q.regularMarketChange * $qty, 2); {\"ticker\": $q.symbol, \"quantity\": $qty, \"cost_basis\": $cb, \"price\": $round($q.regularMarketPrice, 2), \"value\": $val, \"gain_$\": $round($val - $cost, 2), \"gain_%\": $round(($val - $cost) / $cost * 100, 2), \"chg_$\": $chg, \"chg_pct\": $round($q.regularMarketChangePercent, 2)}) }))"
+      "expr": "($hMap := $merge(requires.holdings_tc1.{ticker: $}); $map(requires.quotes_tc2.quoteResponse.result, function($q) { ($h := $lookup($hMap, $q.symbol); $qty := $h.quantity; $cb := $h.cost_basis; $val := $round($q.regularMarketPrice * $qty, 2); $cost := $round($cb * $qty, 2); $chg := $round($q.regularMarketChange * $qty, 2); {\"ticker\": $q.symbol, \"quantity\": $qty, \"cost_basis\": $cb, \"price\": $round($q.regularMarketPrice, 2), \"value\": $val, \"gain_$\": $round($val - $cost, 2), \"gain_%\": $round(($val - $cost) / $cost * 100, 2), \"chg_$\": $chg, \"chg_pct\": $round($q.regularMarketChangePercent, 2)}) }))"
     },
     {
       "bindTo": "totalValue",

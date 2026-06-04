@@ -1,5 +1,5 @@
 {
-  "id": "card-market-prices",
+  "id": "market-prices-tc2",
   "meta": {
     "title": "Market Prices",
     "tags": [
@@ -9,14 +9,14 @@
     "desc": "Fetches live prices for portfolio tickers. Publishes enriched quote data for downstream portfolio value calculations."
   },
   "requires": [
-    "holdings"
+    "holdings_tc1"
   ],
   "source_defs": [
     {
-      "bindTo": "quotes",
+      "bindTo": "quotes_tc2",
       "outputFile": "market-prices-quotes.json",
       "projections": {
-        "quote_urls": "requires.holdings.ticker.('https://query1.finance.yahoo.com/v8/finance/chart/' & $ & '?interval=1d&range=1d')"
+        "quote_urls": "requires.holdings_tc1.ticker.('https://query1.finance.yahoo.com/v8/finance/chart/' & $ & '?interval=1d&range=1d')"
       },
       "urls": {
         "url": "{{url}}",
@@ -31,7 +31,7 @@
   "compute": [
     {
       "bindTo": "normalizedQuotes",
-      "expr": "($raw := fetched_sources.quotes; $rows := $type($raw) = 'array' ? $raw : (($exists($raw.resultValue) and $type($raw.resultValue) = 'array') ? $raw.resultValue : [$raw]); $normalized := $filter($map($rows, function($row) { ($level1 := $exists($row.resultValue) ? $row.resultValue : $row; $level2 := $exists($level1.resultValue) ? $level1.resultValue : $level1; $meta := $level2.chart.result[0].meta; $exists($meta.symbol) ? { \"symbol\": $meta.symbol, \"shortName\": ($exists($meta.longName) ? $meta.longName : $meta.shortName), \"regularMarketPrice\": $meta.regularMarketPrice, \"regularMarketChange\": ($exists($meta.regularMarketChange) ? $meta.regularMarketChange : (($exists($meta.chartPreviousClose) and $exists($meta.regularMarketPrice)) ? ($meta.regularMarketPrice - $meta.chartPreviousClose) : null)), \"regularMarketChangePercent\": ($exists($meta.regularMarketChangePercent) ? $meta.regularMarketChangePercent : (($exists($meta.chartPreviousClose) and $meta.chartPreviousClose != 0 and $exists($meta.regularMarketPrice)) ? (($meta.regularMarketPrice - $meta.chartPreviousClose) / $meta.chartPreviousClose * 100) : null)) } : undefined) }), function($q) { $exists($q.symbol) }); { \"quoteResponse\": { \"result\": $normalized, \"error\": null } })"
+      "expr": "($raw := fetched_sources.quotes_tc2; $rows := $type($raw) = 'array' ? $raw : (($exists($raw.resultValue) and $type($raw.resultValue) = 'array') ? $raw.resultValue : [$raw]); $normalized := $filter($map($rows, function($row) { ($level1 := $exists($row.resultValue) ? $row.resultValue : $row; $level2 := $exists($level1.resultValue) ? $level1.resultValue : $level1; $meta := $level2.chart.result[0].meta; $exists($meta.symbol) ? { \"symbol\": $meta.symbol, \"shortName\": ($exists($meta.longName) ? $meta.longName : $meta.shortName), \"regularMarketPrice\": $meta.regularMarketPrice, \"regularMarketChange\": ($exists($meta.regularMarketChange) ? $meta.regularMarketChange : (($exists($meta.chartPreviousClose) and $exists($meta.regularMarketPrice)) ? ($meta.regularMarketPrice - $meta.chartPreviousClose) : null)), \"regularMarketChangePercent\": ($exists($meta.regularMarketChangePercent) ? $meta.regularMarketChangePercent : (($exists($meta.chartPreviousClose) and $meta.chartPreviousClose != 0 and $exists($meta.regularMarketPrice)) ? (($meta.regularMarketPrice - $meta.chartPreviousClose) / $meta.chartPreviousClose * 100) : null)) } : undefined) }), function($q) { $exists($q.symbol) }); { \"quoteResponse\": { \"result\": $normalized, \"error\": null } })"
     },
     {
       "bindTo": "prices",
@@ -40,7 +40,7 @@
   ],
   "provides": [
     {
-      "bindTo": "quotes",
+      "bindTo": "quotes_tc2",
       "ref": "computed_values.normalizedQuotes"
     }
   ],
