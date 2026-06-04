@@ -526,6 +526,8 @@ const API_BASE = `${BOARD_SERVER_URL}/api/boards/${encodeURIComponent(BOARD_ID)}
 const PORTFOLIO_CARD_ID = 'card-portfolio-tc1-9008';
 const MARKET_PRICES_CARD_ID = 'market-prices-tc2-9027';
 const PORTFOLIO_VALUE_CARD_ID = 'portfolio-value-tc3-9043';
+const T8_CHAT_CARD_ID = 'card-portfolio-t8-9108';
+const T9_CHAT_CARD_ID = 'card-portfolio-t9-9109';
 const ECHO_PROBE_MARKER = '__probe__echo__probe__';
 const NON_PROBE_RESPONSE_TIMEOUT_MS = 120_000;
 
@@ -555,6 +557,8 @@ const portfolioT2SeedCard = (() => {
 })();
 const marketPricesSeedCard = cloneCardWithId(loadCardFixture('cardT-market-prices.json'), MARKET_PRICES_CARD_ID);
 const portfolioValueSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio-value.json'), PORTFOLIO_VALUE_CARD_ID);
+const t8ChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T8_CHAT_CARD_ID);
+const t9ChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T9_CHAT_CARD_ID);
 
 async function main() {
   const { hostConfig } = await getHostedRuntimeContext();
@@ -1421,35 +1425,35 @@ async function main() {
     if (isTestSelected(requestedTests, 'T8')) {
       console.log(`\n=== ${formatTestId('T8')}: real assistant chat over hosted SSE ===`);
 
-      console.log(`[${formatTestId('T8')}] step 0/8: upserting ${PORTFOLIO_CARD_ID} for chat`);
+      console.log(`[${formatTestId('T8')}] step 0/8: upserting ${T8_CHAT_CARD_ID} for chat`);
       expectMcpSuccess(
         await callMcp('manage.upsert-card', {
-          card_id: PORTFOLIO_CARD_ID,
-          candidate_card_content: portfolioSeedCard,
+          card_id: T8_CHAT_CARD_ID,
+          candidate_card_content: t8ChatSeedCard,
         }),
         'T8 manage.upsert-card portfolio',
       );
-      createdCardIds.push(PORTFOLIO_CARD_ID);
+      createdCardIds.push(T8_CHAT_CARD_ID);
 
       console.log(`[${formatTestId('T8')}] step 1/8: waiting for live /sse bootstrap payload`);
       await closeBoardSseConnection({ clearChatEvents: true });
-      await ensureChatSseSubscription(PORTFOLIO_CARD_ID);
+      await ensureChatSseSubscription(T8_CHAT_CARD_ID);
       const bootstrapPayload = await waitUntil(
         () => sseState.initialPayload || false,
         15_000,
-        `T8 initial /sse payload for ${PORTFOLIO_CARD_ID}`,
+        `T8 initial /sse payload for ${T8_CHAT_CARD_ID}`,
       );
       const bootstrapSummary = bootstrapPayload?.statusSnapshot?.summary || sseState.statusSummary;
       assert(bootstrapSummary, `T8 live /sse summary missing: ${jsonText(bootstrapPayload)}`);
 
-      const turnId = `t8${makeTurnId()}`;
+      const turnId = `t8copilot_${makeTurnId()}`;
       const promptText = 'Just answer what is the capital of France. No fluff. No commentary. No markup. Respond in lower case in one word.';
       const markedPromptText = buildProbeChatText(promptText, 'copilot');
       const eventStart = sseState.chatEvents.length;
 
       console.log(`[${formatTestId('T8')}] step 2/8: sending real-assistant chat turn ${turnId}`);
       expectMcpSuccess(
-        await callAction('chat-send', PORTFOLIO_CARD_ID, {
+        await callAction('chat-send', T8_CHAT_CARD_ID, {
           text: markedPromptText,
           'turn-id': turnId,
         }),
@@ -1458,7 +1462,7 @@ async function main() {
 
       console.log(`[${formatTestId('T8')}] step 3/8: verifying user chat entry is stored`);
       const userMessagesPoll = await pollChatMessages(
-        PORTFOLIO_CARD_ID,
+        T8_CHAT_CARD_ID,
         turnId,
         5,
         500,
@@ -1469,8 +1473,8 @@ async function main() {
       console.log(`[${formatTestId('T8')}] user chat entry stored in ${userMessagesPoll.attemptsUsed} poll(s)`);
 
       console.log(`[${formatTestId('T8')}] step 4/8: verifying chat processing turns on`);
-      const processingOnEvent = await waitUntil(() => sseState.chatEvents.slice(eventStart).find((event) => event?.processing === true) || false, 30_000, `T8 processing=true for ${PORTFOLIO_CARD_ID}`);
-      assert(!!processingOnEvent, `T8 processing did not turn on for ${PORTFOLIO_CARD_ID}`);
+  const processingOnEvent = await waitUntil(() => sseState.chatEvents.slice(eventStart).find((event) => event?.processing === true) || false, 30_000, `T8 processing=true for ${T8_CHAT_CARD_ID}`);
+  assert(!!processingOnEvent, `T8 processing did not turn on for ${T8_CHAT_CARD_ID}`);
 
       console.log(`[${formatTestId('T8')}] step 5/8: waiting for SSE assistant reply`);
       const assistantOutcome = await waitForAssistantOutcome({
@@ -1498,7 +1502,7 @@ async function main() {
       assert(settledOutcome.event?.processing === false, 'T8 final SSE event should clear processing');
 
       console.log(`[${formatTestId('T8')}] step 7/8: verifying final inspected messages`);
-      const finalMessages = await readChatMessages(PORTFOLIO_CARD_ID, turnId);
+  const finalMessages = await readChatMessages(T8_CHAT_CARD_ID, turnId);
       const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
       const finalAssistantMessage = [...finalMessages].reverse().find((message) => message?.role === 'assistant');
       assert(finalUserMessage, `T8 final user message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
@@ -1509,51 +1513,51 @@ async function main() {
 
       console.log(`[${formatTestId('T8')}] step 8/8: verifying live /sse board-state bootstrap`);
       resetBoardSseState();
-      await ensureBoardSseConnection(PORTFOLIO_CARD_ID);
+      await ensureBoardSseConnection(T8_CHAT_CARD_ID);
       const finalBootstrapPayload = await waitUntil(
         () => sseState.initialPayload || false,
         15_000,
-        `T8 final /sse payload for ${PORTFOLIO_CARD_ID}`,
+        `T8 final /sse payload for ${T8_CHAT_CARD_ID}`,
       );
       const finalBootstrapSummary = finalBootstrapPayload?.statusSnapshot?.summary || sseState.statusSummary;
-      const finalBootstrapCard = findBoardStatusCard(finalBootstrapPayload?.statusSnapshot || finalBootstrapPayload, PORTFOLIO_CARD_ID);
+      const finalBootstrapCard = findBoardStatusCard(finalBootstrapPayload?.statusSnapshot || finalBootstrapPayload, T8_CHAT_CARD_ID);
       assert(finalBootstrapSummary, `T8 final live /sse summary missing: ${jsonText(finalBootstrapPayload)}`);
-      assert(finalBootstrapCard && String(finalBootstrapCard.status || '') === 'completed', `T8 expected ${PORTFOLIO_CARD_ID} completed in final live /sse payload: ${jsonText(finalBootstrapPayload)}`);
+      assert(finalBootstrapCard && String(finalBootstrapCard.status || '') === 'completed', `T8 expected ${T8_CHAT_CARD_ID} completed in final live /sse payload: ${jsonText(finalBootstrapPayload)}`);
       await closeBoardSseConnection({ clearChatEvents: true });
     }
 
     if (isTestSelected(requestedTests, 'T9')) {
       console.log(`\n=== ${formatTestId('T9')}: foundry-forced assistant chat over hosted SSE ===`);
 
-      console.log(`[${formatTestId('T9')}] step 0/8: upserting ${PORTFOLIO_CARD_ID} for chat`);
+      console.log(`[${formatTestId('T9')}] step 0/8: upserting ${T9_CHAT_CARD_ID} for chat`);
       expectMcpSuccess(
         await callMcp('manage.upsert-card', {
-          card_id: PORTFOLIO_CARD_ID,
-          candidate_card_content: portfolioSeedCard,
+          card_id: T9_CHAT_CARD_ID,
+          candidate_card_content: t9ChatSeedCard,
         }),
         'T9 manage.upsert-card portfolio',
       );
-      createdCardIds.push(PORTFOLIO_CARD_ID);
+      createdCardIds.push(T9_CHAT_CARD_ID);
 
       console.log(`[${formatTestId('T9')}] step 1/8: waiting for live /sse bootstrap payload`);
       await closeBoardSseConnection({ clearChatEvents: true });
-      await ensureChatSseSubscription(PORTFOLIO_CARD_ID);
+      await ensureChatSseSubscription(T9_CHAT_CARD_ID);
       const bootstrapPayload = await waitUntil(
         () => sseState.initialPayload || false,
         15_000,
-        `T9 initial /sse payload for ${PORTFOLIO_CARD_ID}`,
+        `T9 initial /sse payload for ${T9_CHAT_CARD_ID}`,
       );
       const bootstrapSummary = bootstrapPayload?.statusSnapshot?.summary || sseState.statusSummary;
       assert(bootstrapSummary, `T9 live /sse summary missing: ${jsonText(bootstrapPayload)}`);
 
-      const turnId = `t9${makeTurnId()}`;
+      const turnId = `t9foundry_${makeTurnId()}`;
       const promptText = 'Just answer what is the capital of France. No fluff. No commentary. No markup. Respond in lower case in one word.';
       const markedPromptText = buildProbeChatText(promptText, 'foundry');
       const eventStart = sseState.chatEvents.length;
 
       console.log(`[${formatTestId('T9')}] step 2/8: sending foundry-forced chat turn ${turnId}`);
       expectMcpSuccess(
-        await callAction('chat-send', PORTFOLIO_CARD_ID, {
+        await callAction('chat-send', T9_CHAT_CARD_ID, {
           text: markedPromptText,
           'turn-id': turnId,
         }),
@@ -1562,7 +1566,7 @@ async function main() {
 
       console.log(`[${formatTestId('T9')}] step 3/8: verifying user chat entry is stored`);
       const userMessagesPoll = await pollChatMessages(
-        PORTFOLIO_CARD_ID,
+        T9_CHAT_CARD_ID,
         turnId,
         5,
         500,
@@ -1573,8 +1577,8 @@ async function main() {
       console.log(`[${formatTestId('T9')}] user chat entry stored in ${userMessagesPoll.attemptsUsed} poll(s)`);
 
       console.log(`[${formatTestId('T9')}] step 4/8: verifying chat processing turns on`);
-      const processingOnEvent = await waitUntil(() => sseState.chatEvents.slice(eventStart).find((event) => event?.processing === true) || false, 30_000, `T9 processing=true for ${PORTFOLIO_CARD_ID}`);
-      assert(!!processingOnEvent, `T9 processing did not turn on for ${PORTFOLIO_CARD_ID}`);
+  const processingOnEvent = await waitUntil(() => sseState.chatEvents.slice(eventStart).find((event) => event?.processing === true) || false, 30_000, `T9 processing=true for ${T9_CHAT_CARD_ID}`);
+  assert(!!processingOnEvent, `T9 processing did not turn on for ${T9_CHAT_CARD_ID}`);
 
       console.log(`[${formatTestId('T9')}] step 5/8: waiting for SSE assistant reply`);
       const assistantOutcome = await waitForAssistantOutcome({
@@ -1602,7 +1606,7 @@ async function main() {
       assert(settledOutcome.event?.processing === false, 'T9 final SSE event should clear processing');
 
       console.log(`[${formatTestId('T9')}] step 7/8: verifying final inspected messages`);
-      const finalMessages = await readChatMessages(PORTFOLIO_CARD_ID, turnId);
+      const finalMessages = await readChatMessages(T9_CHAT_CARD_ID, turnId);
       const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
       const finalAssistantMessage = [...finalMessages].reverse().find((message) => message?.role === 'assistant');
       assert(finalUserMessage, `T9 final user message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
@@ -1613,16 +1617,16 @@ async function main() {
 
       console.log(`[${formatTestId('T9')}] step 8/8: verifying live /sse board-state bootstrap`);
       resetBoardSseState();
-      await ensureBoardSseConnection(PORTFOLIO_CARD_ID);
+      await ensureBoardSseConnection(T9_CHAT_CARD_ID);
       const finalBootstrapPayload = await waitUntil(
         () => sseState.initialPayload || false,
         15_000,
-        `T9 final /sse payload for ${PORTFOLIO_CARD_ID}`,
+        `T9 final /sse payload for ${T9_CHAT_CARD_ID}`,
       );
       const finalBootstrapSummary = finalBootstrapPayload?.statusSnapshot?.summary || sseState.statusSummary;
-      const finalBootstrapCard = findBoardStatusCard(finalBootstrapPayload?.statusSnapshot || finalBootstrapPayload, PORTFOLIO_CARD_ID);
+      const finalBootstrapCard = findBoardStatusCard(finalBootstrapPayload?.statusSnapshot || finalBootstrapPayload, T9_CHAT_CARD_ID);
       assert(finalBootstrapSummary, `T9 final live /sse summary missing: ${jsonText(finalBootstrapPayload)}`);
-      assert(finalBootstrapCard && String(finalBootstrapCard.status || '') === 'completed', `T9 expected ${PORTFOLIO_CARD_ID} completed in final live /sse payload: ${jsonText(finalBootstrapPayload)}`);
+      assert(finalBootstrapCard && String(finalBootstrapCard.status || '') === 'completed', `T9 expected ${T9_CHAT_CARD_ID} completed in final live /sse payload: ${jsonText(finalBootstrapPayload)}`);
       await closeBoardSseConnection({ clearChatEvents: true });
     }
 
