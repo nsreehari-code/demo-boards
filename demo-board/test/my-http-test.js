@@ -536,7 +536,7 @@ const portArg = readCliOptionValue(cliArgs, '--port');
 const cliBoardId = readCliOptionValue(cliArgs, '--board-id') || readCliOptionValue(cliArgs, '--board');
 const requestedTests = parseRequestedTests(readCliOptionValue(cliArgs, '--run-tests'));
 
-const BOARD_ID = cliBoardId || 'live';
+const BOARD_ID = cliBoardId || 'live-test';
 const BOARD_SERVER_URL = portArg ? `http://127.0.0.1:${portArg}` : 'http://127.0.0.1:7799';
 const API_BASE = `${BOARD_SERVER_URL}/api/boards/${encodeURIComponent(BOARD_ID)}`;
 
@@ -546,6 +546,8 @@ const PORTFOLIO_VALUE_CARD_ID = 'portfolio-value-tc3-9043';
 const T4_CHAT_CARD_ID = 'card-portfolio-t4-9104';
 const T8_CHAT_CARD_ID = 'card-portfolio-t8-9108';
 const T9_CHAT_CARD_ID = 'card-portfolio-t9-9109';
+const T8F_CHAT_CARD_ID = 'card-portfolio-t8f-9118';
+const T9F_CHAT_CARD_ID = 'card-portfolio-t9f-9119';
 const PROBE_ENVELOPE = '__probe__echo__probe__';
 const NON_PROBE_RESPONSE_TIMEOUT_MS = 120_000;
 
@@ -577,6 +579,8 @@ const portfolioValueSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio-
 const t4ChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T4_CHAT_CARD_ID);
 const t8ChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T8_CHAT_CARD_ID);
 const t9ChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T9_CHAT_CARD_ID);
+const t8fChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T8F_CHAT_CARD_ID);
+const t9fChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T9F_CHAT_CARD_ID);
 
 async function main() {
   const { hostConfig } = await getHostedRuntimeContext();
@@ -585,7 +589,7 @@ async function main() {
   const formatTestId = (testId) => `${modePrefix}-${String(testId || '').trim().toUpperCase()}`;
   const printedTests = requestedTests
     ? Array.from(requestedTests).map((testId) => formatTestId(testId)).join(',')
-    : ['MB1', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9'].map((testId) => formatTestId(testId)).join(',');
+    : ['MB1', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F'].map((testId) => formatTestId(testId)).join(',');
 
   console.log(`\n=== ${modeLabel} controlface MCP smoke test ===`);
   console.log(`target: ${API_BASE}`);
@@ -1847,6 +1851,257 @@ async function main() {
       assert(finalBootstrapSummary, `T9 final live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
       assert(finalBootstrapCard && String(finalBootstrapCard.status || '') === 'completed', `T9 expected ${T9_CHAT_CARD_ID} completed in final SSE built state: ${jsonText(finalBootstrapCompletedStatus.statusData)}`);
       await closeBoardSseConnection({ clearChatEvents: true });
+    }
+
+    if (isTestSelected(requestedTests, 'T8F')) {
+      console.log(`\n=== ${formatTestId('T8F')}: real assistant attachment chat over hosted SSE ===`);
+
+      console.log(`[${formatTestId('T8F')}] step 0/11: upserting ${T8F_CHAT_CARD_ID} for chat`);
+      expectMcpSuccess(
+        await callMcp('manage.upsert-card', {
+          card_id: T8F_CHAT_CARD_ID,
+          candidate_card_content: t8fChatSeedCard,
+        }),
+        'T8F manage.upsert-card portfolio',
+      );
+      createdCardIds.push(T8F_CHAT_CARD_ID);
+      let t8fChatSubscribed = false;
+      try {
+        console.log(`[${formatTestId('T8F')}] step 1/11: subscribing chat SSE for ${T8F_CHAT_CARD_ID}`);
+        await closeBoardSseConnection({ clearChatEvents: true });
+        await ensureChatSseSubscription(T8F_CHAT_CARD_ID);
+        t8fChatSubscribed = true;
+
+        console.log(`[${formatTestId('T8F')}] step 2/11: waiting for live /sse bootstrap payload`);
+        await waitUntil(
+          () => sseState.initialPayload || false,
+          15_000,
+          `T8F initial /sse payload for ${T8F_CHAT_CARD_ID}`,
+        );
+        const bootstrapSummary = await waitForSseSummary(15_000, `T8F SSE summary for ${T8F_CHAT_CARD_ID}`);
+        assert(bootstrapSummary, `T8F live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
+
+
+        const turnId = `t8f${makeTurnId()}`;
+        const promptText = 'Answer the question in attached file in one word lower case.';
+        const markedPromptText = buildProbeChatText(promptText, 'copilot');
+        const expectedAssistantReply = 'tokyo';
+
+        console.log(`[${formatTestId('T8F')}] step 3/11: adding chat attachment for turn ${turnId}`);
+        const uploadResult = expectMcpSuccess(
+          await callControlplaneMcp('manage.add-chat-attachment', {
+            card_id: T8F_CHAT_CARD_ID,
+            turn_id: turnId,
+            file_name: 't8f-question.txt',
+            content_type: 'text/plain; charset=utf-8',
+            text: 'What is the capital of Japan',
+          }),
+          'T8F manage.add-chat-attachment',
+        );
+        const uploadedFile = Array.isArray(uploadResult?.files) ? uploadResult.files[0] : null;
+        assert(uploadedFile && typeof uploadedFile === 'object', 'T8F upload response missing file metadata');
+        assert(!Object.prototype.hasOwnProperty.call(uploadedFile, 'path'), 'T8F uploaded file metadata should not expose path');
+
+        const cardAfterUpload = readStoredCard(
+          expectMcpSuccess(
+            await callMcp('manage.read-card', { card_id: T8F_CHAT_CARD_ID }),
+            'T8F manage.read-card after upload',
+          ),
+        );
+        const storedFiles = Array.isArray(cardAfterUpload?.card_data?.files) ? cardAfterUpload.card_data.files : [];
+        const storedFile = storedFiles.find((file) => String(file?.stored_name || '') === String(uploadedFile?.stored_name || ''));
+        assert(!!storedFile, 'T8F stored file metadata missing after upload');
+        assert(storedFile?.chat === true, 'T8F stored file should be marked as chat-origin');
+        assert(!Object.prototype.hasOwnProperty.call(storedFile || {}, 'path'), 'T8F stored file metadata should not expose path');
+
+        const afterUploadMessages = await readChatMessages(T8F_CHAT_CARD_ID, turnId);
+        const uploadSystemMessage = afterUploadMessages.find((message) => message?.role === 'system');
+        assert(!!uploadSystemMessage, 'T8F upload protocol missing system chat message');
+        assert(String(uploadSystemMessage?.text || '').toLowerCase().includes('file uploaded:'), 'T8F upload system message does not describe uploaded file');
+
+        const eventStart = sseState.chatEvents.length;
+
+        console.log(`[${formatTestId('T8F')}] step 4/11: sending real-assistant chat turn ${turnId} with attachment`);
+        expectMcpSuccess(
+          await callAction('chat-send', T8F_CHAT_CARD_ID, {
+            text: markedPromptText,
+            'turn-id': turnId,
+          }),
+          'T8F chat-send',
+        );
+
+        console.log(`[${formatTestId('T8F')}] step 5/11: waiting for SSE processing-done notification`);
+        const bouquet = await waitForChatTurnState({
+          eventStart,
+          turnId,
+          timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
+          label: `T8F chat turn bouquet for turn ${turnId}`,
+          predicate: (currentBouquet) => {
+            const hasUser = currentBouquet.userMessages.some((message) => String(message?.text || '') === promptText);
+            const hasSystem = currentBouquet.systemMessages.some((message) => String(message?.text || '').toLowerCase().includes('file uploaded:'));
+            const hasAssistant = currentBouquet.assistantMessages.some((message) => /tokyo/i.test(String(message?.text || '')));
+            return currentBouquet.processingOnSeen && currentBouquet.processingDoneSeen && hasUser && hasSystem && hasAssistant;
+          },
+        });
+
+        console.log(`[${formatTestId('T8F')}] step 6/11: verifying notification bouquet contents`);
+        assert(bouquet.processingOnSeen, `T8F bouquet missing processing-on notification for turn ${turnId}`);
+        assert(bouquet.processingDoneSeen, `T8F bouquet missing processing-done notification for turn ${turnId}`);
+        const bouquetUserMessage = bouquet.userMessages.find((message) => String(message?.text || '') === promptText);
+        assert(bouquetUserMessage, `T8F bouquet missing user message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+        const bouquetAttachmentSystemMessage = bouquet.systemMessages.find((message) => String(message?.text || '').toLowerCase().includes('file uploaded:'));
+        assert(bouquetAttachmentSystemMessage, `T8F bouquet missing attachment system message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+        const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => /tokyo/i.test(String(message?.text || '')));
+        assert(bouquetAssistantMessage, `T8F bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+
+        console.log(`[${formatTestId('T8F')}] step 7/11: verifying persisted turn contents`);
+        const finalMessages = await readChatMessages(T8F_CHAT_CARD_ID, turnId);
+        const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
+        const finalAssistantMessage = [...finalMessages].reverse().find((message) => message?.role === 'assistant');
+        assert(finalUserMessage, `T8F final user message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
+        assert(finalAssistantMessage, `T8F final assistant message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
+        assert(String(finalUserMessage.text || '') === promptText, `T8F final user text mismatch: ${jsonText(finalUserMessage)}`);
+        const turnSystemMessage = finalMessages.find((message) => message?.role === 'system' && String(message?.text || '').toLowerCase().includes('file uploaded:'));
+        assert(turnSystemMessage, `T8F turn missing system attachment message: ${jsonText(finalMessages)}`);
+        assert(/^tokyo\b/i.test(String(finalAssistantMessage.text || '').trim()), `T8F final assistant text mismatch: ${jsonText(finalAssistantMessage)}`);
+
+        console.log(`[${formatTestId('T8F')}] step 8/11: final assistant reply with attachment contents passed`);
+        console.log(`[${formatTestId('T8F')}] final assistant reply: ${String(finalAssistantMessage.text || '')}`);
+      } finally {
+        if (t8fChatSubscribed) {
+          console.log(`[${formatTestId('T8F')}] step 9/11: unsubscribing chat SSE for ${T8F_CHAT_CARD_ID}`);
+          try {
+            await unsubscribeChatSseSubscription(T8F_CHAT_CARD_ID);
+          } catch (err) {
+            console.warn(`[${formatTestId('T8F')}] chat SSE unsubscribe failed: ${String(err?.message || err)}`);
+          }
+        }
+      }
+    }
+
+    if (isTestSelected(requestedTests, 'T9F')) {
+      console.log(`\n=== ${formatTestId('T9F')}: foundry-forced attachment chat over hosted SSE ===`);
+
+      console.log(`[${formatTestId('T9F')}] step 0/11: upserting ${T9F_CHAT_CARD_ID} for chat`);
+      expectMcpSuccess(
+        await callMcp('manage.upsert-card', {
+          card_id: T9F_CHAT_CARD_ID,
+          candidate_card_content: t9fChatSeedCard,
+        }),
+        'T9F manage.upsert-card portfolio',
+      );
+      createdCardIds.push(T9F_CHAT_CARD_ID);
+      let t9fChatSubscribed = false;
+      try {
+        console.log(`[${formatTestId('T9F')}] step 1/11: subscribing chat SSE for ${T9F_CHAT_CARD_ID}`);
+        await closeBoardSseConnection({ clearChatEvents: true });
+        await ensureChatSseSubscription(T9F_CHAT_CARD_ID);
+        t9fChatSubscribed = true;
+
+        console.log(`[${formatTestId('T9F')}] step 2/11: waiting for live /sse bootstrap payload`);
+        await waitUntil(
+          () => sseState.initialPayload || false,
+          15_000,
+          `T9F initial /sse payload for ${T9F_CHAT_CARD_ID}`,
+        );
+        const bootstrapSummary = await waitForSseSummary(15_000, `T9F SSE summary for ${T9F_CHAT_CARD_ID}`);
+        assert(bootstrapSummary, `T9F live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
+
+
+        const turnId = `t9f${makeTurnId()}`;
+        const promptText = 'Answer the matheamtical question in the attached file.  Only the final numerical answer in digits please';
+        const markedPromptText = buildProbeChatText(promptText, 'foundry');
+
+        console.log(`[${formatTestId('T9F')}] step 3/11: adding chat attachment for turn ${turnId}`);
+        const uploadResult = expectMcpSuccess(
+          await callControlplaneMcp('manage.add-chat-attachment', {
+            card_id: T9F_CHAT_CARD_ID,
+            turn_id: turnId,
+            file_name: 't9f-question.txt',
+            content_type: 'text/plain; charset=utf-8',
+            text: 'What is two plus three plus four?',
+          }),
+          'T9F manage.add-chat-attachment',
+        );
+        const uploadedFile = Array.isArray(uploadResult?.files) ? uploadResult.files[0] : null;
+        assert(uploadedFile && typeof uploadedFile === 'object', 'T9F upload response missing file metadata');
+        assert(!Object.prototype.hasOwnProperty.call(uploadedFile, 'path'), 'T9F uploaded file metadata should not expose path');
+
+        const cardAfterUpload = readStoredCard(
+          expectMcpSuccess(
+            await callMcp('manage.read-card', { card_id: T9F_CHAT_CARD_ID }),
+            'T9F manage.read-card after upload',
+          ),
+        );
+        const storedFiles = Array.isArray(cardAfterUpload?.card_data?.files) ? cardAfterUpload.card_data.files : [];
+        const storedFile = storedFiles.find((file) => String(file?.stored_name || '') === String(uploadedFile?.stored_name || ''));
+        assert(!!storedFile, 'T9F stored file metadata missing after upload');
+        assert(storedFile?.chat === true, 'T9F stored file should be marked as chat-origin');
+        assert(!Object.prototype.hasOwnProperty.call(storedFile || {}, 'path'), 'T9F stored file metadata should not expose path');
+
+        const afterUploadMessages = await readChatMessages(T9F_CHAT_CARD_ID, turnId);
+        const uploadSystemMessage = afterUploadMessages.find((message) => message?.role === 'system');
+        assert(!!uploadSystemMessage, 'T9F upload protocol missing system chat message');
+        assert(String(uploadSystemMessage?.text || '').toLowerCase().includes('file uploaded:'), 'T9F upload system message does not describe uploaded file');
+
+        const eventStart = sseState.chatEvents.length;
+
+        console.log(`[${formatTestId('T9F')}] step 4/11: sending foundry-forced chat turn ${turnId} with attachment`);
+        expectMcpSuccess(
+          await callAction('chat-send', T9F_CHAT_CARD_ID, {
+            text: markedPromptText,
+            'turn-id': turnId,
+          }),
+          'T9F chat-send',
+        );
+
+        console.log(`[${formatTestId('T9F')}] step 5/11: waiting for SSE processing-done notification`);
+        const bouquet = await waitForChatTurnState({
+          eventStart,
+          turnId,
+          timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
+          label: `T9F chat turn bouquet for turn ${turnId}`,
+          predicate: (currentBouquet) => {
+            const hasUser = currentBouquet.userMessages.some((message) => String(message?.text || '') === promptText);
+            const hasSystem = currentBouquet.systemMessages.some((message) => String(message?.text || '').toLowerCase().includes('file uploaded:'));
+            const hasAssistant = currentBouquet.assistantMessages.some((message) => /(?:^|\b)9(?:\b|$)/.test(String(message?.text || '')));
+            return currentBouquet.processingOnSeen && currentBouquet.processingDoneSeen && hasUser && hasSystem && hasAssistant;
+          },
+        });
+
+        console.log(`[${formatTestId('T9F')}] step 6/11: verifying notification bouquet contents`);
+        assert(bouquet.processingOnSeen, `T9F bouquet missing processing-on notification for turn ${turnId}`);
+        assert(bouquet.processingDoneSeen, `T9F bouquet missing processing-done notification for turn ${turnId}`);
+        const bouquetUserMessage = bouquet.userMessages.find((message) => String(message?.text || '') === promptText);
+        assert(bouquetUserMessage, `T9F bouquet missing user message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+        const bouquetAttachmentSystemMessage = bouquet.systemMessages.find((message) => String(message?.text || '').toLowerCase().includes('file uploaded:'));
+        assert(bouquetAttachmentSystemMessage, `T9F bouquet missing attachment system message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+        const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => /(?:^|\b)9(?:\b|$)/.test(String(message?.text || '')));
+        assert(bouquetAssistantMessage, `T9F bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+
+        console.log(`[${formatTestId('T9F')}] step 7/11: verifying persisted turn contents`);
+        const finalMessages = await readChatMessages(T9F_CHAT_CARD_ID, turnId);
+        const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
+        const finalAssistantMessage = [...finalMessages].reverse().find((message) => message?.role === 'assistant');
+        assert(finalUserMessage, `T9F final user message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
+        assert(finalAssistantMessage, `T9F final assistant message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
+        assert(String(finalUserMessage.text || '') === promptText, `T9F final user text mismatch: ${jsonText(finalUserMessage)}`);
+        const turnSystemMessage = finalMessages.find((message) => message?.role === 'system' && String(message?.text || '').toLowerCase().includes('file uploaded:'));
+        assert(turnSystemMessage, `T9F turn missing system attachment message: ${jsonText(finalMessages)}`);
+        assert(/^9\b/.test(String(finalAssistantMessage.text || '').trim()), `T9F final assistant text mismatch: ${jsonText(finalAssistantMessage)}`);
+
+        console.log(`[${formatTestId('T9F')}] step 8/11: final assistant reply with attachment contents passed`);
+        console.log(`[${formatTestId('T9F')}] final assistant reply: ${String(finalAssistantMessage.text || '')}`);
+      } finally {
+        if (t9fChatSubscribed) {
+          console.log(`[${formatTestId('T9F')}] step 9/11: unsubscribing chat SSE for ${T9F_CHAT_CARD_ID}`);
+          try {
+            await unsubscribeChatSseSubscription(T9F_CHAT_CARD_ID);
+          } catch (err) {
+            console.warn(`[${formatTestId('T9F')}] chat SSE unsubscribe failed: ${String(err?.message || err)}`);
+          }
+        }
+      }
     }
 
     console.log('\n=== Selected tests passed ===\n');
