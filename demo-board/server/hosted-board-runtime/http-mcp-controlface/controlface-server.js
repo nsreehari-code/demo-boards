@@ -540,6 +540,26 @@ async function handleManageBoardsRoute({
     return;
   }
 
+  if (subcommand === 'save-meta') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const metadata = args?.metadata;
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      sendJson(res, 400, { status: 'error', error: 'args.metadata is required (object)' });
+      return;
+    }
+    const board = await dynamicBoards.saveMeta(id, metadata);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
+    return;
+  }
+
   if (subcommand === 'refresh-board') {
     const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
     if (!id) {

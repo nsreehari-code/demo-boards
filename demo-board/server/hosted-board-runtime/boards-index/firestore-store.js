@@ -32,5 +32,9 @@ export function createFirestoreBoardsStore({ ref, adapterServices }) {
     await docRef.create(record);
   }
 
-  return { kind: 'firestore', list, get, has, put };
+  async function set(id, record) {
+    await collection.doc(id).set(record);
+  }
+
+  return { kind: 'firestore', list, get, has, put, set };
 }

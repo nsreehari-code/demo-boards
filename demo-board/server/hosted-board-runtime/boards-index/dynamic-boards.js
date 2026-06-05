@@ -44,5 +44,19 @@ export function createDynamicBoards({ hostConfig, adapterServices }) {
     return hydrate(boardId, record);
   }
 
-  return { ensureSeeded, list, get, add, store };
+  async function saveMeta(boardId, metadata) {
+    const record = await store.get(boardId);
+    if (!record) return null;
+    const currentMetadata = record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+      ? record.metadata
+      : {};
+    const incomingMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? metadata
+      : {};
+    const nextRecord = { ...record, metadata: { ...currentMetadata, ...incomingMetadata } };
+    await store.set(boardId, nextRecord);
+    return hydrate(boardId, nextRecord);
+  }
+
+  return { ensureSeeded, list, get, add, saveMeta, store };
 }

@@ -39,5 +39,10 @@ export function createFsPathBoardsStore({ ref }) {
     fs.writeFileSync(filePath(id), JSON.stringify(record, null, 2), { encoding: 'utf8', flag: 'wx' });
   }
 
-  return { kind: 'fs-path', list, get, has, put };
+  async function set(id, record) {
+    ensureDir();
+    fs.writeFileSync(filePath(id), JSON.stringify(record, null, 2), { encoding: 'utf8', flag: 'w' });
+  }
+
+  return { kind: 'fs-path', list, get, has, put, set };
 }
