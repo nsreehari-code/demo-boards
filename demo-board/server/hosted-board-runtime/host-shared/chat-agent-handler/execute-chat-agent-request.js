@@ -1,23 +1,39 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import { createStepMachine, MemoryStore, buildStepHandlersForFlow, loadStepFlow } from 'yaml-flow/step-machine-public';
-import { invokeStepMachineExecutionRef } from 'yaml-flow/board-worker-adapter';
-import { deriveLogIdFromCardId } from '../../../chat-flow/copilot-chat/watchparty.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  buildContext,
+  deriveLogIdFromCardId,
+  resolveBoardWatchpartyCardDir,
+} from '../../../chat-flow/shared.js';
+import { createLogger, HOSTED_SERVER_LOG_PATH } from '../logging.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const BOARD_ROOT = path.resolve(__dirname, '../../../..');
-const DEFAULT_WATCHPARTY_FILES_DIR = 'watchparty-files-for-chat';
 const CHAT_FLOW_ROOT = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
-const DEFAULT_MCP_SERVER_URL = 'http://127.0.0.1:7801/mcp';
+const ASSISTANT_REGISTRY_PATH = path.resolve(CHAT_FLOW_ROOT, 'assistant_registry.json');
+const ASSISTANT_REGISTRY = JSON.parse(fs.readFileSync(ASSISTANT_REGISTRY_PATH, 'utf8'));
+const executeChatAgentLogger = createLogger('execute-chat-agent-handler', { filePath: HOSTED_SERVER_LOG_PATH });
 
-function readJsonIfExists(filePath) {
-  if (!filePath || !fs.existsSync(filePath)) return null;
-  const raw = fs.readFileSync(filePath, 'utf8').trim();
-  if (!raw) return null;
-  return JSON.parse(raw);
+const assistantModuleCache = new Map();
+
+async function loadAssistantInvoker(name) {
+  if (assistantModuleCache.has(name)) {
+    return assistantModuleCache.get(name);
+  }
+  const relativePath = ASSISTANT_REGISTRY[name];
+  if (typeof relativePath !== 'string' || !relativePath.trim()) {
+    throw new Error(`Unknown chat assistant: "${name}". Registered: ${Object.keys(ASSISTANT_REGISTRY).join(', ')}`);
+  }
+  const absolutePath = path.resolve(CHAT_FLOW_ROOT, relativePath);
+  const mod = await import(pathToFileURL(absolutePath).href);
+  if (typeof mod.invokeAssistant !== 'function') {
+    throw new Error(`Chat assistant "${name}" at ${relativePath} does not export invokeAssistant()`);
+  }
+  assistantModuleCache.set(name, mod.invokeAssistant);
+  return mod.invokeAssistant;
 }
 
 function normalizePositiveInt(value, fallback = null) {
@@ -26,55 +42,11 @@ function normalizePositiveInt(value, fallback = null) {
   return Math.floor(num);
 }
 
-function normalizeNonNegativeInt(value, fallback = null) {
-  const num = Number(value);
-  if (!Number.isFinite(num) || num < 0) return fallback;
-  return Math.floor(num);
-}
-
-function applyFlowTimeout(flow, timeoutMs, invokeTimeoutMs) {
-  if (!flow || typeof flow !== 'object' || Array.isArray(flow)) return null;
-  const normalizedTimeoutMs = normalizePositiveInt(timeoutMs, null);
-  const normalizedInvokeTimeoutMs = normalizeNonNegativeInt(invokeTimeoutMs, null);
-  if (normalizedTimeoutMs === null && normalizedInvokeTimeoutMs === null) return flow;
-  return {
-    ...flow,
-    settings: {
-      ...(flow.settings && typeof flow.settings === 'object' ? flow.settings : {}),
-      ...(normalizedTimeoutMs !== null ? { timeout_ms: normalizedTimeoutMs } : {}),
-      ...(normalizedInvokeTimeoutMs !== null ? { invoke_timeout_ms: normalizedInvokeTimeoutMs } : {}),
-    },
-  };
-}
-
-function resolveFromConfigBase(configDir, relativeOrAbsolutePath) {
-  if (typeof relativeOrAbsolutePath !== 'string' || !relativeOrAbsolutePath.trim()) return '';
-  return path.isAbsolute(relativeOrAbsolutePath)
-    ? path.normalize(relativeOrAbsolutePath)
-    : path.resolve(configDir || BOARD_ROOT, relativeOrAbsolutePath);
-}
-
 function normalizeChatAssistant(value) {
   const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return normalized === 'foundry' || normalized === 'probe' || normalized === 'copilot'
     ? normalized
     : 'copilot';
-}
-
-function normalizeWorkspaceStems(value) {
-  if (!Array.isArray(value)) return [];
-  const unique = new Set();
-  for (const entry of value) {
-    const normalized = typeof entry === 'string' ? entry.trim() : '';
-    if (normalized) {
-      unique.add(normalized);
-    }
-  }
-  return [...unique];
-}
-
-function resolveInvokeTimeoutMs(flow) {
-  return normalizePositiveInt(flow?.settings?.invoke_timeout_ms, 300000) ?? 300000;
 }
 
 function normalizeString(value) {
@@ -85,12 +57,6 @@ function trimTrailingSlash(value) {
   return normalizeString(value).replace(/\/+$/, '');
 }
 
-function normalizeBoolean(value) {
-  if (value === true) return true;
-  if (typeof value === 'string') return value.trim().toLowerCase() === 'true';
-  return false;
-}
-
 function normalizeProbe(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
@@ -98,88 +64,65 @@ function normalizeProbe(value) {
 function resolveProbeAssistantOverride(probe) {
   const normalized = normalizeProbe(probe);
   if (!normalized) return '';
-  return normalized === 'echo' ? 'probe' : normalized;
-}
-
-function resolveMcpServerUrl(hostRuntime, apiBasePath = '') {
-  const hostedServerUrl = trimTrailingSlash(hostRuntime?.serverUrl);
-  const normalizedApiBasePath = normalizeString(apiBasePath);
-  if (hostedServerUrl && normalizedApiBasePath) {
-    return `${hostedServerUrl}${normalizedApiBasePath}/mcp`;
+  if (normalized === 'echo' || normalized === 'echoattach') {
+    return 'probe';
   }
-  const envOverride = typeof process.env.DEMO_BOARDS_MCP_SERVER_URL === 'string'
-    ? process.env.DEMO_BOARDS_MCP_SERVER_URL.trim()
-    : '';
-  const configuredUrl = typeof hostRuntime?.mcpServerUrl === 'string'
-    ? hostRuntime.mcpServerUrl.trim()
-    : '';
-  return envOverride || configuredUrl || DEFAULT_MCP_SERVER_URL;
+  return normalized;
 }
 
-export function buildHostedChatAgentRuntime(boardId, boardConfig, hostRuntime) {
-  const configBaseDir = typeof hostRuntime?.configDir === 'string' && hostRuntime.configDir.trim()
-    ? hostRuntime.configDir.trim()
-    : BOARD_ROOT;
+function resolveMcpServerUrl(hostRuntime, _apiBasePath = '') {
+  return normalizeString(hostRuntime?.mcpServerUrl);
+}
+
+export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) {
   const apiBasePath = `${hostRuntime.apiBasePrefix}/${encodeURIComponent(boardId)}`;
-  const chat = boardConfig?.chat && typeof boardConfig.chat === 'object' ? boardConfig.chat : {};
-  const copilotChat = chat?.copilot && typeof chat.copilot === 'object' && !Array.isArray(chat.copilot)
-    ? chat.copilot
-    : {};
-  const executionExtra = {
+  const chatAgentHandlerNeeds = {
     boardId,
     serverUrl: hostRuntime.serverUrl,
     mcpServerUrl: resolveMcpServerUrl(hostRuntime, apiBasePath),
     apiBasePath,
-    chatFlowRoot: CHAT_FLOW_ROOT,
   };
 
-  const setup = boardConfig?.setup && typeof boardConfig.setup === 'object' ? boardConfig.setup : {};
-  const regular = boardConfig?.regular && typeof boardConfig.regular === 'object' ? boardConfig.regular : {};
   const foundryAgents = hostRuntime?.foundryAgents && typeof hostRuntime.foundryAgents === 'object'
     ? hostRuntime.foundryAgents
     : {};
-  const watchparty = hostRuntime?.watchparty && typeof hostRuntime.watchparty === 'object'
-    ? hostRuntime.watchparty
+  const boardChat = boardConfig?.chat && typeof boardConfig.chat === 'object' && !Array.isArray(boardConfig.chat)
+    ? boardConfig.chat
+    : {};
+  const boardChatCopilot = boardChat?.copilot && typeof boardChat.copilot === 'object' && !Array.isArray(boardChat.copilot)
+    ? boardChat.copilot
     : {};
 
-  const setupRoot = resolveFromConfigBase(configBaseDir, typeof setup.setupRoot === 'string' ? setup.setupRoot : '');
-  const aiWorkspaceRoot = typeof setup.aiWorkspaceRoot === 'string' && setup.aiWorkspaceRoot.trim()
-    ? (path.isAbsolute(setup.aiWorkspaceRoot) ? setup.aiWorkspaceRoot : path.resolve(setupRoot, setup.aiWorkspaceRoot))
+  const aiWorkspaceRoot = typeof boardConfig?.aiWorkspaceRoot === 'string' && boardConfig.aiWorkspaceRoot.trim()
+    ? path.normalize(boardConfig.aiWorkspaceRoot.trim())
     : '';
-  const watchPartyFilesForChatDir = setupRoot
-    ? path.join(setupRoot, typeof watchparty.filesForChatDir === 'string' && watchparty.filesForChatDir.trim()
-      ? watchparty.filesForChatDir.trim()
-      : DEFAULT_WATCHPARTY_FILES_DIR)
-    : '';
-
-  const chatHandlerFlowPath = resolveFromConfigBase(
-    configBaseDir,
-    typeof regular.chatHandlerFlowPath === 'string' && regular.chatHandlerFlowPath.trim()
-      ? regular.chatHandlerFlowPath.trim()
-      : '',
-  );
-
-  const chatHandlerFlow = applyFlowTimeout(
-    readJsonIfExists(chatHandlerFlowPath),
-    hostRuntime?.chatFlowTimeoutMs,
-    hostRuntime?.chatInvokeRefTimeoutMs,
-  );
+  if (aiWorkspaceRoot && !path.isAbsolute(aiWorkspaceRoot)) {
+    throw new Error(`boards.${boardId}.aiWorkspaceRoot must be an absolute path (got '${aiWorkspaceRoot}')`);
+  }
 
   return {
-    chatHandlerFlow,
-    executionExtra: {
-      ...executionExtra,
-      boardSetupRoot: setupRoot,
+    chatAgentHandlerNeeds: {
+      ...chatAgentHandlerNeeds,
+      streamableMcpServerUrl: typeof hostRuntime?.mcpServerUrl === 'string' ? hostRuntime.mcpServerUrl.trim() : '',
+      enableAssistantDebug: hostRuntime?.enableAssistantDebug === true,
+      debugAssistantFile: typeof hostRuntime?.debugAssistantFile === 'string' ? hostRuntime.debugAssistantFile.trim() : '',
       aiWorkspaceRoot,
-      watchPartyFilesForChatDir,
       chatCopilotTimeoutMs: normalizePositiveInt(hostRuntime?.chatCopilotTimeoutMs, 300000) ?? 300000,
-      chatAssistant: normalizeChatAssistant(chat?.assistant),
-      copilotCustomWorkspaceStems: normalizeWorkspaceStems(copilotChat['custom-workspace-stems']),
+      chatAssistant: normalizeChatAssistant(boardChat?.assistant || boardConfig?.ai),
+      copilotCustomWorkspaceStems: Array.isArray(boardChatCopilot['custom-workspace-stems'])
+        ? boardChatCopilot['custom-workspace-stems'].filter((entry) => typeof entry === 'string' && entry.trim())
+        : [],
       foundryEndpoint: typeof foundryAgents.endpoint === 'string' ? foundryAgents.endpoint.trim() : '',
       foundryChatAgentId: typeof foundryAgents.chatAgentId === 'string' ? foundryAgents.chatAgentId.trim() : '',
+      foundryTaskExecutorAgentId: typeof foundryAgents.taskExecutorAgentId === 'string' ? foundryAgents.taskExecutorAgentId.trim() : '',
       foundryChatExposedMcpToolPrefixes: Array.isArray(foundryAgents.chatExposedMcpToolPrefixes)
         ? foundryAgents.chatExposedMcpToolPrefixes.filter((entry) => typeof entry === 'string' && entry.trim())
         : [],
+    },
+    taskExecutorExtra: {
+      aiWorkspaceRoot,
+      foundryEndpoint: typeof foundryAgents.endpoint === 'string' ? foundryAgents.endpoint.trim() : '',
+      foundryTaskExecutorAgentId: typeof foundryAgents.taskExecutorAgentId === 'string' ? foundryAgents.taskExecutorAgentId.trim() : '',
     },
   };
 }
@@ -192,30 +135,24 @@ function deriveTurnId(requestArgs) {
   return directTurnId || `hosted-turn-${randomUUID()}`;
 }
 
-async function runChatHandlerFlow(flowSpec, args) {
-  const flow = await loadStepFlow(flowSpec);
-  const handlers = buildStepHandlersForFlow(flow, {
-    invoke: (ref, stepArgs) => invokeStepMachineExecutionRef(ref, stepArgs, {
-      timeoutMs: resolveInvokeTimeoutMs(flow),
-      label: 'chat-handler',
-    }),
+async function setChatProcessingState(serverUrl, boardId, cardId, state) {
+  const tool = state === 'started' ? 'setstate.chat-processing-started' : 'setstate.chat-processing-done';
+  const url = `${serverUrl.replace(/\/$/, '')}/api/boards/${encodeURIComponent(boardId)}/mcp-controlplane`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool, args: { board_id: boardId, card_id: cardId } }),
   });
-  const machine = createStepMachine(flow, handlers, { store: new MemoryStore() });
-  const run = await machine.run(args && typeof args === 'object' && !Array.isArray(args) ? args : {});
-  if (run.status !== 'completed') {
-    const reason = run.error?.message ?? run.intent ?? run.status;
-    return { dispatched: false, error: String(reason || 'flow execution failed') };
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.status === 'fail' || payload?.status === 'error') {
+    const message = typeof payload?.error === 'string' && payload.error.trim()
+      ? payload.error.trim()
+      : `Failed to set chat processing state to ${state}`;
+    throw new Error(message);
   }
-  if (run.intent !== 'success') {
-    const reason = typeof run.data?.error === 'string'
-      ? run.data.error
-      : `flow returned intent: ${run.intent}`;
-    return { dispatched: false, error: reason };
-  }
-  return { dispatched: true };
 }
 
-export async function executeChatAgentRequest(request, boardId, chatRuntime) {
+export async function executeChatAgentRequest(request, boardId, boardRuntimeNeeds) {
   const requestArgs = request && typeof request.args === 'object' && !Array.isArray(request.args)
     ? request.args
     : {};
@@ -226,19 +163,47 @@ export async function executeChatAgentRequest(request, boardId, chatRuntime) {
     : deriveLogIdFromCardId(cardId);
   const probe = normalizeProbe(requestArgs.probe);
   const probeAssistantOverride = resolveProbeAssistantOverride(probe);
-  const args = {
-    ...chatRuntime.executionExtra,
+  const watchPartyDir = cardId
+    ? resolveBoardWatchpartyCardDir(boardId, cardId)
+    : '';
+  const extra = {
+    ...boardRuntimeNeeds.chatAgentHandlerNeeds,
     ...requestArgs,
     ...(cardId ? { cardId } : {}),
     ...(turnId ? { turnId } : {}),
     ...(logId ? { logId } : {}),
     ...(probe ? { probe } : {}),
     ...(probeAssistantOverride ? { chatAssistant: probeAssistantOverride } : {}),
+    ...(watchPartyDir ? { watchPartyDir } : {}),
   };
 
-  const result = await runChatHandlerFlow(chatRuntime.chatHandlerFlow, args);
+  const serverUrl = normalizeString(boardRuntimeNeeds?.chatAgentHandlerNeeds?.serverUrl);
+  if (!serverUrl) {
+    throw new Error('chat-agent dispatch requires boardRuntimeNeeds.chatAgentHandlerNeeds.serverUrl');
+  }
+  if (!cardId) {
+    throw new Error('chat-agent dispatch requires cardId');
+  }
 
-  if (!result.dispatched) {
-    throw new Error(result.error || `chat-agent dispatch failed for card "${cardId || 'unknown'}"`);
+  const assistantName = normalizeChatAssistant(extra.chatAssistant);
+
+  await setChatProcessingState(serverUrl, boardId, cardId, 'started');
+  try {
+    const invokeAssistant = await loadAssistantInvoker(assistantName);
+    executeChatAgentLogger.info(`Invoking ${assistantName}`);
+    const context = buildContext(extra);
+    fs.rmSync(context.watchPartyDir, { recursive: true, force: true });
+    fs.mkdirSync(context.watchPartyDir, { recursive: true });
+    const config = { ...extra };
+    for (const field of Object.keys(context)) {
+      delete config[field];
+    }
+    await invokeAssistant(context, config);
+  } finally {
+    try {
+      await setChatProcessingState(serverUrl, boardId, cardId, 'done');
+    } catch (clearError) {
+      console.error(`[execute-chat-agent-request] failed to clear chat-processing for ${boardId}/${cardId}:`, clearError);
+    }
   }
 }

@@ -10,7 +10,9 @@ import { createFsQueueStorage, parseRef } from 'yaml-flow/board-live-cards-node'
 import { createFirestoreQueueStorage } from 'yaml-flow/firestore-storage';
 import { jsonata } from 'yaml-flow/step-machine-public';
 import { initializeFirebaseServices } from '../server/hosted-board-runtime/firebase-adapter/firebase-init.js';
+import { initializeLocalFsServices } from '../server/hosted-board-runtime/localfs-adapter/localfs-init.js';
 import { loadFirebaseHostConfig } from '../server/hosted-board-runtime/firebase-adapter/load-config.js';
+import { createDynamicBoards } from '../server/hosted-board-runtime/boards-index/dynamic-boards.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -94,7 +96,7 @@ function jsonText(value) {
 }
 
 function makeTurnId() {
-  return randomUUID().replace(/-/g, '');
+  return randomUUID().replace(/-/g, '').slice(0, 6);
 }
 
 function httpJson(method, url, payload) {
@@ -308,11 +310,13 @@ async function getHostedRuntimeContext() {
   if (!hostedRuntimeContextPromise) {
     hostedRuntimeContextPromise = (async () => {
       const hostConfig = loadFirebaseHostConfig(QUEUE_RUNNER_CONFIG_PATH, [], 'queueRunner');
-      if (hostConfig.storageAdapter === 'localfs') {
-        return { hostConfig, firebaseServices: null };
-      }
-      const firebaseServices = await initializeFirebaseServices(hostConfig.firebase);
-      return { hostConfig, firebaseServices };
+      const adapterServices = hostConfig.storageAdapter === 'localfs'
+        ? await initializeLocalFsServices(hostConfig.localfs)
+        : await initializeFirebaseServices(hostConfig.firebase);
+      const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
+      await dynamicBoards.ensureSeeded();
+      const firebaseServices = hostConfig.storageAdapter === 'firebase' ? adapterServices : null;
+      return { hostConfig, firebaseServices, dynamicBoards };
     })();
   }
   return hostedRuntimeContextPromise;
@@ -335,16 +339,25 @@ function makeQueueMessageId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
-function getHostedBoardConfig(hostConfig, boardId) {
-  const boardConfig = hostConfig?.boards?.[boardId];
+function getHostedBoardConfig(boardConfigsById, boardId) {
+  const boardConfig = boardConfigsById?.[boardId];
   if (!boardConfig) {
     throw new Error(`Hosted config does not define board '${boardId}'`);
   }
   return boardConfig;
 }
 
-function getLocalFsProcessQueueDir(hostConfig, boardId) {
-  const boardConfig = getHostedBoardConfig(hostConfig, boardId);
+async function loadBoardConfigsById(dynamicBoards) {
+  const list = await dynamicBoards.list();
+  const map = {};
+  for (const board of list) {
+    map[board.id] = board;
+  }
+  return map;
+}
+
+function getLocalFsProcessQueueDir(hostConfig, boardConfigsById, boardId) {
+  const boardConfig = getHostedBoardConfig(boardConfigsById, boardId);
   const queueStoreRef = boardConfig?.refs?.queueStoreRef;
   if (!queueStoreRef) {
     throw new Error(`Hosted config for board '${boardId}' is missing queueStoreRef`);
@@ -356,8 +369,8 @@ function getLocalFsProcessQueueDir(hostConfig, boardId) {
   return path.join(parsed.value, 'process-accumulated');
 }
 
-function getLocalFsTaskExecutorQueueDir(hostConfig, boardId) {
-  const boardConfig = getHostedBoardConfig(hostConfig, boardId);
+function getLocalFsTaskExecutorQueueDir(hostConfig, boardConfigsById, boardId) {
+  const boardConfig = getHostedBoardConfig(boardConfigsById, boardId);
   const queueStoreRef = boardConfig?.refs?.queueStoreRef;
   if (!queueStoreRef) {
     throw new Error(`Hosted config for board '${boardId}' is missing queueStoreRef`);
@@ -369,8 +382,8 @@ function getLocalFsTaskExecutorQueueDir(hostConfig, boardId) {
   return path.join(parsed.value, 'task-executor');
 }
 
-function getFirebaseProcessQueueCollectionPath(hostConfig, boardId) {
-  const boardConfig = getHostedBoardConfig(hostConfig, boardId);
+function getFirebaseProcessQueueCollectionPath(hostConfig, boardConfigsById, boardId) {
+  const boardConfig = getHostedBoardConfig(boardConfigsById, boardId);
   const queueStoreRef = boardConfig?.refs?.queueStoreRef;
   if (!queueStoreRef) {
     throw new Error(`Hosted config for board '${boardId}' is missing queueStoreRef`);
@@ -382,8 +395,8 @@ function getFirebaseProcessQueueCollectionPath(hostConfig, boardId) {
   return `${parsed.value}-process-accumulated`;
 }
 
-function getFirebaseTaskExecutorQueueCollectionPath(hostConfig, boardId) {
-  const boardConfig = getHostedBoardConfig(hostConfig, boardId);
+function getFirebaseTaskExecutorQueueCollectionPath(hostConfig, boardConfigsById, boardId) {
+  const boardConfig = getHostedBoardConfig(boardConfigsById, boardId);
   const queueStoreRef = boardConfig?.refs?.queueStoreRef;
   if (!queueStoreRef) {
     throw new Error(`Hosted config for board '${boardId}' is missing queueStoreRef`);
@@ -435,9 +448,10 @@ function readLocalFsQueueRecord(queueDir, id) {
 }
 
 async function enqueueProcessAccumulatedWakeup(boardId) {
-  const { hostConfig, firebaseServices } = await getHostedRuntimeContext();
+  const { hostConfig, firebaseServices, dynamicBoards } = await getHostedRuntimeContext();
+  const boardConfigsById = await loadBoardConfigsById(dynamicBoards);
   if (hostConfig.storageAdapter === 'localfs') {
-    const queueDir = getLocalFsProcessQueueDir(hostConfig, boardId);
+    const queueDir = getLocalFsProcessQueueDir(hostConfig, boardConfigsById, boardId);
     const queue = createFsQueueStorage(queueDir);
     const dedupKey = `manual-process-accumulated:${makeQueueMessageId('dedup')}`;
     const message = queue.enqueueIfAbsent
@@ -462,21 +476,23 @@ async function enqueueProcessAccumulatedWakeup(boardId) {
     dead: false,
     deadReason: null,
   };
-  await firebaseServices.firestore.collection(getFirebaseProcessQueueCollectionPath(hostConfig, boardId)).doc(id).set(queueDoc);
+  await firebaseServices.firestore.collection(getFirebaseProcessQueueCollectionPath(hostConfig, boardConfigsById, boardId)).doc(id).set(queueDoc);
   return { id };
 }
 
 async function readProcessAccumulatedWakeup(boardId, id) {
-  const { hostConfig, firebaseServices } = await getHostedRuntimeContext();
+  const { hostConfig, firebaseServices, dynamicBoards } = await getHostedRuntimeContext();
+  const boardConfigsById = await loadBoardConfigsById(dynamicBoards);
   if (hostConfig.storageAdapter === 'localfs') {
-    return readLocalFsQueueRecord(getLocalFsProcessQueueDir(hostConfig, boardId), id);
+    return readLocalFsQueueRecord(getLocalFsProcessQueueDir(hostConfig, boardConfigsById, boardId), id);
   }
-  const snap = await firebaseServices.firestore.collection(getFirebaseProcessQueueCollectionPath(hostConfig, boardId)).doc(id).get();
+  const snap = await firebaseServices.firestore.collection(getFirebaseProcessQueueCollectionPath(hostConfig, boardConfigsById, boardId)).doc(id).get();
   return snap.exists ? snap.data() ?? null : null;
 }
 
 async function enqueueDummyTaskExecutorRequest(boardId) {
-  const { hostConfig, firebaseServices } = await getHostedRuntimeContext();
+  const { hostConfig, firebaseServices, dynamicBoards } = await getHostedRuntimeContext();
+  const boardConfigsById = await loadBoardConfigsById(dynamicBoards);
   const marker = makeQueueMessageId('tt-dummy');
   const request = {
     boardId,
@@ -493,25 +509,26 @@ async function enqueueDummyTaskExecutorRequest(boardId) {
   };
 
   if (hostConfig.storageAdapter === 'localfs') {
-    const queue = createFsQueueStorage(getLocalFsTaskExecutorQueueDir(hostConfig, boardId));
+    const queue = createFsQueueStorage(getLocalFsTaskExecutorQueueDir(hostConfig, boardConfigsById, boardId));
     const message = queue.enqueue(request);
     if (!message) throw new Error(`Failed to enqueue localfs task-executor dummy request for ${boardId}`);
     return { id: message.id, marker };
   }
 
   const queue = createFirestoreQueueStorage(
-    firebaseServices.firestore.collection(getFirebaseTaskExecutorQueueCollectionPath(hostConfig, boardId)),
+    firebaseServices.firestore.collection(getFirebaseTaskExecutorQueueCollectionPath(hostConfig, boardConfigsById, boardId)),
   );
   const message = await queue.enqueue(request);
   return { id: message.id, marker };
 }
 
 async function readDummyTaskExecutorRequest(boardId, id) {
-  const { hostConfig, firebaseServices } = await getHostedRuntimeContext();
+  const { hostConfig, firebaseServices, dynamicBoards } = await getHostedRuntimeContext();
+  const boardConfigsById = await loadBoardConfigsById(dynamicBoards);
   if (hostConfig.storageAdapter === 'localfs') {
-    return readLocalFsQueueRecord(getLocalFsTaskExecutorQueueDir(hostConfig, boardId), id);
+    return readLocalFsQueueRecord(getLocalFsTaskExecutorQueueDir(hostConfig, boardConfigsById, boardId), id);
   }
-  const snap = await firebaseServices.firestore.collection(getFirebaseTaskExecutorQueueCollectionPath(hostConfig, boardId)).doc(id).get();
+  const snap = await firebaseServices.firestore.collection(getFirebaseTaskExecutorQueueCollectionPath(hostConfig, boardConfigsById, boardId)).doc(id).get();
   return snap.exists ? snap.data() ?? null : null;
 }
 
@@ -526,18 +543,18 @@ const API_BASE = `${BOARD_SERVER_URL}/api/boards/${encodeURIComponent(BOARD_ID)}
 const PORTFOLIO_CARD_ID = 'card-portfolio-tc1-9008';
 const MARKET_PRICES_CARD_ID = 'market-prices-tc2-9027';
 const PORTFOLIO_VALUE_CARD_ID = 'portfolio-value-tc3-9043';
+const T4_CHAT_CARD_ID = 'card-portfolio-t4-9104';
 const T8_CHAT_CARD_ID = 'card-portfolio-t8-9108';
 const T9_CHAT_CARD_ID = 'card-portfolio-t9-9109';
-const ECHO_PROBE_MARKER = '__probe__echo__probe__';
+const PROBE_ENVELOPE = '__probe__echo__probe__';
 const NON_PROBE_RESPONSE_TIMEOUT_MS = 120_000;
 
 function buildProbeChatText(promptText, assistantStem = '') {
   const normalizedPromptText = String(promptText || '');
-  const normalizedAssistantStem = typeof assistantStem === 'string' ? assistantStem.trim() : '';
-  if (!normalizedAssistantStem || normalizedAssistantStem.toLowerCase() === 'echo') {
-    return `${ECHO_PROBE_MARKER}${normalizedPromptText}${ECHO_PROBE_MARKER}`;
-  }
-  return `${ECHO_PROBE_MARKER}${normalizedAssistantStem}__${normalizedPromptText}${ECHO_PROBE_MARKER}`;
+  const normalizedAssistantStem = typeof assistantStem === 'string' && assistantStem.trim()
+    ? assistantStem.trim()
+    : 'echo';
+  return `${PROBE_ENVELOPE}${normalizedAssistantStem}__${normalizedPromptText}${PROBE_ENVELOPE}`;
 }
 
 const portfolioSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), PORTFOLIO_CARD_ID);
@@ -557,6 +574,7 @@ const portfolioT2SeedCard = (() => {
 })();
 const marketPricesSeedCard = cloneCardWithId(loadCardFixture('cardT-market-prices.json'), MARKET_PRICES_CARD_ID);
 const portfolioValueSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio-value.json'), PORTFOLIO_VALUE_CARD_ID);
+const t4ChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T4_CHAT_CARD_ID);
 const t8ChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T8_CHAT_CARD_ID);
 const t9ChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T9_CHAT_CARD_ID);
 
@@ -567,7 +585,7 @@ async function main() {
   const formatTestId = (testId) => `${modePrefix}-${String(testId || '').trim().toUpperCase()}`;
   const printedTests = requestedTests
     ? Array.from(requestedTests).map((testId) => formatTestId(testId)).join(',')
-    : ['T0', 'T1', 'TQ', 'TT', 'T2', 'T3'].map((testId) => formatTestId(testId)).join(',');
+    : ['MB1', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9'].map((testId) => formatTestId(testId)).join(',');
 
   console.log(`\n=== ${modeLabel} controlface MCP smoke test ===`);
   console.log(`target: ${API_BASE}`);
@@ -584,12 +602,69 @@ async function main() {
   }
 
   const boards = Array.isArray(healthz.result?.data?.boards) ? healthz.result.data.boards : [];
-  assert(boards.includes(BOARD_ID), `healthz does not list board '${BOARD_ID}': ${jsonText(boards)}`);
   console.log(`[setup] healthz ok: boards=${jsonText(boards)}`);
+
+  console.log(`\n=== ${formatTestId('MB1')}: ensure board '${BOARD_ID}' is registered via /manage-boards ===`);
+  const manageBoardsUrl = `${BOARD_SERVER_URL}/manage-boards`;
+  const listResult = await httpJson('POST', manageBoardsUrl, { subcommand: 'list-boards' });
+  assert(
+    listResult.status === 200 && listResult.data?.status === 'success',
+    `${formatTestId('MB1')} list-boards failed: HTTP ${listResult.status} ${jsonText(listResult.data)}`,
+  );
+  const initialBoards = Array.isArray(listResult.data?.data?.boards) ? listResult.data.data.boards : [];
+  const initialIds = initialBoards.map((board) => String(board?.id || ''));
+  console.log(`[${formatTestId('MB1')}] list-boards returned: ${jsonText(initialIds)}`);
+
+  if (!initialIds.includes(BOARD_ID)) {
+    console.log(`[${formatTestId('MB1')}] board '${BOARD_ID}' missing; calling add-board`);
+    const addResult = await httpJson('POST', manageBoardsUrl, {
+      subcommand: 'add-board',
+      args: {
+        boardId: BOARD_ID,
+        record: {
+          label: BOARD_ID,
+          ai: 'copilot',
+          aiWorkspaceTemplate: 'default',
+          refsTemplate: 'localfs-default',
+        },
+      },
+    });
+    assert(
+      addResult.status === 200 && addResult.data?.status === 'success',
+      `${formatTestId('MB1')} add-board failed: HTTP ${addResult.status} ${jsonText(addResult.data)}`,
+    );
+    const reListResult = await httpJson('POST', manageBoardsUrl, { subcommand: 'list-boards' });
+    assert(
+      reListResult.status === 200 && reListResult.data?.status === 'success',
+      `${formatTestId('MB1')} re-list-boards failed: HTTP ${reListResult.status} ${jsonText(reListResult.data)}`,
+    );
+    const reListedIds = (Array.isArray(reListResult.data?.data?.boards) ? reListResult.data.data.boards : [])
+      .map((board) => String(board?.id || ''));
+    assert(
+      reListedIds.includes(BOARD_ID),
+      `${formatTestId('MB1')} board '${BOARD_ID}' still not listed after add-board: ${jsonText(reListedIds)}`,
+    );
+    console.log(`[${formatTestId('MB1')}] add-board succeeded; boards now: ${jsonText(reListedIds)}`);
+  } else {
+    console.log(`[${formatTestId('MB1')}] board '${BOARD_ID}' already registered; calling refresh-board`);
+    const refreshResult = await httpJson('POST', manageBoardsUrl, {
+      subcommand: 'refresh-board',
+      args: {
+        boardId: BOARD_ID,
+      },
+    });
+    assert(
+      refreshResult.status === 200 && refreshResult.data?.status === 'success',
+      `${formatTestId('MB1')} refresh-board failed: HTTP ${refreshResult.status} ${jsonText(refreshResult.data)}`,
+    );
+    console.log(`[${formatTestId('MB1')}] refresh-board succeeded for '${BOARD_ID}'`);
+  }
 
   const createdCardIds = [];
   const sseState = {
     initialPayload: null,
+    latestPayload: null,
+    latestStatusData: null,
     statusSummary: null,
     chatEvents: [],
   };
@@ -643,14 +718,33 @@ async function main() {
     }
   }
 
+  function extractStatusDataFromSsePayload(payload) {
+    if (payload?.statusSnapshot && typeof payload.statusSnapshot === 'object') {
+      return payload.statusSnapshot;
+    }
+    if (payload?.kind === 'notification-batch' && Array.isArray(payload.notifications)) {
+      for (const notification of payload.notifications) {
+        if (notification?.kind === 'status' && notification.status && typeof notification.status === 'object') {
+          return notification.status;
+        }
+      }
+    }
+    return null;
+  }
+
   function applySseFrame(payload, cardId) {
     if (payload && Array.isArray(payload.cardDefinitions)) {
       if (!sseState.initialPayload && payload.cardDefinitions.length > 0) {
         sseState.initialPayload = payload;
       }
-      const summary = payload?.statusSnapshot?.summary;
-      if (summary) {
-        sseState.statusSummary = summary;
+      sseState.latestPayload = payload;
+    }
+
+    const statusData = extractStatusDataFromSsePayload(payload);
+    if (statusData) {
+      sseState.latestStatusData = statusData;
+      if (statusData.summary) {
+        sseState.statusSummary = statusData.summary;
       }
     }
 
@@ -682,6 +776,8 @@ async function main() {
 
   function resetBoardSseState({ clearChatEvents = false } = {}) {
     sseState.initialPayload = null;
+    sseState.latestPayload = null;
+    sseState.latestStatusData = null;
     sseState.statusSummary = null;
     if (clearChatEvents) {
       sseState.chatEvents = [];
@@ -746,69 +842,88 @@ async function main() {
     );
   }
 
-  function findAssistantOutcome(events, { beforeCount = 0, successPattern, turnId }) {
-    for (const event of events) {
-      const messages = Array.isArray(event?.messages) ? event.messages : [];
-      const newMessages = messages.slice(beforeCount);
-      const relevantMessages = turnId
-        ? newMessages.filter((message) => String(message?.turn || '') === turnId)
-        : newMessages;
-      const assistantMessage = [...relevantMessages].reverse().find((message) => message?.role === 'assistant');
-      if (assistantMessage) {
-        const text = String(assistantMessage.text || '');
-        if (!successPattern || successPattern.test(text)) {
-          return { ok: true, assistantMessage, event, source: 'sse' };
-        }
-        return { ok: false, assistantMessage, reason: `assistant reply did not match expected content: ${text}`, source: 'sse' };
-      }
+  async function unsubscribeChatSseSubscription(cardId) {
+    if (!chatSseClientId) {
+      return;
     }
-    return false;
+    expectMcpSuccess(
+      await callControlplaneMcp('sse.unsubscribe-chat', {
+        card_id: cardId,
+        client_id: chatSseClientId,
+      }),
+      `sse.unsubscribe-chat ${cardId}`,
+    );
   }
 
-  async function waitForAssistantOutcome({ eventStart, beforeCount, successPattern, timeoutMs, label, turnId }) {
+  function collectChatTurnBouquet(events, { turnId }) {
+    const orderedMessages = [];
+    const seenMessageKeys = new Set();
+    let processingOnSeen = false;
+    let processingDoneSeen = false;
+    for (const event of events) {
+      if (event?.processing === true) {
+        processingOnSeen = true;
+      }
+      if (event?.processing === false) {
+        processingDoneSeen = true;
+      }
+      const messages = Array.isArray(event?.messages) ? event.messages : [];
+      for (const message of messages) {
+        if (turnId && String(message?.turn || '') !== turnId) {
+          continue;
+        }
+        const messageKey = `${message?.role || ''}|${String(message?.text || '')}`;
+        if (seenMessageKeys.has(messageKey)) {
+          continue;
+        }
+        seenMessageKeys.add(messageKey);
+        orderedMessages.push(message);
+      }
+    }
+    return {
+      processingOnSeen,
+      processingDoneSeen,
+      messages: orderedMessages,
+      userMessages: orderedMessages.filter((message) => message?.role === 'user'),
+      systemMessages: orderedMessages.filter((message) => message?.role === 'system'),
+      assistantMessages: orderedMessages.filter((message) => message?.role === 'assistant'),
+    };
+  }
+
+  async function waitForChatTurnBouquet({ eventStart, turnId, timeoutMs, label }) {
     return await waitUntil(() => {
-      const outcome = findAssistantOutcome(sseState.chatEvents.slice(eventStart), {
-        beforeCount,
-        successPattern,
-        turnId,
-      });
-      return outcome || false;
+      const bouquet = collectChatTurnBouquet(sseState.chatEvents.slice(eventStart), { turnId });
+      if (!bouquet.processingDoneSeen || bouquet.assistantMessages.length === 0) {
+        return false;
+      }
+      return bouquet;
     }, timeoutMs, label);
   }
 
-  function findProcessingClearedOutcome(events, { beforeCount = 0, turnId, successPattern }) {
-    let previousMessageCount = beforeCount;
-    let matchedAssistantMessage = null;
-    for (const event of events) {
-      const messages = Array.isArray(event?.messages) ? event.messages : [];
-      const nextMessageCount = Number(event?.messageCount || messages.length || 0);
-      const newMessages = nextMessageCount > previousMessageCount
-        ? messages.slice(previousMessageCount, nextMessageCount)
-        : [];
-      const assistantMessage = [...newMessages].reverse().find((message) => (
-        message?.role === 'assistant'
-        && (!turnId || String(message?.turn || '') === turnId)
-        && successPattern.test(String(message?.text || ''))
-      ));
-      if (assistantMessage) {
-        matchedAssistantMessage = assistantMessage;
+  async function waitForChatTurnState({ eventStart, turnId, timeoutMs, label, predicate }) {
+    return await waitUntil(() => {
+      const bouquet = collectChatTurnBouquet(sseState.chatEvents.slice(eventStart), { turnId });
+      if (typeof predicate !== 'function') {
+        return bouquet.processingDoneSeen ? bouquet : false;
       }
-      if (matchedAssistantMessage && event?.processing === false) {
-        return { ok: true, assistantMessage: matchedAssistantMessage, event, source: 'sse' };
-      }
-      previousMessageCount = nextMessageCount;
-    }
-    return false;
+      return predicate(bouquet) ? bouquet : false;
+    }, timeoutMs, label);
   }
 
-  async function waitForProcessingClearedOutcome({ eventStart, beforeCount, successPattern, timeoutMs, label, turnId }) {
+  async function waitForSseCompletedCard(cardId, timeoutMs, label) {
     return await waitUntil(() => {
-      const outcome = findProcessingClearedOutcome(sseState.chatEvents.slice(eventStart), {
-        beforeCount,
-        successPattern,
-        turnId,
-      });
-      return outcome || false;
+      const statusData = sseState.latestStatusData;
+      const card = findBoardStatusCard(statusData, cardId);
+      return card && String(card.status || '') === 'completed'
+        ? { statusData, card }
+        : false;
+    }, timeoutMs, label);
+  }
+
+  async function waitForSseSummary(timeoutMs, label) {
+    return await waitUntil(() => {
+      const summary = sseState.statusSummary;
+      return summary ? summary : false;
     }, timeoutMs, label);
   }
 
@@ -1195,6 +1310,7 @@ async function main() {
       expectMcpSuccess(
         await callAction('chat-send', PORTFOLIO_CARD_ID, {
           text: probeText,
+          probe: 'echo',
           'turn-id': turnId,
         }),
         'T3 chat-send',
@@ -1269,18 +1385,140 @@ async function main() {
         `T3 initial /sse payload for ${PORTFOLIO_CARD_ID}`,
       );
       const bootstrapSummary = bootstrapPayload?.statusSnapshot?.summary || sseState.statusSummary;
-      const bootstrapCard = findBoardStatusCard(bootstrapPayload?.statusSnapshot || bootstrapPayload, PORTFOLIO_CARD_ID);
       assert(bootstrapSummary, `T3 live /sse summary missing: ${jsonText(bootstrapPayload)}`);
-      assert(bootstrapCard, `T3 live /sse payload missing ${PORTFOLIO_CARD_ID}: ${jsonText(bootstrapPayload)}`);
-      assert(String(bootstrapCard?.status || '') === 'completed', `T3 expected ${PORTFOLIO_CARD_ID} completed in live /sse payload: ${jsonText(bootstrapPayload)}`);
+      const bootstrapCompletedStatus = await waitForSseCompletedCard(PORTFOLIO_CARD_ID, 15_000, `T3 SSE completed status for ${PORTFOLIO_CARD_ID}`);
+      assert(bootstrapCompletedStatus.card, `T3 live /sse payload missing ${PORTFOLIO_CARD_ID}: ${jsonText(bootstrapCompletedStatus.statusData)}`);
       assert(Number(bootstrapSummary.completed || 0) >= 1, `T3 expected completed count >= 1 after upsert: ${jsonText(bootstrapSummary)}`);
       await closeBoardSseConnection({ clearChatEvents: true });
+    }
+
+    if (isTestSelected(requestedTests, 'T4')) {
+      console.log(`\n=== ${formatTestId('T4')}: probe chat with attachment + poll lifecycle ===`);
+
+      console.log(`[${formatTestId('T4')}] step 0/8: upserting ${T4_CHAT_CARD_ID} for chat`);
+      expectMcpSuccess(
+        await callMcp('manage.upsert-card', {
+          card_id: T4_CHAT_CARD_ID,
+          candidate_card_content: t4ChatSeedCard,
+        }),
+        'T4 manage.upsert-card portfolio',
+      );
+      createdCardIds.push(T4_CHAT_CARD_ID);
+
+      const turnId = `t4${makeTurnId()}`;
+      const promptText = 'what is the content in the attached file';
+      const probeText = buildProbeChatText(promptText, 'echoattach');
+      const expectedProbeReply = 'what is the capital of japan';
+
+      console.log(`[${formatTestId('T4')}] step 1/8: adding chat attachment for turn ${turnId}`);
+      const uploadResult = expectMcpSuccess(
+        await callControlplaneMcp('manage.add-chat-attachment', {
+          card_id: T4_CHAT_CARD_ID,
+          turn_id: turnId,
+          file_name: 't4-probe.txt',
+          content_type: 'text/plain; charset=utf-8',
+          text: expectedProbeReply,
+        }),
+        'T4 manage.add-chat-attachment',
+      );
+      const uploadedFile = Array.isArray(uploadResult?.files) ? uploadResult.files[0] : null;
+      assert(uploadedFile && typeof uploadedFile === 'object', 'T4 upload response missing file metadata');
+      assert(!Object.prototype.hasOwnProperty.call(uploadedFile, 'path'), 'T4 uploaded file metadata should not expose path');
+
+      const cardAfterUpload = readStoredCard(
+        expectMcpSuccess(
+          await callMcp('manage.read-card', { card_id: T4_CHAT_CARD_ID }),
+          'T4 manage.read-card after upload',
+        ),
+      );
+      const storedFiles = Array.isArray(cardAfterUpload?.card_data?.files) ? cardAfterUpload.card_data.files : [];
+      const storedFile = storedFiles.find((file) => String(file?.stored_name || '') === String(uploadedFile?.stored_name || ''));
+      assert(!!storedFile, 'T4 stored file metadata missing after upload');
+      assert(storedFile?.chat === true, 'T4 stored file should be marked as chat-origin');
+      assert(!Object.prototype.hasOwnProperty.call(storedFile || {}, 'path'), 'T4 stored file metadata should not expose path');
+
+      const afterUploadMessages = await readChatMessages(T4_CHAT_CARD_ID, turnId);
+      const uploadSystemMessage = afterUploadMessages.find((message) => message?.role === 'system');
+      assert(!!uploadSystemMessage, 'T4 upload protocol missing system chat message');
+      assert(String(uploadSystemMessage?.text || '').toLowerCase().includes('file uploaded:'), 'T4 upload system message does not describe uploaded file');
+
+      console.log(`[${formatTestId('T4')}] step 2/8: sending probe chat turn ${turnId} with attachment`);
+      expectMcpSuccess(
+        await callAction('chat-send', T4_CHAT_CARD_ID, {
+          text: probeText,
+          probe: 'echoattach',
+          'turn-id': turnId,
+        }),
+        'T4 chat-send',
+      );
+
+      console.log(`[${formatTestId('T4')}] step 3/8: verifying user chat entry is stored`);
+      const userMessagesPoll = await pollChatMessages(
+        T4_CHAT_CARD_ID,
+        turnId,
+        5,
+        500,
+        (messages) => messages.some((message) => message?.role === 'user' && String(message?.text || '') === promptText),
+        `user chat message for turn ${turnId}`,
+      );
+      assert(userMessagesPoll.matched, `T4 user message not found for turn ${turnId}: ${jsonText(userMessagesPoll.messages)}`);
+      console.log(`[${formatTestId('T4')}] user chat entry stored in ${userMessagesPoll.attemptsUsed} poll(s)`);
+
+      console.log(`[${formatTestId('T4')}] step 4/8: verifying chat processing turns on`);
+      const processingOnPoll = await pollChatProcessing(
+        T4_CHAT_CARD_ID,
+        true,
+        5,
+        1000,
+        `chat processing on for ${T4_CHAT_CARD_ID}`,
+      );
+      assert(processingOnPoll.matched, `T4 chat processing did not turn on for ${T4_CHAT_CARD_ID}; active=${processingOnPoll.active}`);
+      console.log(`[${formatTestId('T4')}] chat processing turned on in ${processingOnPoll.attemptsUsed} poll(s)`);
+
+      console.log(`[${formatTestId('T4')}] step 5/8: waiting for probe final reply`);
+      const assistantMessagesPoll = await pollChatMessages(
+        T4_CHAT_CARD_ID,
+        turnId,
+        12,
+        1000,
+        (messages) => messages.some((message) => message?.role === 'assistant' && String(message?.text || '').includes(expectedProbeReply)),
+        `probe final reply for turn ${turnId}`,
+      );
+      assert(assistantMessagesPoll.matched, `T4 probe final reply not found for turn ${turnId}: ${jsonText(assistantMessagesPoll.messages)}`);
+      const assistantMessage = assistantMessagesPoll.messages.find((message) => message?.role === 'assistant' && String(message?.text || '').includes(expectedProbeReply));
+      assert(assistantMessage, `T4 probe final reply missing after successful poll for turn ${turnId}`);
+      console.log(`[${formatTestId('T4')}] probe final reply stored in ${assistantMessagesPoll.attemptsUsed} poll(s)`);
+
+      console.log(`[${formatTestId('T4')}] step 6/8: verifying chat processing turns off`);
+      const processingOffPoll = await pollChatProcessing(
+        T4_CHAT_CARD_ID,
+        false,
+        12,
+        1000,
+        `chat processing off for ${T4_CHAT_CARD_ID}`,
+      );
+      assert(processingOffPoll.matched, `T4 chat processing did not turn off for ${T4_CHAT_CARD_ID}; active=${processingOffPoll.active}`);
+      console.log(`[${formatTestId('T4')}] chat processing turned off in ${processingOffPoll.attemptsUsed} poll(s)`);
+
+      console.log(`[${formatTestId('T4')}] step 7/8: verifying final inspected messages`);
+      const finalMessages = await readChatMessages(T4_CHAT_CARD_ID, turnId);
+      const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
+      const finalAssistantMessage = finalMessages.find((message) => message?.role === 'assistant');
+      assert(finalUserMessage, `T4 final user message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
+      assert(finalAssistantMessage, `T4 final assistant message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
+      assert(String(finalUserMessage.text || '') === promptText, `T4 final user text mismatch: ${jsonText(finalUserMessage)}`);
+      const turnSystemMessage = finalMessages.find((message) => message?.role === 'system' && String(message?.text || '').toLowerCase().includes('file uploaded:'));
+      assert(turnSystemMessage, `T4 turn missing system attachment message: ${jsonText(finalMessages)}`);
+      assert(String(finalAssistantMessage.text || '').includes(expectedProbeReply), `T4 final probe reply text mismatch: ${jsonText(finalAssistantMessage)}`);
+      console.log(`[${formatTestId('T4')}] final probe reply: ${String(finalAssistantMessage.text || '')}`);
+
+      console.log(`[${formatTestId('T4')}] step 8/8: final probe reply with attachment contents passed`);
     }
 
     if (isTestSelected(requestedTests, 'TS')) {
       console.log(`\n=== ${formatTestId('TS')}: probe chat with attachment + SSE lifecycle ===`);
 
-      console.log(`[${formatTestId('TS')}] step 0/9: upserting ${PORTFOLIO_CARD_ID} for chat`);
+      console.log(`[${formatTestId('TS')}] step 0/11: upserting ${PORTFOLIO_CARD_ID} for chat`);
       expectMcpSuccess(
         await callMcp('manage.upsert-card', {
           card_id: PORTFOLIO_CARD_ID,
@@ -1289,137 +1527,142 @@ async function main() {
         'TS manage.upsert-card portfolio',
       );
       createdCardIds.push(PORTFOLIO_CARD_ID);
-
-      console.log(`[${formatTestId('TS')}] step 1/9: waiting for live /sse bootstrap payload`);
-      await closeBoardSseConnection({ clearChatEvents: true });
-      await ensureChatSseSubscription(PORTFOLIO_CARD_ID);
-
-      const bootstrapPayload = await waitUntil(
-        () => sseState.initialPayload || false,
-        15_000,
-        `TS initial /sse payload for ${PORTFOLIO_CARD_ID}`,
-      );
-      const bootstrapSummary = bootstrapPayload?.statusSnapshot?.summary || sseState.statusSummary;
-      const bootstrapCard = findBoardStatusCard(bootstrapPayload?.statusSnapshot || bootstrapPayload, PORTFOLIO_CARD_ID);
-      assert(bootstrapSummary, `TS live /sse summary missing: ${jsonText(bootstrapPayload)}`);
-      assert(Number(bootstrapSummary.completed || 0) >= 1, `TS expected completed count >= 1 after upsert: ${jsonText(bootstrapSummary)}`);
-      assert(bootstrapCard && String(bootstrapCard.status || '') === 'completed', `TS expected ${PORTFOLIO_CARD_ID} completed in live /sse payload: ${jsonText(bootstrapPayload)}`);
-
-      const turnId = `ts${makeTurnId()}`;
-      const promptText = `attachment probe ${Date.now()}`;
-      const probeText = buildProbeChatText(promptText, 'echo');
-
-      console.log(`[${formatTestId('TS')}] step 2/9: adding chat attachment for turn ${turnId}`);
-      const uploadResult = expectMcpSuccess(
-        await callControlplaneMcp('manage.add-chat-attachment', {
-          card_id: PORTFOLIO_CARD_ID,
-          turn_id: turnId,
-          file_name: 'ts-probe.txt',
-          content_type: 'text/plain; charset=utf-8',
-          text: 'what is the capital of japan',
-        }),
-        'TS manage.add-chat-attachment',
-      );
-      const uploadedFile = Array.isArray(uploadResult?.files) ? uploadResult.files[0] : null;
-      assert(uploadedFile && typeof uploadedFile === 'object', 'TS upload response missing file metadata');
-      assert(!Object.prototype.hasOwnProperty.call(uploadedFile, 'path'), 'TS uploaded file metadata should not expose path');
-
-      const cardAfterUpload = readStoredCard(
-        expectMcpSuccess(
-          await callMcp('manage.read-card', { card_id: PORTFOLIO_CARD_ID }),
-          'TS manage.read-card after upload',
-        ),
-      );
-      const storedFiles = Array.isArray(cardAfterUpload?.card_data?.files) ? cardAfterUpload.card_data.files : [];
-      const storedFile = storedFiles.find((file) => String(file?.stored_name || '') === String(uploadedFile?.stored_name || ''));
-      assert(!!storedFile, 'TS stored file metadata missing after upload');
-      assert(storedFile?.chat === true, 'TS stored file should be marked as chat-origin');
-      assert(!Object.prototype.hasOwnProperty.call(storedFile || {}, 'path'), 'TS stored file metadata should not expose path');
-
-      const afterUploadMessages = await readChatMessages(PORTFOLIO_CARD_ID, turnId);
-      const uploadSystemMessage = afterUploadMessages.find((message) => message?.role === 'system');
-      assert(!!uploadSystemMessage, 'TS upload protocol missing system chat message');
-      assert(String(uploadSystemMessage?.text || '').toLowerCase().includes('file uploaded:'), 'TS upload system message does not describe uploaded file');
-
-      const eventStart = sseState.chatEvents.length;
-      const beforeCount = afterUploadMessages.length;
-
-      console.log(`[${formatTestId('TS')}] step 3/9: sending probe chat turn ${turnId} with attachment`);
-      expectMcpSuccess(
-        await callAction('chat-send', PORTFOLIO_CARD_ID, {
-          text: probeText,
-          'turn-id': turnId,
-        }),
-        'TS chat-send',
-      );
-
-      console.log(`[${formatTestId('TS')}] step 4/9: waiting for SSE user turn event`);
-      const userEvent = await waitUntil(() => sseState.chatEvents.slice(eventStart).find((event) => (
-        Array.isArray(event?.messages)
-        && event.messages.slice(beforeCount).some((message) => (
-          message?.role === 'user'
-          && String(message?.text || '') === promptText
-        ))
-      )) || false, 30_000, `TS user chat event for turn ${turnId}`);
-      assert(!!userEvent, `TS user SSE event missing for turn ${turnId}`);
-
-      console.log(`[${formatTestId('TS')}] step 5/9: waiting for SSE processing=true`);
-      const processingOnEvent = await waitUntil(() => sseState.chatEvents.slice(eventStart).find((event) => event?.processing === true) || false, 30_000, `TS processing=true for ${PORTFOLIO_CARD_ID}`);
-      assert(!!processingOnEvent, `TS processing did not turn on for ${PORTFOLIO_CARD_ID}`);
-
-      const expectedProbeReply = `Echo: ${promptText}`;
-
-      console.log(`[${formatTestId('TS')}] step 6/9: waiting for SSE assistant reply`);
-      let assistantOutcome;
+      let tsChatSubscribed = false;
       try {
-        assistantOutcome = await waitForAssistantOutcome({
-          eventStart,
-          beforeCount,
-          successPattern: new RegExp(expectedProbeReply.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-          timeoutMs: 45_000,
-          label: `TS assistant reply for turn ${turnId}`,
-          turnId,
-        });
-      } catch (err) {
-        const debugEvents = sseState.chatEvents.slice(eventStart).map((event, idx) => ({
-          idx,
-          processing: event?.processing,
-          messageCount: Array.isArray(event?.messages) ? event.messages.length : 0,
-          tailMessages: Array.isArray(event?.messages)
-            ? event.messages.slice(-3).map((m) => ({ role: m?.role, turn: m?.turn, text: String(m?.text || '').slice(0, 60) }))
-            : [],
-        }));
-        console.error('[TS DEBUG] SSE events captured (after eventStart):', JSON.stringify(debugEvents, null, 2));
-        const persisted = await readChatMessages(PORTFOLIO_CARD_ID, turnId).catch((e) => ({ error: String(e?.message || e) }));
-        console.error('[TS DEBUG] Persisted messages for turn:', JSON.stringify(persisted, null, 2));
-        throw err;
+        console.log(`[${formatTestId('TS')}] step 1/11: subscribing chat SSE for ${PORTFOLIO_CARD_ID}`);
+        await closeBoardSseConnection({ clearChatEvents: true });
+        await ensureChatSseSubscription(PORTFOLIO_CARD_ID);
+        tsChatSubscribed = true;
+
+        console.log(`[${formatTestId('TS')}] step 2/11: waiting for live /sse bootstrap payload`);
+        await waitUntil(
+          () => sseState.initialPayload || false,
+          15_000,
+          `TS initial /sse payload for ${PORTFOLIO_CARD_ID}`,
+        );
+        const bootstrapSummary = await waitForSseSummary(15_000, `TS SSE summary for ${PORTFOLIO_CARD_ID}`);
+        assert(bootstrapSummary, `TS live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
+
+        console.log(`[${formatTestId('TS')}] step 2.1/11: waiting for ${PORTFOLIO_CARD_ID} to appear completed in SSE status`);
+        const completedStatus = await waitForSseCompletedCard(PORTFOLIO_CARD_ID, 15_000, `TS SSE completed status for ${PORTFOLIO_CARD_ID}`);
+        const bootstrapCard = completedStatus.card;
+        assert(bootstrapSummary, `TS live /sse summary missing after status wait: ${jsonText(completedStatus.statusData)}`);
+        assert(Number(bootstrapSummary.completed || 0) >= 1, `TS expected completed count >= 1 after upsert: ${jsonText(bootstrapSummary)}`);
+        assert(bootstrapCard && String(bootstrapCard.status || '') === 'completed', `TS expected ${PORTFOLIO_CARD_ID} completed in SSE built state: ${jsonText(completedStatus.statusData)}`);
+
+        const turnId = `ts${makeTurnId()}`;
+        const promptText = 'what is the content in the attached file';
+        const probeText = buildProbeChatText(promptText, 'echoattach');
+        const expectedProbeReply = 'what is the capital of japan';
+
+        console.log(`[${formatTestId('TS')}] step 3/11: adding chat attachment for turn ${turnId}`);
+        const uploadResult = expectMcpSuccess(
+          await callControlplaneMcp('manage.add-chat-attachment', {
+            card_id: PORTFOLIO_CARD_ID,
+            turn_id: turnId,
+            file_name: 'ts-probe.txt',
+            content_type: 'text/plain; charset=utf-8',
+            text: 'what is the capital of japan',
+          }),
+          'TS manage.add-chat-attachment',
+        );
+        const uploadedFile = Array.isArray(uploadResult?.files) ? uploadResult.files[0] : null;
+        assert(uploadedFile && typeof uploadedFile === 'object', 'TS upload response missing file metadata');
+        assert(!Object.prototype.hasOwnProperty.call(uploadedFile, 'path'), 'TS uploaded file metadata should not expose path');
+
+        const cardAfterUpload = readStoredCard(
+          expectMcpSuccess(
+            await callMcp('manage.read-card', { card_id: PORTFOLIO_CARD_ID }),
+            'TS manage.read-card after upload',
+          ),
+        );
+        const storedFiles = Array.isArray(cardAfterUpload?.card_data?.files) ? cardAfterUpload.card_data.files : [];
+        const storedFile = storedFiles.find((file) => String(file?.stored_name || '') === String(uploadedFile?.stored_name || ''));
+        assert(!!storedFile, 'TS stored file metadata missing after upload');
+        assert(storedFile?.chat === true, 'TS stored file should be marked as chat-origin');
+        assert(!Object.prototype.hasOwnProperty.call(storedFile || {}, 'path'), 'TS stored file metadata should not expose path');
+
+        const afterUploadMessages = await readChatMessages(PORTFOLIO_CARD_ID, turnId);
+        const uploadSystemMessage = afterUploadMessages.find((message) => message?.role === 'system');
+        assert(!!uploadSystemMessage, 'TS upload protocol missing system chat message');
+        assert(String(uploadSystemMessage?.text || '').toLowerCase().includes('file uploaded:'), 'TS upload system message does not describe uploaded file');
+
+        const eventStart = sseState.chatEvents.length;
+
+        console.log(`[${formatTestId('TS')}] step 4/11: sending probe chat turn ${turnId} with attachment`);
+        expectMcpSuccess(
+          await callAction('chat-send', PORTFOLIO_CARD_ID, {
+            text: probeText,
+            probe: 'echoattach',
+            'turn-id': turnId,
+          }),
+          'TS chat-send',
+        );
+
+        console.log(`[${formatTestId('TS')}] step 5/11: waiting for SSE processing-done notification`);
+        let bouquet;
+        try {
+          bouquet = await waitForChatTurnState({
+            eventStart,
+            turnId,
+            timeoutMs: 45_000,
+            label: `TS chat turn bouquet for turn ${turnId}`,
+            predicate: (currentBouquet) => {
+              const hasUser = currentBouquet.userMessages.some((message) => String(message?.text || '') === promptText);
+              const hasSystem = currentBouquet.systemMessages.some((message) => String(message?.text || '').toLowerCase().includes('file uploaded:'));
+              const hasAssistant = currentBouquet.assistantMessages.some((message) => String(message?.text || '').includes(expectedProbeReply));
+              return currentBouquet.processingOnSeen && currentBouquet.processingDoneSeen && hasUser && hasSystem && hasAssistant;
+            },
+          });
+        } catch (err) {
+          const debugEvents = sseState.chatEvents.slice(eventStart).map((event, idx) => ({
+            idx,
+            processing: event?.processing,
+            messageCount: Array.isArray(event?.messages) ? event.messages.length : 0,
+            tailMessages: Array.isArray(event?.messages)
+              ? event.messages.slice(-3).map((m) => ({ role: m?.role, turn: m?.turn, text: String(m?.text || '').slice(0, 60) }))
+              : [],
+          }));
+          console.error('[TS DEBUG] SSE events captured (after eventStart):', JSON.stringify(debugEvents, null, 2));
+          const persisted = await readChatMessages(PORTFOLIO_CARD_ID, turnId).catch((e) => ({ error: String(e?.message || e) }));
+          console.error('[TS DEBUG] Persisted messages for turn:', JSON.stringify(persisted, null, 2));
+          throw err;
+        }
+
+        console.log(`[${formatTestId('TS')}] step 6/11: verifying notification bouquet contents`);
+        const expectedProbeReplyPattern = new RegExp(expectedProbeReply.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        assert(bouquet.processingOnSeen, `TS bouquet missing processing-on notification for turn ${turnId}`);
+        assert(bouquet.processingDoneSeen, `TS bouquet missing processing-done notification for turn ${turnId}`);
+        const bouquetUserMessage = bouquet.userMessages.find((message) => String(message?.text || '') === promptText);
+        assert(bouquetUserMessage, `TS bouquet missing user message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+        const bouquetAttachmentSystemMessage = bouquet.systemMessages.find((message) => String(message?.text || '').toLowerCase().includes('file uploaded:'));
+        assert(bouquetAttachmentSystemMessage, `TS bouquet missing attachment system message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+        const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => expectedProbeReplyPattern.test(String(message?.text || '')));
+        assert(bouquetAssistantMessage, `TS bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+
+        console.log(`[${formatTestId('TS')}] step 7/11: verifying persisted turn contents`);
+        const finalMessages = await readChatMessages(PORTFOLIO_CARD_ID, turnId);
+        const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
+        const finalAssistantMessage = finalMessages.find((message) => message?.role === 'assistant');
+        assert(finalUserMessage, `TS final user message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
+        assert(finalAssistantMessage, `TS final assistant message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
+        assert(String(finalUserMessage.text || '') === promptText, `TS final user text mismatch: ${jsonText(finalUserMessage)}`);
+        const turnSystemMessage = finalMessages.find((message) => message?.role === 'system' && String(message?.text || '').toLowerCase().includes('file uploaded:'));
+        assert(turnSystemMessage, `TS turn missing system attachment message: ${jsonText(finalMessages)}`);
+        assert(String(finalAssistantMessage.text || '').includes(expectedProbeReply), `TS final probe reply text mismatch: ${jsonText(finalAssistantMessage)}`);
+
+        console.log(`[${formatTestId('TS')}] step 8/11: final probe reply with attachment contents passed`);
+        console.log(`[${formatTestId('TS')}] final probe reply: ${String(finalAssistantMessage.text || '')}`);
+      } finally {
+        if (tsChatSubscribed) {
+          console.log(`[${formatTestId('TS')}] step 9/11: unsubscribing chat SSE for ${PORTFOLIO_CARD_ID}`);
+          try {
+            await unsubscribeChatSseSubscription(PORTFOLIO_CARD_ID);
+          } catch (err) {
+            console.warn(`[${formatTestId('TS')}] chat SSE unsubscribe failed: ${String(err?.message || err)}`);
+          }
+        }
       }
-      assert(assistantOutcome.ok, `TS assistant reply missing or invalid: ${assistantOutcome.reason || 'unknown reason'}`);
-
-      console.log(`[${formatTestId('TS')}] step 7/9: waiting for SSE processing=false`);
-      const settledOutcome = await waitForProcessingClearedOutcome({
-        eventStart,
-        beforeCount,
-        successPattern: new RegExp(expectedProbeReply.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-        timeoutMs: 45_000,
-        label: `TS processing cleared for turn ${turnId}`,
-        turnId,
-      });
-      assert(settledOutcome.ok, `TS processing did not clear after assistant reply for turn ${turnId}`);
-
-      console.log(`[${formatTestId('TS')}] step 8/9: verifying persisted turn contents`);
-      const finalMessages = await readChatMessages(PORTFOLIO_CARD_ID, turnId);
-      const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
-      const finalAssistantMessage = finalMessages.find((message) => message?.role === 'assistant');
-      assert(finalUserMessage, `TS final user message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
-      assert(finalAssistantMessage, `TS final assistant message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
-      assert(String(finalUserMessage.text || '') === promptText, `TS final user text mismatch: ${jsonText(finalUserMessage)}`);
-      const turnSystemMessage = finalMessages.find((message) => message?.role === 'system' && String(message?.text || '').toLowerCase().includes('file uploaded:'));
-      assert(turnSystemMessage, `TS turn missing system attachment message: ${jsonText(finalMessages)}`);
-      assert(String(finalAssistantMessage.text || '').includes(expectedProbeReply), `TS final probe reply text mismatch: ${jsonText(finalAssistantMessage)}`);
-
-      console.log(`[${formatTestId('TS')}] step 9/9: final probe reply with attachment path passed`);
-      console.log(`[${formatTestId('TS')}] final probe reply: ${String(finalAssistantMessage.text || '')}`);
     }
 
     if (isTestSelected(requestedTests, 'T8')) {
@@ -1438,13 +1681,13 @@ async function main() {
       console.log(`[${formatTestId('T8')}] step 1/8: waiting for live /sse bootstrap payload`);
       await closeBoardSseConnection({ clearChatEvents: true });
       await ensureChatSseSubscription(T8_CHAT_CARD_ID);
-      const bootstrapPayload = await waitUntil(
+      await waitUntil(
         () => sseState.initialPayload || false,
         15_000,
         `T8 initial /sse payload for ${T8_CHAT_CARD_ID}`,
       );
-      const bootstrapSummary = bootstrapPayload?.statusSnapshot?.summary || sseState.statusSummary;
-      assert(bootstrapSummary, `T8 live /sse summary missing: ${jsonText(bootstrapPayload)}`);
+      const bootstrapSummary = await waitForSseSummary(15_000, `T8 SSE summary for ${T8_CHAT_CARD_ID}`);
+      assert(bootstrapSummary, `T8 live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
 
       const turnId = `t8copilot_${makeTurnId()}`;
       const promptText = 'Just answer what is the capital of France. No fluff. No commentary. No markup. Respond in lower case in one word.';
@@ -1472,36 +1715,23 @@ async function main() {
       assert(userMessagesPoll.matched, `T8 user message not found for turn ${turnId}: ${jsonText(userMessagesPoll.messages)}`);
       console.log(`[${formatTestId('T8')}] user chat entry stored in ${userMessagesPoll.attemptsUsed} poll(s)`);
 
-      console.log(`[${formatTestId('T8')}] step 4/8: verifying chat processing turns on`);
-  const processingOnEvent = await waitUntil(() => sseState.chatEvents.slice(eventStart).find((event) => event?.processing === true) || false, 30_000, `T8 processing=true for ${T8_CHAT_CARD_ID}`);
-  assert(!!processingOnEvent, `T8 processing did not turn on for ${T8_CHAT_CARD_ID}`);
-
-      console.log(`[${formatTestId('T8')}] step 5/8: waiting for SSE assistant reply`);
-      const assistantOutcome = await waitForAssistantOutcome({
+      console.log(`[${formatTestId('T8')}] step 4/8: waiting for SSE processing-done notification`);
+      const bouquet = await waitForChatTurnBouquet({
         eventStart,
-        beforeCount: 0,
-        successPattern: /paris/i,
-        timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
-        label: `T8 assistant reply for turn ${turnId}`,
         turnId,
-      });
-      assert(assistantOutcome.ok, `T8 assistant reply missing or invalid: ${assistantOutcome.reason || 'unknown reason'}`);
-      assert(assistantOutcome.source === 'sse', 'T8 assistant reply should resolve from SSE chat notifications');
-
-      console.log(`[${formatTestId('T8')}] step 6/8: waiting for SSE processing=false`);
-      const settledOutcome = await waitForProcessingClearedOutcome({
-        eventStart,
-        beforeCount: 0,
-        successPattern: /paris/i,
         timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
-        label: `T8 processing cleared for turn ${turnId}`,
-        turnId,
+        label: `T8 chat turn bouquet for turn ${turnId}`,
       });
-      assert(settledOutcome.ok, `T8 processing did not clear after assistant reply for turn ${turnId}`);
-      assert(settledOutcome.source === 'sse', 'T8 processing clear should resolve from SSE chat notifications');
-      assert(settledOutcome.event?.processing === false, 'T8 final SSE event should clear processing');
 
-      console.log(`[${formatTestId('T8')}] step 7/8: verifying final inspected messages`);
+      console.log(`[${formatTestId('T8')}] step 5/8: verifying notification bouquet contents`);
+      assert(bouquet.processingOnSeen, `T8 bouquet missing processing-on notification for turn ${turnId}`);
+      assert(bouquet.processingDoneSeen, `T8 bouquet missing processing-done notification for turn ${turnId}`);
+      const bouquetUserMessage = bouquet.userMessages.find((message) => String(message?.text || '') === promptText);
+      assert(bouquetUserMessage, `T8 bouquet missing user message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+      const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => /paris/i.test(String(message?.text || '')));
+      assert(bouquetAssistantMessage, `T8 bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+
+      console.log(`[${formatTestId('T8')}] step 6/8: verifying final inspected messages`);
   const finalMessages = await readChatMessages(T8_CHAT_CARD_ID, turnId);
       const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
       const finalAssistantMessage = [...finalMessages].reverse().find((message) => message?.role === 'assistant');
@@ -1511,18 +1741,19 @@ async function main() {
       assert(/paris/i.test(String(finalAssistantMessage.text || '')), `T8 final assistant text mismatch: ${jsonText(finalAssistantMessage)}`);
       console.log(`[${formatTestId('T8')}] final assistant reply: ${String(finalAssistantMessage.text || '')}`);
 
-      console.log(`[${formatTestId('T8')}] step 8/8: verifying live /sse board-state bootstrap`);
+      console.log(`[${formatTestId('T8')}] step 7/8: verifying live /sse board-state bootstrap`);
       resetBoardSseState();
       await ensureBoardSseConnection(T8_CHAT_CARD_ID);
-      const finalBootstrapPayload = await waitUntil(
+      await waitUntil(
         () => sseState.initialPayload || false,
         15_000,
         `T8 final /sse payload for ${T8_CHAT_CARD_ID}`,
       );
-      const finalBootstrapSummary = finalBootstrapPayload?.statusSnapshot?.summary || sseState.statusSummary;
-      const finalBootstrapCard = findBoardStatusCard(finalBootstrapPayload?.statusSnapshot || finalBootstrapPayload, T8_CHAT_CARD_ID);
-      assert(finalBootstrapSummary, `T8 final live /sse summary missing: ${jsonText(finalBootstrapPayload)}`);
-      assert(finalBootstrapCard && String(finalBootstrapCard.status || '') === 'completed', `T8 expected ${T8_CHAT_CARD_ID} completed in final live /sse payload: ${jsonText(finalBootstrapPayload)}`);
+      const finalBootstrapSummary = await waitForSseSummary(15_000, `T8 final SSE summary for ${T8_CHAT_CARD_ID}`);
+      const finalBootstrapCompletedStatus = await waitForSseCompletedCard(T8_CHAT_CARD_ID, 15_000, `T8 SSE completed status for ${T8_CHAT_CARD_ID}`);
+      const finalBootstrapCard = finalBootstrapCompletedStatus.card;
+      assert(finalBootstrapSummary, `T8 final live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
+      assert(finalBootstrapCard && String(finalBootstrapCard.status || '') === 'completed', `T8 expected ${T8_CHAT_CARD_ID} completed in final SSE built state: ${jsonText(finalBootstrapCompletedStatus.statusData)}`);
       await closeBoardSseConnection({ clearChatEvents: true });
     }
 
@@ -1542,13 +1773,13 @@ async function main() {
       console.log(`[${formatTestId('T9')}] step 1/8: waiting for live /sse bootstrap payload`);
       await closeBoardSseConnection({ clearChatEvents: true });
       await ensureChatSseSubscription(T9_CHAT_CARD_ID);
-      const bootstrapPayload = await waitUntil(
+      await waitUntil(
         () => sseState.initialPayload || false,
         15_000,
         `T9 initial /sse payload for ${T9_CHAT_CARD_ID}`,
       );
-      const bootstrapSummary = bootstrapPayload?.statusSnapshot?.summary || sseState.statusSummary;
-      assert(bootstrapSummary, `T9 live /sse summary missing: ${jsonText(bootstrapPayload)}`);
+      const bootstrapSummary = await waitForSseSummary(15_000, `T9 SSE summary for ${T9_CHAT_CARD_ID}`);
+      assert(bootstrapSummary, `T9 live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
 
       const turnId = `t9foundry_${makeTurnId()}`;
       const promptText = 'Just answer what is the capital of France. No fluff. No commentary. No markup. Respond in lower case in one word.';
@@ -1576,36 +1807,23 @@ async function main() {
       assert(userMessagesPoll.matched, `T9 user message not found for turn ${turnId}: ${jsonText(userMessagesPoll.messages)}`);
       console.log(`[${formatTestId('T9')}] user chat entry stored in ${userMessagesPoll.attemptsUsed} poll(s)`);
 
-      console.log(`[${formatTestId('T9')}] step 4/8: verifying chat processing turns on`);
-  const processingOnEvent = await waitUntil(() => sseState.chatEvents.slice(eventStart).find((event) => event?.processing === true) || false, 30_000, `T9 processing=true for ${T9_CHAT_CARD_ID}`);
-  assert(!!processingOnEvent, `T9 processing did not turn on for ${T9_CHAT_CARD_ID}`);
-
-      console.log(`[${formatTestId('T9')}] step 5/8: waiting for SSE assistant reply`);
-      const assistantOutcome = await waitForAssistantOutcome({
+      console.log(`[${formatTestId('T9')}] step 4/8: waiting for SSE processing-done notification`);
+      const bouquet = await waitForChatTurnBouquet({
         eventStart,
-        beforeCount: 0,
-        successPattern: /paris/i,
-        timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
-        label: `T9 assistant reply for turn ${turnId}`,
         turnId,
-      });
-      assert(assistantOutcome.ok, `T9 assistant reply missing or invalid: ${assistantOutcome.reason || 'unknown reason'}`);
-      assert(assistantOutcome.source === 'sse', 'T9 assistant reply should resolve from SSE chat notifications');
-
-      console.log(`[${formatTestId('T9')}] step 6/8: waiting for SSE processing=false`);
-      const settledOutcome = await waitForProcessingClearedOutcome({
-        eventStart,
-        beforeCount: 0,
-        successPattern: /paris/i,
         timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
-        label: `T9 processing cleared for turn ${turnId}`,
-        turnId,
+        label: `T9 chat turn bouquet for turn ${turnId}`,
       });
-      assert(settledOutcome.ok, `T9 processing did not clear after assistant reply for turn ${turnId}`);
-      assert(settledOutcome.source === 'sse', 'T9 processing clear should resolve from SSE chat notifications');
-      assert(settledOutcome.event?.processing === false, 'T9 final SSE event should clear processing');
 
-      console.log(`[${formatTestId('T9')}] step 7/8: verifying final inspected messages`);
+      console.log(`[${formatTestId('T9')}] step 5/8: verifying notification bouquet contents`);
+      assert(bouquet.processingOnSeen, `T9 bouquet missing processing-on notification for turn ${turnId}`);
+      assert(bouquet.processingDoneSeen, `T9 bouquet missing processing-done notification for turn ${turnId}`);
+      const bouquetUserMessage = bouquet.userMessages.find((message) => String(message?.text || '') === promptText);
+      assert(bouquetUserMessage, `T9 bouquet missing user message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+      const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => /paris/i.test(String(message?.text || '')));
+      assert(bouquetAssistantMessage, `T9 bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
+
+      console.log(`[${formatTestId('T9')}] step 6/8: verifying final inspected messages`);
       const finalMessages = await readChatMessages(T9_CHAT_CARD_ID, turnId);
       const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
       const finalAssistantMessage = [...finalMessages].reverse().find((message) => message?.role === 'assistant');
@@ -1615,18 +1833,19 @@ async function main() {
       assert(/paris/i.test(String(finalAssistantMessage.text || '')), `T9 final assistant text mismatch: ${jsonText(finalAssistantMessage)}`);
       console.log(`[${formatTestId('T9')}] final assistant reply: ${String(finalAssistantMessage.text || '')}`);
 
-      console.log(`[${formatTestId('T9')}] step 8/8: verifying live /sse board-state bootstrap`);
+      console.log(`[${formatTestId('T9')}] step 7/8: verifying live /sse board-state bootstrap`);
       resetBoardSseState();
       await ensureBoardSseConnection(T9_CHAT_CARD_ID);
-      const finalBootstrapPayload = await waitUntil(
+      await waitUntil(
         () => sseState.initialPayload || false,
         15_000,
         `T9 final /sse payload for ${T9_CHAT_CARD_ID}`,
       );
-      const finalBootstrapSummary = finalBootstrapPayload?.statusSnapshot?.summary || sseState.statusSummary;
-      const finalBootstrapCard = findBoardStatusCard(finalBootstrapPayload?.statusSnapshot || finalBootstrapPayload, T9_CHAT_CARD_ID);
-      assert(finalBootstrapSummary, `T9 final live /sse summary missing: ${jsonText(finalBootstrapPayload)}`);
-      assert(finalBootstrapCard && String(finalBootstrapCard.status || '') === 'completed', `T9 expected ${T9_CHAT_CARD_ID} completed in final live /sse payload: ${jsonText(finalBootstrapPayload)}`);
+      const finalBootstrapSummary = await waitForSseSummary(15_000, `T9 final SSE summary for ${T9_CHAT_CARD_ID}`);
+      const finalBootstrapCompletedStatus = await waitForSseCompletedCard(T9_CHAT_CARD_ID, 15_000, `T9 SSE completed status for ${T9_CHAT_CARD_ID}`);
+      const finalBootstrapCard = finalBootstrapCompletedStatus.card;
+      assert(finalBootstrapSummary, `T9 final live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
+      assert(finalBootstrapCard && String(finalBootstrapCard.status || '') === 'completed', `T9 expected ${T9_CHAT_CARD_ID} completed in final SSE built state: ${jsonText(finalBootstrapCompletedStatus.statusData)}`);
       await closeBoardSseConnection({ clearChatEvents: true });
     }
 
