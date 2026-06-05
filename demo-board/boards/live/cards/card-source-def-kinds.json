@@ -3,6 +3,8 @@
   "meta": {
     "title": "Evidence Intake",
     "ingest": true,
+    "gandalf": true,
+    "cardRenderer": "ingest",
     "tags": [
       "ingest",
       "evidence"
@@ -10,6 +12,14 @@
     "desc": "Board intake card for reviewing and managing incoming evidence."
   },
   "view": {
+    "elements": [
+      {
+        "kind": "markdown",
+        "data": {
+          "value": "Review and manage incoming evidence for this board."
+        }
+      }
+    ],
     "layout": {
       "board": {
         "col": 4,

@@ -154,7 +154,7 @@ function parseCliConfigPath(defaultConfigPath, cliArgs = process.argv.slice(2)) 
     : path.resolve(process.cwd(), configuredPath);
 }
 
-export function buildBoardConfig(boardId, source, { configDir, refsTemplates, aiWorkspaceTemplates }) {
+export function buildBoardConfig(boardId, source, { configDir, refsTemplates, aiWorkspaceTemplates, uiTemplates = {} }) {
   const normalizedBoardId = requireNonEmptyString(boardId, 'board id');
   const record = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
   const tokens = { boardId: normalizedBoardId, configDir };
@@ -195,6 +195,18 @@ export function buildBoardConfig(boardId, source, { configDir, refsTemplates, ai
     }
   }
 
+  const uiTemplateName = typeof record.uiTemplate === 'string' && record.uiTemplate.trim()
+    ? record.uiTemplate.trim()
+    : '';
+  let ui = {};
+  if (uiTemplateName) {
+    const template = uiTemplates[uiTemplateName];
+    if (!template) {
+      throw new Error(`Board '${normalizedBoardId}' references unknown uiTemplate '${uiTemplateName}'`);
+    }
+    ui = template && typeof template === 'object' && !Array.isArray(template) ? template : {};
+  }
+
   return {
     id: normalizedBoardId,
     label: typeof record.label === 'string' && record.label.trim() ? record.label.trim() : normalizedBoardId,
@@ -202,6 +214,8 @@ export function buildBoardConfig(boardId, source, { configDir, refsTemplates, ai
     aiWorkspaceTemplate: aiWorkspaceTemplateName,
     aiWorkspaceRoot,
     scratchStore,
+    uiTemplate: uiTemplateName,
+    ui,
     refs: resolveBoardRefs(normalizedBoardId, refsSource, tokens),
     chat: record.chat && typeof record.chat === 'object' && !Array.isArray(record.chat)
       ? record.chat
@@ -255,6 +269,9 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
   const aiWorkspaceTemplates = config.aiWorkspaceTemplates && typeof config.aiWorkspaceTemplates === 'object' && !Array.isArray(config.aiWorkspaceTemplates)
     ? config.aiWorkspaceTemplates
     : {};
+  const uiTemplates = config.uiTemplates && typeof config.uiTemplates === 'object' && !Array.isArray(config.uiTemplates)
+    ? config.uiTemplates
+    : {};
   const sampleBoards = collectSampleBoards(config);
   const boardsIndexRef = resolveBoardsIndexRef(config);
 
@@ -283,6 +300,7 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
       : {},
     aiWorkspaceTemplates,
     refsTemplates,
+    uiTemplates,
     firebase: config.firebase && typeof config.firebase === 'object' && !Array.isArray(config.firebase)
       ? config.firebase
       : {},

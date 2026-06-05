@@ -91,6 +91,14 @@
     "kind": "fs-path",
     "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/boards-index"
   },
+  "uiTemplates": {
+    "default": {
+      "filters": {
+        "gandalf": "meta.gandalf = true",
+        "truthset": "meta.truthset = true"
+      }
+    }
+  },
   "sample-boards": {
     "live": {
       "label": "Live",
@@ -102,7 +110,8 @@
         }
       },
       "aiWorkspaceTemplate": "default",
-      "refsTemplate": "localfs-default"
+      "refsTemplate": "localfs-default",
+      "uiTemplate": "default"
     },
     "live-test": {
       "label": "Live Test",

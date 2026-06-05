@@ -85,10 +85,19 @@
     "kind": "firestore",
     "value": "boards-index"
   },
+  "uiTemplates": {
+    "default": {
+      "filters": {
+        "gandalf": "meta.gandalf = true",
+        "truthset": "meta.truthset = true"
+      }
+    }
+  },
   "sample-boards": {
     "live": {
       "label": "Live",
-      "refsTemplate": "firestore-default"
+      "refsTemplate": "firestore-default",
+      "uiTemplate": "default"
     }
   }
 }

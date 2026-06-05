@@ -7,6 +7,7 @@ export function createDynamicBoards({ hostConfig, adapterServices }) {
     configDir: hostConfig.configDir,
     refsTemplates: hostConfig.refsTemplates,
     aiWorkspaceTemplates: hostConfig.aiWorkspaceTemplates,
+    uiTemplates: hostConfig.uiTemplates,
   };
 
   function hydrate(id, record) {
