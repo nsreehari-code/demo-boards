@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -325,6 +326,56 @@ function sendJson(res, status, payload) {
   res.end(body);
 }
 
+function createNamedPipeNotificationTransport() {
+  return {
+    async subscribe(ref, onEvent) {
+      if (ref?.kind !== 'named-pipe') return () => {};
+      const pipePath = typeof ref.value === 'string' ? ref.value : '';
+      if (!pipePath) return () => {};
+      if (process.platform !== 'win32' && fs.existsSync(pipePath)) {
+        try {
+          fs.rmSync(pipePath, { force: true });
+        } catch {
+          // Best-effort stale socket cleanup.
+        }
+      }
+      const server = net.createServer((socket) => {
+        let buffer = '';
+        socket.on('data', (chunk) => {
+          buffer += chunk.toString('utf8');
+          while (true) {
+            const newlineIndex = buffer.indexOf('\n');
+            if (newlineIndex < 0) break;
+            const line = buffer.slice(0, newlineIndex).trim();
+            buffer = buffer.slice(newlineIndex + 1);
+            if (!line) continue;
+            try {
+              const parsed = JSON.parse(line);
+              onEvent(parsed?.notification ?? parsed);
+            } catch {
+              // Ignore malformed notification frames.
+            }
+          }
+        });
+      });
+      await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(pipePath, () => resolve());
+      });
+      return () => {
+        server.close();
+        if (process.platform !== 'win32') {
+          try {
+            fs.rmSync(pipePath, { force: true });
+          } catch {
+            // Best-effort socket cleanup.
+          }
+        }
+      };
+    },
+  };
+}
+
 async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig, processLogger) {
   const buildBoardBundle = hostConfig.storageAdapter === 'localfs'
     ? buildLocalFsBoardBundle
@@ -374,6 +425,7 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
     },
     executionExtra: boardRuntimeNeeds.taskExecutorExtra,
     logger: processLogger.child(`${boardId}:controlface`),
+    notificationTransport: createNamedPipeNotificationTransport(),
   });
   return { runtime, boardRuntimeNeeds };
 }

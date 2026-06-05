@@ -548,6 +548,9 @@ const T8_CHAT_CARD_ID = 'card-portfolio-t8-9108';
 const T9_CHAT_CARD_ID = 'card-portfolio-t9-9109';
 const T8F_CHAT_CARD_ID = 'card-portfolio-t8f-9118';
 const T9F_CHAT_CARD_ID = 'card-portfolio-t9f-9119';
+const TR_PORTFOLIO_CARD_ID = 'card-portfolio-tr-9200';
+const TR_MARKET_PRICES_CARD_ID = 'market-prices-tr-9201';
+const TR_QUOTES_TOKEN = 'quotes_tr2_9201';
 const PROBE_ENVELOPE = '__probe__echo__probe__';
 const NON_PROBE_RESPONSE_TIMEOUT_MS = 120_000;
 
@@ -581,6 +584,20 @@ const t8ChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), 
 const t9ChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T9_CHAT_CARD_ID);
 const t8fChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T8F_CHAT_CARD_ID);
 const t9fChatSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), T9F_CHAT_CARD_ID);
+// TR uses a portfolio card with a unique id that still provides holdings_tc1,
+// satisfying the requires of the TR market-prices card (which gets a unique id
+// and a unique provides token so it does not collide with other tests).
+const trPortfolioSeedCard = cloneCardWithId(loadCardFixture('cardT-portfolio.json'), TR_PORTFOLIO_CARD_ID);
+const trMarketPricesSeedCard = (() => {
+  const clone = cloneCardWithId(loadCardFixture('cardT-market-prices.json'), TR_MARKET_PRICES_CARD_ID);
+  const provides = Array.isArray(clone.provides) ? clone.provides : [];
+  clone.provides = provides.map((entry) => (
+    entry && entry.bindTo === 'quotes_tc2'
+      ? { ...entry, bindTo: TR_QUOTES_TOKEN }
+      : entry
+  ));
+  return clone;
+})();
 
 async function main() {
   const { hostConfig } = await getHostedRuntimeContext();
@@ -589,7 +606,7 @@ async function main() {
   const formatTestId = (testId) => `${modePrefix}-${String(testId || '').trim().toUpperCase()}`;
   const printedTests = requestedTests
     ? Array.from(requestedTests).map((testId) => formatTestId(testId)).join(',')
-    : ['MB1', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F'].map((testId) => formatTestId(testId)).join(',');
+    : ['MB1', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F', 'TR'].map((testId) => formatTestId(testId)).join(',');
 
   console.log(`\n=== ${modeLabel} controlface MCP smoke test ===`);
   console.log(`target: ${API_BASE}`);
@@ -650,18 +667,7 @@ async function main() {
     );
     console.log(`[${formatTestId('MB1')}] add-board succeeded; boards now: ${jsonText(reListedIds)}`);
   } else {
-    console.log(`[${formatTestId('MB1')}] board '${BOARD_ID}' already registered; calling refresh-board`);
-    const refreshResult = await httpJson('POST', manageBoardsUrl, {
-      subcommand: 'refresh-board',
-      args: {
-        boardId: BOARD_ID,
-      },
-    });
-    assert(
-      refreshResult.status === 200 && refreshResult.data?.status === 'success',
-      `${formatTestId('MB1')} refresh-board failed: HTTP ${refreshResult.status} ${jsonText(refreshResult.data)}`,
-    );
-    console.log(`[${formatTestId('MB1')}] refresh-board succeeded for '${BOARD_ID}'`);
+    console.log(`[${formatTestId('MB1')}] board '${BOARD_ID}' already registered; reusing existing runtime`);
   }
 
   const createdCardIds = [];
@@ -671,6 +677,8 @@ async function main() {
     latestStatusData: null,
     statusSummary: null,
     chatEvents: [],
+    statusHistory: [],
+    cardRefreshedEvents: [],
   };
   let chatSseWorker = null;
   let chatSseClientId = '';
@@ -722,6 +730,18 @@ async function main() {
     }
   }
 
+  function captureCardRefreshedEvents(payload) {
+    if (!payload || payload.kind !== 'notification-batch' || !Array.isArray(payload.notifications)) return;
+    for (const notification of payload.notifications) {
+      if (notification?.kind !== 'card_refreshed') continue;
+      sseState.cardRefreshedEvents.push({
+        at: Date.now(),
+        cardId: String(notification.cardId || ''),
+        card: notification.card || null,
+      });
+    }
+  }
+
   function extractStatusDataFromSsePayload(payload) {
     if (payload?.statusSnapshot && typeof payload.statusSnapshot === 'object') {
       return payload.statusSnapshot;
@@ -750,8 +770,13 @@ async function main() {
       if (statusData.summary) {
         sseState.statusSummary = statusData.summary;
       }
+      sseState.statusHistory.push({ at: Date.now(), statusData });
+      if (sseState.statusHistory.length > 500) {
+        sseState.statusHistory.splice(0, sseState.statusHistory.length - 500);
+      }
     }
 
+    captureCardRefreshedEvents(payload);
     captureChatEvents(payload, cardId);
   }
 
@@ -783,6 +808,8 @@ async function main() {
     sseState.latestPayload = null;
     sseState.latestStatusData = null;
     sseState.statusSummary = null;
+    sseState.statusHistory = [];
+    sseState.cardRefreshedEvents = [];
     if (clearChatEvents) {
       sseState.chatEvents = [];
     }
@@ -928,6 +955,26 @@ async function main() {
     return await waitUntil(() => {
       const summary = sseState.statusSummary;
       return summary ? summary : false;
+    }, timeoutMs, label);
+  }
+
+  async function waitForSseCardRefreshed(cardId, eventStart, timeoutMs, label) {
+    return await waitUntil(() => {
+      const events = sseState.cardRefreshedEvents.slice(eventStart);
+      return events.find((event) => event.cardId === cardId) || false;
+    }, timeoutMs, label);
+  }
+
+  async function waitForSseCardStatus(cardId, expectedStatus, historyStart, timeoutMs, label) {
+    return await waitUntil(() => {
+      const snapshots = sseState.statusHistory.slice(historyStart);
+      for (const snapshot of snapshots) {
+        const card = findBoardStatusCard(snapshot.statusData, cardId);
+        if (card && String(card.status || '') === expectedStatus) {
+          return { statusData: snapshot.statusData, card };
+        }
+      }
+      return false;
     }, timeoutMs, label);
   }
 
@@ -1522,7 +1569,7 @@ async function main() {
     if (isTestSelected(requestedTests, 'TS')) {
       console.log(`\n=== ${formatTestId('TS')}: probe chat with attachment + SSE lifecycle ===`);
 
-      console.log(`[${formatTestId('TS')}] step 0/11: upserting ${PORTFOLIO_CARD_ID} for chat`);
+      console.log(`[${formatTestId('TS')}] step 0/9: upserting ${PORTFOLIO_CARD_ID} for chat`);
       expectMcpSuccess(
         await callMcp('manage.upsert-card', {
           card_id: PORTFOLIO_CARD_ID,
@@ -1533,12 +1580,12 @@ async function main() {
       createdCardIds.push(PORTFOLIO_CARD_ID);
       let tsChatSubscribed = false;
       try {
-        console.log(`[${formatTestId('TS')}] step 1/11: subscribing chat SSE for ${PORTFOLIO_CARD_ID}`);
+        console.log(`[${formatTestId('TS')}] step 1/9: subscribing chat SSE for ${PORTFOLIO_CARD_ID}`);
         await closeBoardSseConnection({ clearChatEvents: true });
         await ensureChatSseSubscription(PORTFOLIO_CARD_ID);
         tsChatSubscribed = true;
 
-        console.log(`[${formatTestId('TS')}] step 2/11: waiting for live /sse bootstrap payload`);
+        console.log(`[${formatTestId('TS')}] step 2/9: waiting for live /sse bootstrap payload`);
         await waitUntil(
           () => sseState.initialPayload || false,
           15_000,
@@ -1547,7 +1594,7 @@ async function main() {
         const bootstrapSummary = await waitForSseSummary(15_000, `TS SSE summary for ${PORTFOLIO_CARD_ID}`);
         assert(bootstrapSummary, `TS live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
 
-        console.log(`[${formatTestId('TS')}] step 2.1/11: waiting for ${PORTFOLIO_CARD_ID} to appear completed in SSE status`);
+        console.log(`[${formatTestId('TS')}] step 3/9: waiting for ${PORTFOLIO_CARD_ID} to appear completed in SSE status`);
         const completedStatus = await waitForSseCompletedCard(PORTFOLIO_CARD_ID, 15_000, `TS SSE completed status for ${PORTFOLIO_CARD_ID}`);
         const bootstrapCard = completedStatus.card;
         assert(bootstrapSummary, `TS live /sse summary missing after status wait: ${jsonText(completedStatus.statusData)}`);
@@ -1559,7 +1606,7 @@ async function main() {
         const probeText = buildProbeChatText(promptText, 'echoattach');
         const expectedProbeReply = 'what is the capital of japan';
 
-        console.log(`[${formatTestId('TS')}] step 3/11: adding chat attachment for turn ${turnId}`);
+        console.log(`[${formatTestId('TS')}] step 4/9: adding chat attachment for turn ${turnId}`);
         const uploadResult = expectMcpSuccess(
           await callControlplaneMcp('manage.add-chat-attachment', {
             card_id: PORTFOLIO_CARD_ID,
@@ -1593,7 +1640,7 @@ async function main() {
 
         const eventStart = sseState.chatEvents.length;
 
-        console.log(`[${formatTestId('TS')}] step 4/11: sending probe chat turn ${turnId} with attachment`);
+        console.log(`[${formatTestId('TS')}] step 5/9: sending probe chat turn ${turnId} with attachment`);
         expectMcpSuccess(
           await callAction('chat-send', PORTFOLIO_CARD_ID, {
             text: probeText,
@@ -1603,7 +1650,7 @@ async function main() {
           'TS chat-send',
         );
 
-        console.log(`[${formatTestId('TS')}] step 5/11: waiting for SSE processing-done notification`);
+        console.log(`[${formatTestId('TS')}] step 6/9: waiting for SSE processing-done notification`);
         let bouquet;
         try {
           bouquet = await waitForChatTurnState({
@@ -1633,7 +1680,7 @@ async function main() {
           throw err;
         }
 
-        console.log(`[${formatTestId('TS')}] step 6/11: verifying notification bouquet contents`);
+        console.log(`[${formatTestId('TS')}] step 7/9: verifying notification bouquet contents`);
         const expectedProbeReplyPattern = new RegExp(expectedProbeReply.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
         assert(bouquet.processingOnSeen, `TS bouquet missing processing-on notification for turn ${turnId}`);
         assert(bouquet.processingDoneSeen, `TS bouquet missing processing-done notification for turn ${turnId}`);
@@ -1644,7 +1691,7 @@ async function main() {
         const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => expectedProbeReplyPattern.test(String(message?.text || '')));
         assert(bouquetAssistantMessage, `TS bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
 
-        console.log(`[${formatTestId('TS')}] step 7/11: verifying persisted turn contents`);
+        console.log(`[${formatTestId('TS')}] step 8/9: verifying persisted turn contents`);
         const finalMessages = await readChatMessages(PORTFOLIO_CARD_ID, turnId);
         const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
         const finalAssistantMessage = finalMessages.find((message) => message?.role === 'assistant');
@@ -1655,11 +1702,11 @@ async function main() {
         assert(turnSystemMessage, `TS turn missing system attachment message: ${jsonText(finalMessages)}`);
         assert(String(finalAssistantMessage.text || '').includes(expectedProbeReply), `TS final probe reply text mismatch: ${jsonText(finalAssistantMessage)}`);
 
-        console.log(`[${formatTestId('TS')}] step 8/11: final probe reply with attachment contents passed`);
+        console.log(`[${formatTestId('TS')}] step 9/9: final probe reply with attachment contents passed`);
         console.log(`[${formatTestId('TS')}] final probe reply: ${String(finalAssistantMessage.text || '')}`);
       } finally {
         if (tsChatSubscribed) {
-          console.log(`[${formatTestId('TS')}] step 9/11: unsubscribing chat SSE for ${PORTFOLIO_CARD_ID}`);
+          console.log(`[${formatTestId('TS')}] cleanup: unsubscribing chat SSE for ${PORTFOLIO_CARD_ID}`);
           try {
             await unsubscribeChatSseSubscription(PORTFOLIO_CARD_ID);
           } catch (err) {
@@ -2100,6 +2147,97 @@ async function main() {
           } catch (err) {
             console.warn(`[${formatTestId('T9F')}] chat SSE unsubscribe failed: ${String(err?.message || err)}`);
           }
+        }
+      }
+    }
+
+    if (isTestSelected(requestedTests, 'TR')) {
+      console.log(`\n=== ${formatTestId('TR')}: card refresh action + SSE refreshed/running/completed lifecycle ===`);
+
+      let trSseConnected = false;
+      try {
+        console.log(`[${formatTestId('TR')}] step 0/6: seeding ${TR_PORTFOLIO_CARD_ID} so ${TR_MARKET_PRICES_CARD_ID} can resolve holdings`);
+        expectMcpSuccess(
+          await callMcp('manage.upsert-card', {
+            card_id: TR_PORTFOLIO_CARD_ID,
+            candidate_card_content: trPortfolioSeedCard,
+          }),
+          'TR manage.upsert-card portfolio',
+        );
+        createdCardIds.push(TR_PORTFOLIO_CARD_ID);
+
+        console.log(`[${formatTestId('TR')}] step 1/6: subscribing board SSE before upserting ${TR_MARKET_PRICES_CARD_ID}`);
+        await closeBoardSseConnection({ clearChatEvents: true });
+        await ensureBoardSseConnection(TR_MARKET_PRICES_CARD_ID);
+        trSseConnected = true;
+        await waitForSseSummary(15_000, `TR SSE summary before ${TR_MARKET_PRICES_CARD_ID} upsert`);
+
+        const refreshedEventStart = sseState.cardRefreshedEvents.length;
+
+        console.log(`[${formatTestId('TR')}] step 2/6: upserting ${TR_MARKET_PRICES_CARD_ID}`);
+        expectMcpSuccess(
+          await callMcp('manage.upsert-card', {
+            card_id: TR_MARKET_PRICES_CARD_ID,
+            candidate_card_content: trMarketPricesSeedCard,
+          }),
+          'TR manage.upsert-card market-prices',
+        );
+        createdCardIds.push(TR_MARKET_PRICES_CARD_ID);
+
+        console.log(`[${formatTestId('TR')}] step 3/6: waiting for SSE card_refreshed notification for ${TR_MARKET_PRICES_CARD_ID}`);
+        const refreshedEvent = await waitForSseCardRefreshed(
+          TR_MARKET_PRICES_CARD_ID,
+          refreshedEventStart,
+          15_000,
+          `TR SSE card_refreshed for ${TR_MARKET_PRICES_CARD_ID}`,
+        );
+        assert(
+          refreshedEvent && refreshedEvent.cardId === TR_MARKET_PRICES_CARD_ID,
+          `TR card_refreshed notification missing for ${TR_MARKET_PRICES_CARD_ID}`,
+        );
+
+        // Let the card settle into completed from the upsert so the refresh transition is cleanly observable.
+        await waitForSseCardStatus(TR_MARKET_PRICES_CARD_ID, 'completed', 0, 30_000, `TR ${TR_MARKET_PRICES_CARD_ID} initial completed`);
+
+        const statusHistoryStart = sseState.statusHistory.length;
+
+        console.log(`[${formatTestId('TR')}] step 4/6: issuing card refresh action for ${TR_MARKET_PRICES_CARD_ID}`);
+        const refreshActionResult = await callAction('retrigger-card', TR_MARKET_PRICES_CARD_ID);
+        assert(
+          refreshActionResult.status === 200 && refreshActionResult.data?.status === 'success',
+          `TR retrigger-card failed: HTTP ${refreshActionResult.status} ${jsonText(refreshActionResult.data)}`,
+        );
+
+        console.log(`[${formatTestId('TR')}] step 5/6: waiting for board status notification with ${TR_MARKET_PRICES_CARD_ID} running`);
+        const runningStatus = await waitForSseCardStatus(
+          TR_MARKET_PRICES_CARD_ID,
+          'running',
+          statusHistoryStart,
+          30_000,
+          `TR SSE running status for ${TR_MARKET_PRICES_CARD_ID}`,
+        );
+        assert(
+          runningStatus.card && String(runningStatus.card.status || '') === 'running',
+          `TR expected ${TR_MARKET_PRICES_CARD_ID} running in SSE status: ${jsonText(runningStatus.statusData)}`,
+        );
+
+        console.log(`[${formatTestId('TR')}] step 6/6: waiting for board status notification with ${TR_MARKET_PRICES_CARD_ID} completed`);
+        const completedStatus = await waitForSseCardStatus(
+          TR_MARKET_PRICES_CARD_ID,
+          'completed',
+          statusHistoryStart,
+          30_000,
+          `TR SSE completed status for ${TR_MARKET_PRICES_CARD_ID}`,
+        );
+        assert(
+          completedStatus.card && String(completedStatus.card.status || '') === 'completed',
+          `TR expected ${TR_MARKET_PRICES_CARD_ID} completed in SSE status after refresh: ${jsonText(completedStatus.statusData)}`,
+        );
+
+        console.log(`[${formatTestId('TR')}] card refresh lifecycle verified for ${TR_MARKET_PRICES_CARD_ID}`);
+      } finally {
+        if (trSseConnected) {
+          await closeBoardSseConnection({ clearChatEvents: true });
         }
       }
     }

@@ -7,6 +7,15 @@ import {
   serializeRef,
 } from 'yaml-flow/board-live-cards-node';
 
+function getNamedPipePath(pipeName) {
+  if (process.platform === 'win32') return `\\\\.\\pipe\\${pipeName}`;
+  return `/tmp/${pipeName}.sock`;
+}
+
+function makeNotifyChannel(boardId) {
+  return `hosted-board-runtime-${boardId}`;
+}
+
 function makeHostedTaskExecutorRef(boardId) {
   return {
     meta: 'task-executor',
@@ -84,10 +93,15 @@ export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, ru
 
   ensureBoardDirs(refs);
   const immediateTaskExecutorRef = options.taskExecutorRef;
+  const notifyChannel = makeNotifyChannel(boardId);
+  const notifyRef = { kind: 'named-pipe', value: getNamedPipePath(notifyChannel) };
 
   const adapterOpts = {
     suppressSpawn: true,
     onWarn: (message) => console.warn(`[localfs-adapter] ${message}`),
+    boardRuntimeStoreRef: serializedRefs.boardRuntimeStoreRef,
+    queueStoreRef: serializedRefs.queueStoreRef,
+    notifyChannel,
     ...(options.callbackTransport ? { callbackTransport: options.callbackTransport } : {}),
   };
   const nonCoreAdapterOpts = {
@@ -121,6 +135,7 @@ export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, ru
       boardAdapter,
       nonCore,
       taskExecutorRef: hostedTaskExecutorRef,
+      notifyRef,
       ...(chatHandlerFlow ? { chatHandlerFlow } : {}),
       ...serializedRefs,
     },
