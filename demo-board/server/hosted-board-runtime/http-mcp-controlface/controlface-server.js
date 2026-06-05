@@ -5,16 +5,21 @@ import http from 'node:http';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 import { createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
 import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
 import { buildBoardBundle as buildFirebaseBoardBundle } from '../firebase-adapter/build-board-bundle.js';
 import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js';
 import { loadFirebaseHostConfig, resolveConfigRelativePath } from '../firebase-adapter/load-config.js';
+import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
 import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
-import { buildHostedChatAgentRuntime } from '../host-shared/chat-agent-handler/execute-chat-agent-request.js';
-import { createLogger } from '../host-shared/logging.js';
-import { deriveCardIdFromLogId, resolveAgentToolsLogFilePath } from '../../chat-flow/copilot-chat/watchparty.js';
+import {
+  buildHostedBoardRuntimeNeeds,
+  executeChatAgentRequest,
+} from '../host-shared/chat-agent-handler/execute-chat-agent-request.js';
+import { createLogger, HOSTED_SERVER_LOG_PATH } from '../host-shared/logging.js';
+import { deriveCardIdFromLogId, resolveBoardAgentToolsLogFilePath } from '../../chat-flow/shared.js';
 import {
   createHostedImmediateTaskExecutorRef,
   loadTaskExecutorModule,
@@ -23,8 +28,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.config.json');
-const BOARD_ROOT = path.resolve(__dirname, '../../..');
-const CONTROLFACE_LOG_PATH = path.join(BOARD_ROOT, 'logs', 'control-face.log');
+const SETUP_SCRIPT_PATH = path.resolve(__dirname, '..', 'scripts', 'setup-single-ai-workspace.js');
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -46,33 +50,36 @@ function defaultBoardId(boardRuntimes) {
 
 function normalizeControlfaceScope(routeKind, boardId, boardRuntimes) {
   const resolvedBoardId = normalizeText(boardId) || defaultBoardId(boardRuntimes) || 'controlface';
-  if (routeKind === 'healthz') return `${resolvedBoardId}:healthz`;
-  if (routeKind === 'mcp' || routeKind === 'mcp-controlplane' || routeKind === 'mcp-actions') return `${resolvedBoardId}:mcp`;
-  if (routeKind) return `${resolvedBoardId}:${routeKind}`;
-  return `${resolvedBoardId}:api`;
+  return `${resolvedBoardId}:controlface`;
+}
+
+function resolveControlfaceRouteLabel(parsedUrl, details = {}) {
+  const pathname = normalizeText(parsedUrl?.pathname);
+  if (!pathname) {
+    return '/';
+  }
+  const segments = pathname.split('/').filter(Boolean);
+  const stem = segments[segments.length - 1] || '';
+  return stem ? `/${stem}` : '/';
 }
 
 function formatControlfacePickupMessage(req, parsedUrl, details = {}) {
   const method = normalizeText(req?.method) || 'GET';
-  if (details.routeKind === 'healthz') {
-    return method;
-  }
+  const routeLabel = resolveControlfaceRouteLabel(parsedUrl, details);
   if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions') {
-    return joinParts([method, normalizeText(details.toolName), normalizeText(details.cardId), normalizeText(details.turnId)]);
+    return joinParts([method, routeLabel, normalizeText(details.toolName), normalizeText(details.cardId), normalizeText(details.turnId)]);
   }
-  return joinParts([method, parsedUrl?.pathname || '/']);
+  return joinParts([method, routeLabel]);
 }
 
 function formatControlfaceCompletionMessage(req, parsedUrl, details = {}, statusCode = 0) {
   const method = normalizeText(req?.method) || 'GET';
   const status = String(statusCode || 0);
-  if (details.routeKind === 'healthz') {
-    return joinParts([method, status, normalizeText(details.errorMessage)]);
-  }
+  const routeLabel = resolveControlfaceRouteLabel(parsedUrl, details);
   if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions') {
-    return joinParts([method, normalizeText(details.toolName), normalizeText(details.cardId), normalizeText(details.turnId), status, normalizeText(details.errorMessage)]);
+    return joinParts([method, routeLabel, normalizeText(details.toolName), normalizeText(details.cardId), normalizeText(details.turnId), status, normalizeText(details.errorMessage)]);
   }
-  return joinParts([method, parsedUrl?.pathname || '/', status, normalizeText(details.errorMessage)]);
+  return joinParts([method, routeLabel, status, normalizeText(details.errorMessage)]);
 }
 
 function titleCase(text) {
@@ -248,20 +255,13 @@ function formatWatchpartyToolMessage(phase, toolName, body) {
   return `${phase} '${semanticName}'${details}`;
 }
 
-function appendWatchpartyToolsLog(chatRuntime, logId, phase, toolName, body) {
+function appendWatchpartyToolsLog(boardId, logId, phase, toolName, body) {
   const sanitizedCardId = deriveCardIdFromLogId(logId);
-  if (!sanitizedCardId) {
+  if (!sanitizedCardId || !boardId) {
     return;
   }
 
-  const watchPartyFilesForChatDir = typeof chatRuntime?.executionExtra?.watchPartyFilesForChatDir === 'string'
-    ? chatRuntime.executionExtra.watchPartyFilesForChatDir.trim()
-    : '';
-  if (!watchPartyFilesForChatDir) {
-    return;
-  }
-
-  const outputPath = resolveAgentToolsLogFilePath(watchPartyFilesForChatDir, sanitizedCardId);
+  const outputPath = resolveBoardAgentToolsLogFilePath(boardId, sanitizedCardId);
   const line = formatWatchpartyToolMessage(phase, toolName, body);
 
   try {
@@ -325,78 +325,199 @@ function sendJson(res, status, payload) {
   res.end(body);
 }
 
-async function buildBoardRuntimes(hostConfig, adapterServices) {
-  const processLogger = createLogger('controlface', { filePath: CONTROLFACE_LOG_PATH });
-  const runtimes = new Map();
+async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig, processLogger) {
   const buildBoardBundle = hostConfig.storageAdapter === 'localfs'
     ? buildLocalFsBoardBundle
     : buildFirebaseBoardBundle;
-  for (const [boardId, boardConfig] of Object.entries(hostConfig.boards)) {
-    const callbackBaseUrl = `http://${hostConfig.host}:${hostConfig.port}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/mcp-webhooks`;
-    const chatRuntime = buildHostedChatAgentRuntime(boardId, boardConfig, {
-      serverUrl: `http://${hostConfig.host}:${hostConfig.port}`,
-      apiBasePrefix: hostConfig.apiBasePrefix,
+  const boardId = boardConfig.id;
+  const callbackBaseUrl = `http://${hostConfig.host}:${hostConfig.port}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/mcp-webhooks`;
+  const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
+    serverUrl: `http://${hostConfig.host}:${hostConfig.port}`,
+    mcpServerUrl: hostConfig.mcpServerUrl,
+    apiBasePrefix: hostConfig.apiBasePrefix,
+    foundryAgents: hostConfig.foundryAgents,
+    chatFlowTimeoutMs: hostConfig.chatFlowTimeoutMs,
+    chatInvokeRefTimeoutMs: hostConfig.chatInvokeRefTimeoutMs,
+    chatCopilotTimeoutMs: hostConfig.chatCopilotTimeoutMs,
+  });
+  const bundle = buildBoardBundle(
+    boardId,
+    boardConfig,
+    adapterServices,
+    {},
+    {
+      callbackTransport: createHttpBoardCallbackTransport(callbackBaseUrl),
       configDir: hostConfig.configDir,
-      watchparty: hostConfig.watchparty,
-      foundryAgents: hostConfig.foundryAgents,
-      chatFlowTimeoutMs: hostConfig.chatFlowTimeoutMs,
-      chatInvokeRefTimeoutMs: hostConfig.chatInvokeRefTimeoutMs,
-      chatCopilotTimeoutMs: hostConfig.chatCopilotTimeoutMs,
-    });
-    await loadTaskExecutorModule(
-      boardId,
-      boardConfig,
+      taskExecutorRef: createHostedImmediateTaskExecutorRef(
+        boardId,
+        boardRuntimeNeeds.taskExecutorExtra,
+      ),
       resolveConfigRelativePath,
-      hostConfig.configDir,
-    );
-    const bundle = buildBoardBundle(
-      boardId,
-      boardConfig,
-      adapterServices,
-      {},
-      {
-        callbackTransport: createHttpBoardCallbackTransport(callbackBaseUrl),
-        configDir: hostConfig.configDir,
-        taskExecutorRef: createHostedImmediateTaskExecutorRef(
-          boardId,
-          boardConfig,
-          resolveConfigRelativePath,
-          hostConfig.configDir,
-          chatRuntime.executionExtra,
-        ),
-        resolveConfigRelativePath,
+    },
+  );
+  const runtime = createSingleBoardServerRuntime({
+    apiBasePath: `${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}`,
+    boardId,
+    boards: [{
+      ...bundle.boardContextConfig,
+    }],
+    async handleChatAgentRequest(request) {
+      await executeChatAgentRequest(request, boardId, boardRuntimeNeeds);
+    },
+    invocationAdapter: {
+      async invoke(ref) {
+        return {
+          dispatched: false,
+          error: `No invocation adapter configured for ${ref?.howToRun || 'unknown'}`,
+        };
       },
-    );
-    const runtime = createSingleBoardServerRuntime({
-      apiBasePath: `${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}`,
-      boardId,
-      boards: [{
-        ...bundle.boardContextConfig,
-        ...(chatRuntime.chatHandlerFlow ? { chatHandlerFlow: chatRuntime.chatHandlerFlow } : {}),
-      }],
-      invocationAdapter: {
-        async invoke(ref) {
-          return {
-            dispatched: false,
-            error: `No invocation adapter configured for ${ref?.howToRun || 'unknown'}`,
-          };
-        },
-      },
-      executionExtra: chatRuntime.executionExtra,
-      logger: processLogger.child(`${boardId}:controlface`),
-    });
-    runtimes.set(boardId, { runtime, chatRuntime });
+    },
+    executionExtra: boardRuntimeNeeds.taskExecutorExtra,
+    logger: processLogger.child(`${boardId}:controlface`),
+  });
+  return { runtime, boardRuntimeNeeds };
+}
+
+async function buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards) {
+  const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
+  const runtimes = new Map();
+  const boardConfigs = await dynamicBoards.list();
+  for (const boardConfig of boardConfigs) {
+    runtimes.set(boardConfig.id, await buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig, processLogger));
   }
   return runtimes;
 }
 
+function runSetupSingleAiWorkspaceScript(boardId, configPath) {
+  return new Promise((resolve, reject) => {
+    const args = [SETUP_SCRIPT_PATH, boardId];
+    if (configPath) {
+      args.push('--config', configPath);
+    }
+    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdoutChunks = [];
+    const stderrChunks = [];
+    child.stdout.on('data', (chunk) => stdoutChunks.push(chunk));
+    child.stderr.on('data', (chunk) => stderrChunks.push(chunk));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+      const stderr = Buffer.concat(stderrChunks).toString('utf8');
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const err = new Error(`setup-single-ai-workspace.js exited with code ${code}: ${stderr || stdout}`);
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+      }
+    });
+  });
+}
+
+function summarizeBoardForList(board) {
+  return {
+    id: board.id,
+    label: board.label,
+    ai: board.ai,
+    aiWorkspaceTemplate: board.aiWorkspaceTemplate,
+    metadata: board.metadata,
+  };
+}
+
+async function handleManageBoardsRoute({
+  req,
+  res,
+  dynamicBoards,
+  hostConfig,
+  adapterServices,
+  boardRuntimes,
+  processLogger,
+}) {
+  const rawBody = await readRawRequestBody(req);
+  const body = parseJsonObjectOrEmpty(rawBody);
+  const subcommand = typeof body?.subcommand === 'string' ? body.subcommand.trim() : '';
+  const args = body?.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
+
+  if (subcommand === 'list-boards') {
+    const list = await dynamicBoards.list();
+    sendJson(res, 200, { status: 'success', data: { boards: list.map(summarizeBoardForList) } });
+    return;
+  }
+
+  if (subcommand === 'get-board') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const board = await dynamicBoards.get(id);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    sendJson(res, 200, { status: 'success', data: { board } });
+    return;
+  }
+
+  if (subcommand === 'add-board') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    const record = args?.record;
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    if (!record || typeof record !== 'object' || Array.isArray(record)) {
+      sendJson(res, 400, { status: 'error', error: 'args.record is required (object)' });
+      return;
+    }
+    let board;
+    try {
+      board = await dynamicBoards.add(id, record);
+    } catch (err) {
+      if (err?.code === 'EEXIST') {
+        sendJson(res, 400, { status: 'error', error: err.message });
+        return;
+      }
+      throw err;
+    }
+    await runSetupSingleAiWorkspaceScript(id, hostConfig.configPath);
+    const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
+    boardRuntimes.set(id, runtimePair);
+    sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
+    return;
+  }
+
+  if (subcommand === 'refresh-board') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const board = await dynamicBoards.get(id);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    await runSetupSingleAiWorkspaceScript(id, hostConfig.configPath);
+    const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
+    boardRuntimes.set(id, runtimePair);
+    sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
+    return;
+  }
+
+  sendJson(res, 400, { status: 'error', error: `unknown subcommand '${subcommand}'` });
+}
+
 async function main() {
-  const processLogger = createLogger('controlface', { filePath: CONTROLFACE_LOG_PATH });
+  const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'controlface');
   const adapterServices = hostConfig.storageAdapter === 'localfs'
     ? await initializeLocalFsServices(hostConfig.localfs)
     : await initializeFirebaseServices(hostConfig.firebase);
-  const boardRuntimes = await buildBoardRuntimes(hostConfig, adapterServices);
+  const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
+  await dynamicBoards.ensureSeeded();
+  const boardRuntimes = await buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards);
 
   const server = http.createServer(async (req, res) => {
     let requestDetails = null;
@@ -439,6 +560,24 @@ async function main() {
       return;
     }
 
+    if (req.method === 'POST' && parsedUrl.pathname === '/manage-boards') {
+      requestDetails = { routeKind: 'manage-boards' };
+      requestLogger = processLogger.child(normalizeControlfaceScope('manage-boards', '', boardRuntimes));
+      requestLogger.info(formatControlfacePickupMessage(req, parsedUrl, requestDetails));
+      res.once('finish', logCompletionOnce);
+      res.once('close', logCompletionOnce);
+      await handleManageBoardsRoute({
+        req,
+        res,
+        dynamicBoards,
+        hostConfig,
+        adapterServices,
+        boardRuntimes,
+        processLogger,
+      });
+      return;
+    }
+
     try {
       const mcpRouteMatch = req.method === 'POST'
         ? matchLoggedMcpRoute(hostConfig.apiBasePrefix, parsedUrl.pathname)
@@ -465,7 +604,7 @@ async function main() {
           res.once('finish', logCompletionOnce);
           res.once('close', logCompletionOnce);
 
-          appendWatchpartyToolsLog(entry.chatRuntime, logId, 'Invoking', toolName, strippedBody);
+          appendWatchpartyToolsLog(boardId, logId, 'Invoking', toolName, strippedBody);
 
           let watchpartyCompletionLogged = false;
           const logWatchpartyCompletionOnce = () => {
@@ -473,7 +612,7 @@ async function main() {
               return;
             }
             watchpartyCompletionLogged = true;
-            appendWatchpartyToolsLog(entry.chatRuntime, logId, 'Completed', toolName, strippedBody);
+            appendWatchpartyToolsLog(boardId, logId, 'Completed', toolName, strippedBody);
           };
           res.once('finish', logWatchpartyCompletionOnce);
           res.once('close', logWatchpartyCompletionOnce);
@@ -529,7 +668,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  const processLogger = createLogger('controlface', { filePath: CONTROLFACE_LOG_PATH });
+  const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
   processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });

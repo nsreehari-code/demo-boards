@@ -3,8 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prestart": "node ./scripts/prestart.js",
-    "start": "node ./scripts/start-localfs-runtime.js",
     "stop": "node ./scripts/stop-runtime.js",
     "start:controlface": "node ./http-mcp-controlface/controlface-server.js --config ./hosted-board-runtime.config.json",
     "start:queue-runner": "node ./queue-runner/queue-runner.js --config ./hosted-board-runtime.config.json",

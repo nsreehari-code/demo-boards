@@ -12,7 +12,7 @@ const localfsConfigArgv = ['--config', './hosted-board-runtime.localfs.config.js
 
 for (const entryPath of [controlfaceEntry, queueRunnerEntry]) {
   if (!fs.existsSync(entryPath)) {
-    console.error(`[start-firebase-hosts] Missing ${entryPath}`);
+    console.error(`[start-local-hosts] Missing ${entryPath}`);
     process.exit(1);
   }
 }
@@ -28,7 +28,7 @@ function startRuntime(entryPath, label) {
   });
   child.on('exit', (code) => {
     if (shuttingDown) return;
-    console.error(`[start-firebase-hosts] ${label} exited with code ${code ?? 0}`);
+    console.error(`[start-local-hosts] ${label} exited with code ${code ?? 0}`);
     shutdown();
   });
   return child;

@@ -3,7 +3,7 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -12,6 +12,20 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as z from 'zod/v4';
 import { loadManifests } from './manifest-loader.js';
 import { resolveHandler } from './handler-registry.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const MCP_SERVER_DIR = path.resolve(__dirname, '..');
+const MCP_SERVER_LOG_PATH = path.join(MCP_SERVER_DIR, 'logs', 'mcp-server.log');
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatTimestamp(date = new Date()) {
+  return `${MONTHS[date.getMonth()] || '???'}${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
 
 function getArgValues(flag) {
   const values = [];
@@ -182,6 +196,43 @@ function sendText(res, status, message) {
   res.end(message);
 }
 
+function appendMcpServerLogLine(message) {
+  const line = `${formatTimestamp()} ${message}`;
+  try {
+    mkdirSync(path.dirname(MCP_SERVER_LOG_PATH), { recursive: true });
+    appendFileSync(MCP_SERVER_LOG_PATH, `${line}\n`, 'utf8');
+  } catch {
+    // Logging must not break the server.
+  }
+}
+
+function summarizeMcpRequestBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return null;
+  }
+
+  const method = typeof body.method === 'string' ? body.method.trim() : '';
+  const params = body.params && typeof body.params === 'object' && !Array.isArray(body.params)
+    ? body.params
+    : {};
+  const toolName = typeof params.name === 'string' ? params.name.trim() : '';
+  const argumentsObject = params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments)
+    ? params.arguments
+    : {};
+  const boardId = typeof argumentsObject.board_id === 'string'
+    ? argumentsObject.board_id.trim()
+    : (typeof argumentsObject.boardId === 'string' ? argumentsObject.boardId.trim() : '');
+  const cardId = typeof argumentsObject.card_id === 'string'
+    ? argumentsObject.card_id.trim()
+    : (typeof argumentsObject.cardId === 'string' ? argumentsObject.cardId.trim() : '');
+
+  if (method !== 'tools/call' || !toolName) {
+    return null;
+  }
+
+  return `[${boardId || '?'}] ${toolName}${cardId ? ` ${cardId}` : ''}`;
+}
+
 async function readJsonBody(req) {
   let body = '';
   for await (const chunk of req) {
@@ -247,6 +298,10 @@ async function startStreamableHttpServer(loaded) {
     try {
       if (req.method === 'POST') {
         const parsedBody = await readJsonBody(req);
+        const requestSummary = summarizeMcpRequestBody(parsedBody);
+        if (requestSummary) {
+          appendMcpServerLogLine(requestSummary);
+        }
 
         if (sessionId && sessionTransports.has(sessionId)) {
           await sessionTransports.get(sessionId).handleRequest(req, res, parsedBody);
@@ -327,11 +382,12 @@ async function startStreamableHttpServer(loaded) {
     });
   });
 
+  appendMcpServerLogLine(`[mcp-server] started http://${host}:${port}${endpoint}`);
   process.stdout.write(`[mcp-server] streamable-http listening on http://${host}:${port}${endpoint}\n`);
 }
 
 function loadManifestPathsFromRegistry() {
-  const mcpServerDir = path.resolve(fileURLToPath(import.meta.url), '..', '..');
+  const mcpServerDir = MCP_SERVER_DIR;
   const registryPath = path.resolve(mcpServerDir, 'registry.json');
   const manifestsDir = path.resolve(mcpServerDir, 'manifests');
   // Registry manifests are auto-loaded into the local server process, so every

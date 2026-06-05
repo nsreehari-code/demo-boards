@@ -19,7 +19,53 @@
         "host": "127.0.0.1",
         "port": 9199
       }
-        "mcpServerUrl": "http://127.0.0.1:7801/mcp",
+    }
+  },
+  "mcpServerUrl": "http://127.0.0.1:7801/mcp",
+  "enableAssistantDebug": false,
+  "debugAssistantFile": "",
+  "refsTemplates": {
+    "firestore-default": {
+      "baseRef": {
+        "kind": "firestore-board",
+        "value": "boards/{{boardId}}"
+      },
+      "boardRuntimeStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/runtime-board"
+      },
+      "cardStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/cards"
+      },
+      "outputsStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/runtime-out"
+      },
+      "queueStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/runtime"
+      },
+      "scratchStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/scratch"
+      },
+      "archiveStoreRef": {
+        "kind": "firestore-board",
+        "value": "archive-{{boardId}}"
+      },
+      "chatStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/cards-chats"
+      },
+      "artifactsStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/files"
+      },
+      "fetchedSourcesStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/sources"
+      }
     }
   },
   "controlface": {
@@ -35,52 +81,14 @@
       "appName": "demo-board-local-queue-runner"
     }
   },
-  "boards": {
+  "boards-index": {
+    "kind": "firestore",
+    "value": "boards-index"
+  },
+  "sample-boards": {
     "live": {
       "label": "Live",
-      "taskExecutorModule": "../board-worker/task-executor.js",
-      "refs": {
-        "baseRef": {
-          "kind": "firestore-board",
-          "value": "boards/{{boardId}}"
-        },
-        "boardRuntimeStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/runtime-board"
-        },
-        "cardStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/cards"
-        },
-        "outputsStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/runtime-out"
-        },
-        "queueStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/runtime"
-        },
-        "scratchStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/scratch"
-        },
-        "archiveStoreRef": {
-          "kind": "firestore-board",
-          "value": "archive-{{boardId}}"
-        },
-        "chatStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/cards-chats"
-        },
-        "artifactsStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/files"
-        },
-        "fetchedSourcesStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/sources"
-        }
-      }
+      "refsTemplate": "firestore-default"
     }
   }
 }

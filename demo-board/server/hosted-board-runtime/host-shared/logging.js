@@ -1,6 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import util from 'node:util';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const BOARD_ROOT = path.resolve(__dirname, '../../..');
+
+export const HOSTED_SERVER_LOG_PATH = path.join(BOARD_ROOT, 'logs', 'hosted-server.log');
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -35,19 +41,22 @@ function appendLogLine(filePath, line) {
 export function createLogger(scope, options = {}) {
   const normalizedScope = typeof scope === 'string' && scope.trim() ? scope.trim() : 'runtime';
   const filePath = typeof options.filePath === 'string' && options.filePath.trim() ? options.filePath.trim() : '';
+  const mirrorToConsole = options.mirrorToConsole === true;
 
   function write(method, msg, args) {
     const text = typeof msg === 'string' ? msg : formatArg(msg);
     const suffix = args.length > 0 ? ` ${args.map(formatArg).join(' ')}` : '';
     const line = `${formatTimestamp()} [${normalizedScope}] ${text}${suffix}`;
-    console[method](line);
+    if (mirrorToConsole) {
+      console[method](line);
+    }
     appendLogLine(filePath, line);
   }
 
   return {
     child(childScope) {
       const suffix = typeof childScope === 'string' && childScope.trim() ? childScope.trim() : '';
-      return createLogger(suffix ? suffix : normalizedScope, { filePath });
+      return createLogger(suffix ? suffix : normalizedScope, { filePath, mirrorToConsole });
     },
     info(msg, ...args) {
       write('log', msg, args);

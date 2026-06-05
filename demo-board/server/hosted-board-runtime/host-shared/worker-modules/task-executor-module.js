@@ -1,24 +1,27 @@
-import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { serializeRef } from 'yaml-flow/board-live-cards-node';
 
-export async function loadTaskExecutorModule(boardId, boardConfig, resolveConfigRelativePath, configDir) {
-  if (!boardConfig.taskExecutorModule) return undefined;
-  const absolutePath = resolveConfigRelativePath(configDir, boardConfig.taskExecutorModule);
-  const mod = await import(pathToFileURL(absolutePath).href);
-  if (typeof mod.executeTaskExecutorRequest !== 'function') {
-    throw new Error(`Task executor module for ${boardId} must export executeTaskExecutorRequest(request)`);
-  }
-  return mod.executeTaskExecutorRequest;
+import { executeTaskExecutorRequest } from '../../../board-worker/task-executor.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const TASK_EXECUTOR_PATH = path.resolve(__dirname, '../../../board-worker/task-executor.js');
+
+if (typeof executeTaskExecutorRequest !== 'function') {
+  throw new Error(`Task executor module at ${TASK_EXECUTOR_PATH} must export executeTaskExecutorRequest(request)`);
 }
 
-export function createHostedImmediateTaskExecutorRef(boardId, boardConfig, resolveConfigRelativePath, configDir, extra = undefined) {
-  if (!boardConfig.taskExecutorModule) return undefined;
-  const absolutePath = resolveConfigRelativePath(configDir, boardConfig.taskExecutorModule);
+export function loadTaskExecutorModule() {
+  return executeTaskExecutorRequest;
+}
+
+export function createHostedImmediateTaskExecutorRef(boardId, extra = undefined) {
   return {
     meta: 'task-executor',
     howToRun: 'local-node',
-    whatToRun: serializeRef({ kind: 'fs-path', value: absolutePath }),
+    whatToRun: serializeRef({ kind: 'fs-path', value: TASK_EXECUTOR_PATH }),
     extra: {
       boardId,
       ...(extra && typeof extra === 'object' && !Array.isArray(extra) ? extra : {}),

@@ -118,8 +118,8 @@ This `.github/` workspace is materialized per card chat by merging:
 
 The chat flow picks one of the configured copilot roots (typically `default`
 or `gandalf`) based on the card's `meta.ingest` flag, and merges arrays of
-generic + board-local directories from `server-config.json`'s
-`copilot-workdirs-setup[]`.
+generic + board-local directories from the hosted runtime's
+`aiWorkspaceTemplates.<name>.ai-workdirs-setup[]`.
 
 Consequences for you:
 

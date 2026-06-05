@@ -12,6 +12,8 @@
     }
   },
   "mcpServerUrl": "http://127.0.0.1:7801/mcp",
+  "enableAssistantDebug": false,
+  "debugAssistantFile": "",
   "controlface": {
     "host": "127.0.0.1",
     "port": 7799,
@@ -25,52 +27,88 @@
       "appName": "finbook-492706-demo-boards-queue-runner"
     }
   },
-  "boards": {
+  "refsTemplates": {
+    "firestore-default": {
+      "baseRef": {
+        "kind": "firestore-board",
+        "value": "boards/{{boardId}}"
+      },
+      "boardRuntimeStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/runtime-board"
+      },
+      "cardStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/cards"
+      },
+      "outputsStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/runtime-out"
+      },
+      "queueStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/runtime"
+      },
+      "scratchStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/scratch"
+      },
+      "archiveStoreRef": {
+        "kind": "firestore-board",
+        "value": "archive-{{boardId}}"
+      },
+      "chatStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/cards-chats"
+      },
+      "artifactsStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/files"
+      },
+      "fetchedSourcesStoreRef": {
+        "kind": "firestore",
+        "value": "boards/{{boardId}}/sources"
+      }
+    }
+  },
+  "aiWorkspaceTemplates": {
+    "default": {
+      "ai-workdirs-setup": [
+        {
+          "copilot-root": "default",
+          "instructionsDirs": ["server/chat-flow/instructions", "boards/{{boardId}}/copilot/default/instructions"],
+          "agentsDirs": ["server/chat-flow/copilot-chat/agents", "boards/{{boardId}}/copilot/default/agents"],
+          "agentsSkills": ["server/chat-flow/skills", "boards/{{boardId}}/copilot/default/skills"],
+          "agentsHooks": ["server/chat-flow/copilot-chat/hooks", "boards/{{boardId}}/copilot/default/hooks"],
+          "copyScripts": ["scripts/cli"]
+        },
+        {
+          "copilot-root": "gandalf",
+          "instructionsDirs": ["server/chat-flow/instructions", "boards/{{boardId}}/copilot/gandalf/instructions"],
+          "agentsDirs": ["server/chat-flow/copilot-chat/agents", "boards/{{boardId}}/copilot/gandalf/agents"],
+          "agentsSkills": ["server/chat-flow/skills", "boards/{{boardId}}/copilot/gandalf/skills"],
+          "agentsHooks": ["server/chat-flow/copilot-chat/hooks", "boards/{{boardId}}/copilot/gandalf/hooks"],
+          "copyScripts": ["scripts/cli"]
+        }
+      ]
+    }
+  },
+  "boards-index": {
+    "kind": "firestore",
+    "value": "boards-index"
+  },
+  "sample-boards": {
     "live": {
       "label": "Live",
-      "taskExecutorModule": "../board-worker/task-executor.js",
-      "refs": {
-        "baseRef": {
-          "kind": "firestore-board",
-          "value": "boards/{{boardId}}"
-        },
-        "boardRuntimeStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/runtime-board"
-        },
-        "cardStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/cards"
-        },
-        "outputsStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/runtime-out"
-        },
-        "queueStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/runtime"
-        },
-        "scratchStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/scratch"
-        },
-        "archiveStoreRef": {
-          "kind": "firestore-board",
-          "value": "archive-{{boardId}}"
-        },
-        "chatStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/cards-chats"
-        },
-        "artifactsStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/files"
-        },
-        "fetchedSourcesStoreRef": {
-          "kind": "firestore",
-          "value": "boards/{{boardId}}/sources"
+      "ai": "copilot",
+      "chat": {
+        "assistant": "foundry",
+        "copilot": {
+          "custom-workspace-stems": ["gandalf"]
         }
-      }
+      },
+      "aiWorkspaceTemplate": "default",
+      "refsTemplate": "firestore-default"
     }
   }
 }

@@ -94,8 +94,8 @@ async function createTransport(connection, extra) {
       command: connection.command,
       args: Array.isArray(connection.args) ? connection.args : [],
       cwd: connection.cwd
-        ? path.resolve(extra?.boardSetupRoot || process.cwd(), connection.cwd)
-        : (extra?.boardSetupRoot || process.cwd()),
+        ? path.resolve(extra?.aiWorkspaceRoot || process.cwd(), connection.cwd)
+        : (extra?.aiWorkspaceRoot || process.cwd()),
       env: connection.env && typeof connection.env === 'object' ? connection.env : undefined,
     });
   }

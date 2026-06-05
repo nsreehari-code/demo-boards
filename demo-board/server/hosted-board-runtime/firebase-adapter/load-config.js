@@ -59,11 +59,13 @@ function normalizeStoreRefConfig(value) {
   return parsed ? serializeKindValueRef(parsed) : undefined;
 }
 
-function replaceBoardTemplate(value, boardId) {
-  return String(value).replace(/\{\{\s*boardId\s*\}\}/g, String(boardId));
+function replaceTemplateTokens(value, tokens) {
+  return String(value).replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key) =>
+    Object.prototype.hasOwnProperty.call(tokens, key) ? String(tokens[key]) : match
+  );
 }
 
-function resolveBoardRefs(boardId, refsConfig) {
+function resolveBoardRefs(boardId, refsConfig, tokens) {
   const source = refsConfig && typeof refsConfig === 'object' ? refsConfig : null;
   if (!source) return undefined;
 
@@ -72,7 +74,7 @@ function resolveBoardRefs(boardId, refsConfig) {
   if (baseRef) {
     refs.baseRef = {
       kind: baseRef.kind,
-      value: replaceBoardTemplate(baseRef.value, boardId),
+      value: replaceTemplateTokens(baseRef.value, tokens),
     };
   }
   for (const field of BOARD_REF_FIELDS) {
@@ -80,8 +82,8 @@ function resolveBoardRefs(boardId, refsConfig) {
     if (!normalized) continue;
     const parsed = tryParseKindValueRef(normalized);
     refs[field] = parsed
-      ? serializeKindValueRef({ kind: parsed.kind, value: replaceBoardTemplate(parsed.value, boardId) })
-      : replaceBoardTemplate(normalized, boardId);
+      ? serializeKindValueRef({ kind: parsed.kind, value: replaceTemplateTokens(parsed.value, tokens) })
+      : replaceTemplateTokens(normalized, tokens);
   }
   return Object.keys(refs).length > 0 ? refs : undefined;
 }
@@ -133,6 +135,14 @@ function requireNonEmptyString(value, label) {
   return value.trim();
 }
 
+function resolveMcpServerUrl(config) {
+  const envOverride = typeof process.env.DEMO_BOARDS_MCP_SERVER_URL === 'string'
+    ? process.env.DEMO_BOARDS_MCP_SERVER_URL.trim()
+    : '';
+  if (envOverride) return envOverride;
+  return requireNonEmptyString(config?.mcpServerUrl, 'config.mcpServerUrl');
+}
+
 function parseCliConfigPath(defaultConfigPath, cliArgs = process.argv.slice(2)) {
   const configFlagIndex = cliArgs.indexOf('--config');
   const configuredPath = configFlagIndex >= 0 ? cliArgs[configFlagIndex + 1] : '';
@@ -144,48 +154,94 @@ function parseCliConfigPath(defaultConfigPath, cliArgs = process.argv.slice(2)) 
     : path.resolve(process.cwd(), configuredPath);
 }
 
-function buildBoardConfigs(config) {
-  const boardsSource = config?.boards;
-  if (!boardsSource || typeof boardsSource !== 'object' || Array.isArray(boardsSource)) {
-    throw new Error('Config requires a boards object');
+export function buildBoardConfig(boardId, source, { configDir, refsTemplates, aiWorkspaceTemplates }) {
+  const normalizedBoardId = requireNonEmptyString(boardId, 'board id');
+  const record = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
+  const tokens = { boardId: normalizedBoardId, configDir };
+
+  const refsTemplateName = typeof record.refsTemplate === 'string' ? record.refsTemplate.trim() : '';
+  let refsSource;
+  if (refsTemplateName) {
+    if (record.refs) {
+      throw new Error(`Board '${normalizedBoardId}' must declare either refs or refsTemplate, not both`);
+    }
+    const template = refsTemplates[refsTemplateName];
+    if (!template) {
+      throw new Error(`Board '${normalizedBoardId}' references unknown refsTemplate '${refsTemplateName}'`);
+    }
+    refsSource = template;
+  } else {
+    refsSource = record.refs;
   }
 
-  const boards = {};
-  for (const [boardId, boardConfig] of Object.entries(boardsSource)) {
-    const normalizedBoardId = requireNonEmptyString(boardId, 'board id');
-    const source = boardConfig && typeof boardConfig === 'object' && !Array.isArray(boardConfig)
-      ? boardConfig
+  const aiWorkspaceTemplateName = typeof record.aiWorkspaceTemplate === 'string' && record.aiWorkspaceTemplate.trim()
+    ? record.aiWorkspaceTemplate.trim()
+    : '';
+  let aiWorkspaceRoot = '';
+  let scratchStore = '';
+  if (aiWorkspaceTemplateName) {
+    const template = aiWorkspaceTemplates[aiWorkspaceTemplateName];
+    if (!template) {
+      throw new Error(`Board '${normalizedBoardId}' references unknown aiWorkspaceTemplate '${aiWorkspaceTemplateName}'`);
+    }
+    const paths = template.paths && typeof template.paths === 'object' && !Array.isArray(template.paths)
+      ? template.paths
       : {};
-    boards[normalizedBoardId] = {
-      id: normalizedBoardId,
-      label: typeof source.label === 'string' && source.label.trim() ? source.label.trim() : normalizedBoardId,
-      refs: resolveBoardRefs(normalizedBoardId, source.refs),
-      taskExecutorModule: typeof source.taskExecutorModule === 'string' && source.taskExecutorModule.trim()
-        ? source.taskExecutorModule.trim()
-        : '',
-      chat: source.chat && typeof source.chat === 'object' && !Array.isArray(source.chat)
-        ? source.chat
-        : {},
-      setup: source.setup && typeof source.setup === 'object' && !Array.isArray(source.setup)
-        ? source.setup
-        : {},
-      regular: source.regular && typeof source.regular === 'object' && !Array.isArray(source.regular)
-        ? source.regular
-        : {},
-      'copilot-workdirs-setup': Array.isArray(source['copilot-workdirs-setup'])
-        ? source['copilot-workdirs-setup'].filter((entry) => entry && typeof entry === 'object')
-        : [],
-      queueWakeup: source.queueWakeup && typeof source.queueWakeup === 'object' && !Array.isArray(source.queueWakeup)
-        ? source.queueWakeup
-        : {},
-    };
+    if (typeof paths.aiWorkspaceRoot === 'string' && paths.aiWorkspaceRoot.trim()) {
+      aiWorkspaceRoot = replaceTemplateTokens(paths.aiWorkspaceRoot.trim(), tokens);
+    }
+    if (typeof paths.scratchStore === 'string' && paths.scratchStore.trim()) {
+      scratchStore = replaceTemplateTokens(paths.scratchStore.trim(), tokens);
+    }
   }
 
-  if (Object.keys(boards).length === 0) {
-    throw new Error('Config requires at least one board');
-  }
+  return {
+    id: normalizedBoardId,
+    label: typeof record.label === 'string' && record.label.trim() ? record.label.trim() : normalizedBoardId,
+    ai: typeof record.ai === 'string' && record.ai.trim() ? record.ai.trim() : '',
+    aiWorkspaceTemplate: aiWorkspaceTemplateName,
+    aiWorkspaceRoot,
+    scratchStore,
+    refs: resolveBoardRefs(normalizedBoardId, refsSource, tokens),
+    chat: record.chat && typeof record.chat === 'object' && !Array.isArray(record.chat)
+      ? record.chat
+      : {},
+    queueWakeup: record.queueWakeup && typeof record.queueWakeup === 'object' && !Array.isArray(record.queueWakeup)
+      ? record.queueWakeup
+      : {},
+    metadata: record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+      ? record.metadata
+      : {},
+  };
+}
 
-  return boards;
+function collectSampleBoards(config) {
+  const source = config?.['sample-boards'];
+  if (!source) return {};
+  if (typeof source !== 'object' || Array.isArray(source)) {
+    throw new Error('Config sample-boards must be an object');
+  }
+  const out = {};
+  for (const [boardId, record] of Object.entries(source)) {
+    const id = requireNonEmptyString(boardId, 'sample-board id');
+    if (!record || typeof record !== 'object' || Array.isArray(record)) {
+      throw new Error(`sample-boards.${id} must be an object`);
+    }
+    out[id] = record;
+  }
+  return out;
+}
+
+function resolveBoardsIndexRef(config) {
+  const source = config?.['boards-index'];
+  if (!source) {
+    throw new Error('Config requires a boards-index ref ({kind, value})');
+  }
+  const parsed = tryParseKindValueRef(source);
+  if (!parsed) {
+    throw new Error('Config boards-index must be a {kind, value} ref');
+  }
+  return parsed;
 }
 
 export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv.slice(2), processName = '') {
@@ -193,7 +249,14 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
   const rawConfig = readJsonFile(configPath);
   const config = resolveProcessConfig(rawConfig, processName);
   const configDir = path.dirname(configPath);
-  const boards = buildBoardConfigs(config);
+  const refsTemplates = config.refsTemplates && typeof config.refsTemplates === 'object' && !Array.isArray(config.refsTemplates)
+    ? config.refsTemplates
+    : {};
+  const aiWorkspaceTemplates = config.aiWorkspaceTemplates && typeof config.aiWorkspaceTemplates === 'object' && !Array.isArray(config.aiWorkspaceTemplates)
+    ? config.aiWorkspaceTemplates
+    : {};
+  const sampleBoards = collectSampleBoards(config);
+  const boardsIndexRef = resolveBoardsIndexRef(config);
 
   return {
     configPath,
@@ -203,9 +266,7 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
       : 'firebase',
     host: typeof config.host === 'string' && config.host.trim() ? config.host.trim() : '127.0.0.1',
     port: Number.isFinite(Number(config.port)) ? Number(config.port) : 7810,
-    mcpServerUrl: typeof config.mcpServerUrl === 'string' && config.mcpServerUrl.trim()
-      ? config.mcpServerUrl.trim()
-      : '',
+    mcpServerUrl: resolveMcpServerUrl(config),
     serverOrigin: typeof config.serverOrigin === 'string' && config.serverOrigin.trim()
       ? config.serverOrigin.trim().replace(/\/$/, '')
       : '',
@@ -215,16 +276,18 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
     chatFlowTimeoutMs: Number.isFinite(Number(config.chatFlowTimeoutMs)) ? Number(config.chatFlowTimeoutMs) : undefined,
     chatInvokeRefTimeoutMs: Number.isFinite(Number(config.chatInvokeRefTimeoutMs)) ? Number(config.chatInvokeRefTimeoutMs) : undefined,
     chatCopilotTimeoutMs: Number.isFinite(Number(config.chatCopilotTimeoutMs)) ? Number(config.chatCopilotTimeoutMs) : undefined,
-    watchparty: config.watchparty && typeof config.watchparty === 'object' && !Array.isArray(config.watchparty)
-      ? config.watchparty
-      : {},
+    enableAssistantDebug: config.enableAssistantDebug === true,
+    debugAssistantFile: typeof config.debugAssistantFile === 'string' ? config.debugAssistantFile.trim() : '',
     foundryAgents: config.foundryAgents && typeof config.foundryAgents === 'object' && !Array.isArray(config.foundryAgents)
       ? config.foundryAgents
       : {},
+    aiWorkspaceTemplates,
+    refsTemplates,
     firebase: config.firebase && typeof config.firebase === 'object' && !Array.isArray(config.firebase)
       ? config.firebase
       : {},
-    boards,
+    sampleBoards,
+    boardsIndexRef,
   };
 }
 

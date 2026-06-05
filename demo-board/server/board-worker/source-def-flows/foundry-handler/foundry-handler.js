@@ -5,6 +5,9 @@
  *
  * Shells out to the local invoke.py helper (uses azure-identity + azure-ai-inference).
  * No API keys needed — uses DefaultAzureCredential (MI in prod, az login locally).
+ *
+ * Endpoint + agent id come from `extra.foundryEndpoint` / `extra.foundryTaskExecutorAgentId`
+ * (baked into executionExtra by the hosted runtime) or from the source_def itself.
  */
 
 import fs from 'node:fs';
@@ -13,8 +16,6 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HANDLER_DIR = path.dirname(fileURLToPath(import.meta.url));
-// server-config.json lives at demo-board/server-config.json — four levels up from this handler.
-const SERVER_CONFIG_FILE = path.resolve(HANDLER_DIR, '..', '..', '..', '..', 'server-config.json');
 const FOUNDRY_INVOKE_SCRIPT = path.join(HANDLER_DIR, 'invoke.py');
 
 function interpolate(template, args) {
@@ -23,23 +24,6 @@ function interpolate(template, args) {
     if (v === undefined) return '';
     return typeof v === 'string' ? v : JSON.stringify(v);
   });
-}
-
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-}
-
-function loadFoundryAgentsConfig() {
-  try {
-    const cfg = readJson(SERVER_CONFIG_FILE);
-    const fa = (cfg && typeof cfg.foundryAgents === 'object') ? cfg.foundryAgents : {};
-    return {
-      endpoint: typeof fa.endpoint === 'string' ? fa.endpoint.trim() : '',
-      agent_id: typeof fa.taskExecutorAgentId === 'string' ? fa.taskExecutorAgentId.trim() : '',
-    };
-  } catch {
-    return { endpoint: '', agent_id: '' };
-  }
 }
 
 const DEFAULT_PROMPT_CONTEXT = {
@@ -60,19 +44,18 @@ export async function execute(context) {
   const sourceDef = context?.sourceDef || {};
   const extra = context?.extra || {};
   const promptContext = context?.promptContext || DEFAULT_PROMPT_CONTEXT;
-  const handlerConfig = loadFoundryAgentsConfig();
 
   const cfg = typeof sourceDef.foundry === 'object' ? sourceDef.foundry : {};
   if (!cfg.prompt_template) {
     return { result: 'failure', data: { error: 'foundry: prompt_template is required' }, error: 'missing prompt_template' };
   }
 
-  const endpoint = cfg.endpoint || handlerConfig.endpoint;
-  const agentId  = cfg.agent_id || handlerConfig.agent_id;
+  const endpoint = cfg.endpoint || (typeof extra.foundryEndpoint === 'string' ? extra.foundryEndpoint.trim() : '');
+  const agentId  = cfg.agent_id || (typeof extra.foundryTaskExecutorAgentId === 'string' ? extra.foundryTaskExecutorAgentId.trim() : '');
   if (!endpoint || !agentId) {
     return {
       result: 'failure',
-      data: { error: 'foundry: endpoint and agent_id must be set in source_def or server-config.json foundryAgents block' },
+      data: { error: 'foundry: endpoint and agent_id must be set in source_def or via executionExtra (foundryEndpoint / foundryTaskExecutorAgentId)' },
       error: 'missing endpoint/agent_id',
     };
   }
@@ -80,20 +63,11 @@ export async function execute(context) {
   const interpolationContext = { ...promptContext, ...(sourceDef._projections || {}), ...(cfg.args || {}) };
   const prompt = interpolate(cfg.prompt_template, interpolationContext);
 
-  // Sandbox: same dirs as copilot — cards, runtime, runtime-out.
-  const allowedDirs = [];
-  if (extra.boardSetupRoot) {
-    if (extra.boardRuntimeDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.boardRuntimeDir));
-    if (extra.runtimeStatusDir) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.runtimeStatusDir));
-    if (extra.artifactsStore) allowedDirs.push(path.resolve(extra.boardSetupRoot, extra.artifactsStore));
-  }
-
   const invokeReq = {
     endpoint,
     agent_id: agentId,
     prompt,
     result_shape: cfg.result_shape || undefined,
-    allowed_dirs: allowedDirs.length > 0 ? allowedDirs : undefined,
   };
 
   const tmpBase = path.join(process.env.TEMP || process.cwd(), `foundry-handler-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);

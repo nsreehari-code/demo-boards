@@ -14,6 +14,15 @@ function makeHostedTaskExecutorRef(boardId) {
   };
 }
 
+function buildHostedChatHandlerFlow(boardConfig) {
+  const chat = boardConfig?.chat;
+  const ai = typeof boardConfig?.ai === 'string' ? boardConfig.ai.trim() : '';
+  if ((!chat || typeof chat !== 'object' || Array.isArray(chat)) && !ai) {
+    return undefined;
+  }
+  return { kind: 'hosted-chat-agent' };
+}
+
 export function buildBoardBundle(boardId, boardConfig, firebaseServices, runtimeHooks = {}, options = {}) {
   const { refs, boardAdapter } = createFirestoreBoardRuntimeBundle(
     firebaseServices.firestore,
@@ -25,9 +34,11 @@ export function buildBoardBundle(boardId, boardConfig, firebaseServices, runtime
     },
   );
   const dispatcher = createNonCoreExecutorDispatcher({ resolveCliDir: () => process.cwd() });
+  const chatHandlerFlow = buildHostedChatHandlerFlow(boardConfig);
   const nonCore = createHostedAsyncBoardNonCorePublic(boardAdapter, {
     invokeExecutor: dispatcher.invokeExecutor,
     ...(options.taskExecutorRef ? { taskExecutorRef: options.taskExecutorRef } : {}),
+    ...(chatHandlerFlow ? { chatHandlerFlow } : {}),
   });
 
   if (options.callbackTransport) {
@@ -43,6 +54,7 @@ export function buildBoardBundle(boardId, boardConfig, firebaseServices, runtime
       boardAdapter,
       nonCore,
       taskExecutorRef: makeHostedTaskExecutorRef(boardId),
+      ...(chatHandlerFlow ? { chatHandlerFlow } : {}),
       ...refs,
     },
   };

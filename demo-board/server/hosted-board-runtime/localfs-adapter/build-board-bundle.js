@@ -16,16 +16,6 @@ function makeHostedTaskExecutorRef(boardId) {
   };
 }
 
-function makeLocalTaskExecutorRef(scriptPath, extra) {
-  if (!scriptPath) return undefined;
-  return {
-    meta: 'task-executor',
-    howToRun: 'local-node',
-    whatToRun: serializeRef({ kind: 'fs-path', value: scriptPath }),
-    ...(extra !== undefined ? { extra } : {}),
-  };
-}
-
 function isHostedTaskExecutorRef(ref) {
   return ref?.howToRun === 'queue-storage'
     || ref?.howToRun === 'in-process-loop'
@@ -60,11 +50,23 @@ function normalizeSerializedRef(ref) {
   return typeof ref === 'string' ? ref : serializeRef(ref);
 }
 
+function buildHostedChatHandlerFlow(boardConfig) {
+  const chat = boardConfig?.chat;
+  const ai = typeof boardConfig?.ai === 'string' ? boardConfig.ai.trim() : '';
+  if ((!chat || typeof chat !== 'object' || Array.isArray(chat)) && !ai) {
+    return undefined;
+  }
+  return { kind: 'hosted-chat-agent' };
+}
+
 export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, runtimeHooks = {}, options = {}) {
   const refs = boardConfig?.refs;
   const baseRef = normalizeKindValueRef(refs?.baseRef);
   if (!baseRef || baseRef.kind !== 'fs-path' || !baseRef.value) {
     throw new Error(`localfs board ${boardId} requires refs.baseRef as an fs-path ref`);
+  }
+  if (!options.taskExecutorRef) {
+    throw new Error(`localfs board ${boardId} requires options.taskExecutorRef`);
   }
 
   const serializedRefs = {
@@ -81,12 +83,7 @@ export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, ru
   };
 
   ensureBoardDirs(refs);
-
-  const taskExecutorModulePath = typeof boardConfig?.taskExecutorModule === 'string' && boardConfig.taskExecutorModule.trim()
-    && typeof options.resolveConfigRelativePath === 'function'
-    ? options.resolveConfigRelativePath(options.configDir, boardConfig.taskExecutorModule)
-    : '';
-  const localSyncTaskExecutorRef = makeLocalTaskExecutorRef(taskExecutorModulePath, { boardId });
+  const immediateTaskExecutorRef = options.taskExecutorRef;
 
   const adapterOpts = {
     suppressSpawn: true,
@@ -95,12 +92,11 @@ export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, ru
   };
   const nonCoreAdapterOpts = {
     ...adapterOpts,
-    ...(localSyncTaskExecutorRef
-      ? { resolveRef: (ref) => (isHostedTaskExecutorRef(ref) ? localSyncTaskExecutorRef : ref) }
-      : {}),
+    resolveRef: (ref) => (isHostedTaskExecutorRef(ref) ? immediateTaskExecutorRef : ref),
   };
-  const boardAdapter = createFsBoardPlatformAdapter(baseRef, adapterOpts);
-  const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(baseRef, nonCoreAdapterOpts);
+  const cliDir = process.cwd();
+  const boardAdapter = createFsBoardPlatformAdapter(baseRef, cliDir, adapterOpts);
+  const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(baseRef, cliDir, nonCoreAdapterOpts);
 
   const requestProcessAccumulated = typeof runtimeHooks.requestProcessAccumulated === 'function'
     ? runtimeHooks.requestProcessAccumulated
@@ -109,9 +105,11 @@ export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, ru
   nonCoreAdapter.requestProcessAccumulated = requestProcessAccumulated;
 
   const hostedTaskExecutorRef = makeHostedTaskExecutorRef(boardId);
+  const chatHandlerFlow = buildHostedChatHandlerFlow(boardConfig);
   const nonCore = createBoardLiveCardsNonCorePublic(baseRef, nonCoreAdapter, {
     boardRuntimeStoreRef: serializedRefs.boardRuntimeStoreRef,
     taskExecutorRef: hostedTaskExecutorRef,
+    ...(chatHandlerFlow ? { chatHandlerFlow } : {}),
   });
 
   return {
@@ -123,6 +121,7 @@ export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, ru
       boardAdapter,
       nonCore,
       taskExecutorRef: hostedTaskExecutorRef,
+      ...(chatHandlerFlow ? { chatHandlerFlow } : {}),
       ...serializedRefs,
     },
   };

@@ -2,6 +2,8 @@
   "storageAdapter": "localfs",
   "mcpServerUrl": "http://127.0.0.1:7801/mcp",
   "apiBasePrefix": "/api/boards",
+  "enableAssistantDebug": false,
+  "debugAssistantFile": "",
   "controlface": {
     "host": "127.0.0.1",
     "port": 7799
@@ -12,94 +14,101 @@
   "foundryAgents": {
     "endpoint": "https://sz-foundry.services.ai.azure.com/api/projects/sz-project",
     "chatAgentId": "asst_IMDJiVnL9fS0QbttDXKxN5lF",
+    "taskExecutorAgentId": "asst_IMDJiVnL9fS0QbttDXKxN5lF",
     "chatExposedMcpToolPrefixes": ["liveboards.", "lore."]
   },
-  "boards": {
+  "refsTemplates": {
+    "localfs-default": {
+      "baseRef": {
+        "kind": "fs-path",
+        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}"
+      },
+      "boardRuntimeStoreRef": {
+        "kind": "fs-path",
+        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/runtime-board"
+      },
+      "cardStoreRef": {
+        "kind": "fs-path",
+        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/cards-store"
+      },
+      "outputsStoreRef": {
+        "kind": "fs-path",
+        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/runtime-outputs"
+      },
+      "queueStoreRef": {
+        "kind": "fs-path",
+        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/queue-store"
+      },
+      "scratchStoreRef": {
+        "kind": "fs-path",
+        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/scratch"
+      },
+      "archiveStoreRef": {
+        "kind": "fs-path",
+        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/archive"
+      },
+      "chatStoreRef": {
+        "kind": "fs-path",
+        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/cards-chat"
+      },
+      "artifactsStoreRef": {
+        "kind": "fs-path",
+        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/cards-files"
+      },
+      "fetchedSourcesStoreRef": {
+        "kind": "fs-path",
+        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/fetched-sources"
+      }
+    }
+  },
+  "aiWorkspaceTemplates": {
+    "default": {
+      "paths": {
+        "aiWorkspaceRoot": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/chat-workspaces",
+        "scratchStore": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/tmp"
+      },
+      "ai-workdirs-setup": [
+        {
+          "copilot-root": "default",
+          "instructionsDirs": ["server/chat-flow/instructions", "boards/{{boardId}}/copilot/default/instructions"],
+          "agentsDirs": ["server/chat-flow/copilot-chat/agents", "boards/{{boardId}}/copilot/default/agents"],
+          "agentsSkills": ["server/chat-flow/skills", "boards/{{boardId}}/copilot/default/skills"],
+          "agentsHooks": ["server/chat-flow/copilot-chat/hooks", "boards/{{boardId}}/copilot/default/hooks"],
+          "copyScripts": ["scripts/cli"]
+        },
+        {
+          "copilot-root": "gandalf",
+          "instructionsDirs": ["server/chat-flow/instructions", "boards/{{boardId}}/copilot/gandalf/instructions"],
+          "agentsDirs": ["server/chat-flow/copilot-chat/agents", "boards/{{boardId}}/copilot/gandalf/agents"],
+          "agentsSkills": ["server/chat-flow/skills", "boards/{{boardId}}/copilot/gandalf/skills"],
+          "agentsHooks": ["server/chat-flow/copilot-chat/hooks", "boards/{{boardId}}/copilot/gandalf/hooks"],
+          "copyScripts": ["scripts/cli"]
+        }
+      ]
+    }
+  },
+  "boards-index": {
+    "kind": "fs-path",
+    "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/boards-index"
+  },
+  "sample-boards": {
     "live": {
       "label": "Live",
+      "ai": "copilot",
       "chat": {
         "assistant": "foundry",
         "copilot": {
           "custom-workspace-stems": ["gandalf"]
         }
       },
-      "setup": {
-        "setupRoot": "../../../workspaces/live/case-workspace",
-        "aiWorkspaceRoot": "copilot-workspaces",
-        "cardStore": "cards-store",
-        "artifactsStore": "cards-files",
-        "boardRuntime": "runtime",
-        "boardOutputsStore": "board-outputs",
-        "chatStore": "cards-chats",
-        "scratchStore": "scratch",
-        "archivalStore": "runtime-archive"
-      },
-      "regular": {
-        "seedCardsDir": "../../boards/live/cards",
-        "taskExecutorPath": "../board-worker/task-executor.js",
-        "chatHandlerFlowPath": "../chat-flow/flow-steps.json"
-      },
-      "copilot-workdirs-setup": [
-        {
-          "copilot-root": "default",
-          "instructionsDirs": ["../../server/chat-flow/instructions", "../../boards/live/copilot/default/instructions"],
-          "agentsDirs": ["../../server/chat-flow/copilot-chat/agents", "../../boards/live/copilot/default/agents"],
-          "agentsSkills": ["../../server/chat-flow/skills", "../../boards/live/copilot/default/skills"],
-          "agentsHooks": ["../../server/chat-flow/copilot-chat/hooks", "../../boards/live/copilot/default/hooks"],
-          "copyScripts": ["../../scripts/cli"]
-        },
-        {
-          "copilot-root": "gandalf",
-          "instructionsDirs": ["../../server/chat-flow/instructions", "../../boards/live/copilot/gandalf/instructions"],
-          "agentsDirs": ["../../server/chat-flow/copilot-chat/agents", "../../boards/live/copilot/gandalf/agents"],
-          "agentsSkills": ["../../server/chat-flow/skills", "../../boards/live/copilot/gandalf/skills"],
-          "agentsHooks": ["../../server/chat-flow/copilot-chat/hooks", "../../boards/live/copilot/gandalf/hooks"],
-          "copyScripts": ["../../scripts/cli"]
-        }
-      ],
-      "taskExecutorModule": "../board-worker/task-executor.js",
-      "refs": {
-        "baseRef": {
-          "kind": "fs-path",
-          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/runtime/live"
-        },
-        "boardRuntimeStoreRef": {
-          "kind": "fs-path",
-          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/runtime-board"
-        },
-        "cardStoreRef": {
-          "kind": "fs-path",
-          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/cards"
-        },
-        "outputsStoreRef": {
-          "kind": "fs-path",
-          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/outputs"
-        },
-        "queueStoreRef": {
-          "kind": "fs-path",
-          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/runtime"
-        },
-        "scratchStoreRef": {
-          "kind": "fs-path",
-          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/scratch"
-        },
-        "archiveStoreRef": {
-          "kind": "fs-path",
-          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/archive"
-        },
-        "chatStoreRef": {
-          "kind": "fs-path",
-          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/chat"
-        },
-        "artifactsStoreRef": {
-          "kind": "fs-path",
-          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/files"
-        },
-        "fetchedSourcesStoreRef": {
-          "kind": "fs-path",
-          "value": "C:/Users/sreenaga/ADO/ai-tool-evolver/demo-boards-ns-code/demo-board/.hosted-localfs/stores/live/sources"
-        }
-      }
+      "aiWorkspaceTemplate": "default",
+      "refsTemplate": "localfs-default"
+    },
+    "live-test": {
+      "label": "Live Test",
+      "ai": "copilot",
+      "aiWorkspaceTemplate": "default",
+      "refsTemplate": "localfs-default"
     }
   }
 }

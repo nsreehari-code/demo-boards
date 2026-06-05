@@ -33,12 +33,8 @@
  *
  * Decoded --extra context (optional; schema comes from source_def_flows.json.extraSchema):
  *   {
- *     "boardSetupRoot": "<abs path>",
  *     "boardId": "<board id>",
- *     "boardRuntimeDir": "<relative>",
- *     "runtimeStatusDir": "<relative>",
- *     "artifactsStore": "<relative>",
- *     "scratchStore": "<relative>",
+ *     "aiWorkspaceRoot": "<abs path>",
  *     "serverUrl": "<base url>",
  *     "boardLiveCardsCliJs": "<abs path>",
  *     "stepMachineCliPath": "<abs path>"

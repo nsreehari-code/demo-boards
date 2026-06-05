@@ -53,10 +53,9 @@ function runCopilot(prompt, sourceDef, executorDir, extra) {
     const tmpBase = path.join(process.env.TEMP || process.cwd(), `copilot-handler-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     const outFile = `${tmpBase}.out.json`;
     const promptFile = `${tmpBase}.prompt.txt`;
+    const copilotCwd = extra?.aiWorkspaceRoot || process.cwd();
     const sessionDir = path.join(
-      (extra?.boardSetupRoot && extra?.scratchStore)
-        ? path.resolve(extra.boardSetupRoot, extra.scratchStore)
-        : (extra?.boardSetupRoot || (process.env.TEMP || process.cwd())),
+      copilotCwd,
       'copilot-sessions',
       String(sourceDef?.bindTo || 'default').replace(/[^a-zA-Z0-9_-]/g, '_'),
     );
@@ -70,17 +69,6 @@ function runCopilot(prompt, sourceDef, executorDir, extra) {
       fs.writeFileSync(shapeFile, JSON.stringify(shape), 'utf-8');
     }
 
-    // Copilot sandbox: cwd = card's surface dir; --add-dir for cards, runtime, runtime-out.
-    const copilotCwd = extra?.artifactsStore
-      ? path.resolve(extra.boardSetupRoot, extra.artifactsStore)
-      : (extra?.boardSetupRoot || process.cwd());
-    const addDirs = [];
-    if (extra?.boardSetupRoot) {
-      if (extra.boardRuntimeDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.boardRuntimeDir));
-      if (extra.runtimeStatusDir) addDirs.push(path.resolve(extra.boardSetupRoot, extra.runtimeStatusDir));
-      if (extra.artifactsStore) addDirs.push(path.resolve(extra.boardSetupRoot, extra.artifactsStore));
-    }
-
     const pyArgs = [
       wrapperPath,
       '--output-file', outFile,
@@ -90,9 +78,6 @@ function runCopilot(prompt, sourceDef, executorDir, extra) {
       '--result-type', 'json',
       '--agent-name', String(sourceDef?.bindTo || 'executor'),
     ];
-    for (const d of addDirs) {
-      pyArgs.push('--add-dir', d);
-    }
     if (shapeFile) {
       pyArgs.push('--result-shape-file', shapeFile);
     }
@@ -119,7 +104,7 @@ function runCopilot(prompt, sourceDef, executorDir, extra) {
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: 120000,
-    cwd: extra?.boardSetupRoot || process.cwd(),
+    cwd: extra?.aiWorkspaceRoot || process.cwd(),
     windowsHide: true,
     maxBuffer: 10 * 1024 * 1024,
   });

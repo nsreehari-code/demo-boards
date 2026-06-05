@@ -1,0 +1,5 @@
+{
+  "copilot": "./copilot-chat/assistant.js",
+  "foundry": "./foundry-chat/assistant.js",
+  "probe": "./probe-chat/probe.js"
+}

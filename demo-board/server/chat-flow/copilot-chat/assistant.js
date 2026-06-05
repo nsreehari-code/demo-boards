@@ -1,57 +1,15 @@
-#!/usr/bin/env node
-
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
-  readChatMessagesViaMcp,
-  readEnhancedChatMessages,
-  readCardPrivateFieldViaMcpControlplane,
-  readJsonStdin,
+  AGENT_OUTPUT_FILE_STEM,
+  getEnhancedChatMessages,
+  getCardPrivate,
   requireRequiredStrings,
-  resolveAssistantDebugEnabled,
-  resolveAssistantDebugFile,
-  resolveBoardLogsDir,
-  stageAssistantReplyViaMcp,
-} from './shared.js';
-import {
-  resolveAgentOutputFilePath,
-  resolveAgentWatchpartyCardDir,
-} from './watchparty.js';
+  resolveBoardLogPath,
+} from '../shared.js';
 
 const COPILOT_MODEL = 'gpt-5.4';
-
-const extra = readJsonStdin();
-const {
-  boardId = '',
-  cardId = '',
-  logId = '',
-  turnId = '',
-  aiWorkspaceRoot = '',
-  boardSetupRoot = '',
-  mcpServerUrl = '',
-  watchPartyFilesForChatDir = '',
-  copilotCustomWorkspaceStems = [],
-  chatCopilotTimeoutMs: rawChatCopilotTimeoutMs = 300000,
-} = extra;
-
-const chatCopilotTimeoutMs = Number.isFinite(Number(rawChatCopilotTimeoutMs)) && Number(rawChatCopilotTimeoutMs) > 0
-  ? Math.floor(Number(rawChatCopilotTimeoutMs))
-  : 300000;
-const bypassCopilotForTest = process.env.DEMO_T3A_BYPASS === '1';
-const ENABLE_DEBUG_LOGGING = typeof process.env.ENABLE_DEBUG_LOGGING === 'string' ? process.env.ENABLE_DEBUG_LOGGING.trim() : '';
-
-const DEBUG_FLAG = resolveAssistantDebugEnabled();
-const DEBUG_FILE_OVERRIDE = resolveAssistantDebugFile();
-const BOARD_LOGS_DIR = resolveBoardLogsDir(boardId);
-const DEBUG_LOG_PATH = DEBUG_FILE_OVERRIDE || path.join(BOARD_LOGS_DIR, 'copilot-assistant-debug.log');
-const DEBUG_LOG_FILE = DEBUG_FILE_OVERRIDE
-  || path.join(BOARD_LOGS_DIR, 'assistant-debug.jsonl');
-const agentOutputFile = watchPartyFilesForChatDir ? resolveAgentOutputFilePath(watchPartyFilesForChatDir, cardId) : '';
-const agentWatchpartyCardDir = watchPartyFilesForChatDir ? resolveAgentWatchpartyCardDir(watchPartyFilesForChatDir, cardId) : '';
-const scratchDir = boardSetupRoot
-  ? path.join(boardSetupRoot, 'scratch')
-  : path.join(BOARD_LOGS_DIR, 'scratch');
 
 function normalizeWorkspaceStem(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -67,92 +25,6 @@ function resolveCopilotWorkspaceDirByStem(aiWorkspaceRootPath, workspaceStem, co
     throw new Error(`Missing required ${contextLabel} input: copilot workspace ${workspaceStem}`);
   }
   return workingDir;
-}
-
-async function resolveWorkspaceStem() {
-  const configuredStems = Array.isArray(copilotCustomWorkspaceStems)
-    ? copilotCustomWorkspaceStems.map((value) => normalizeWorkspaceStem(value)).filter(Boolean)
-    : [];
-  const knownStems = new Set(['default', ...configuredStems]);
-  const privateStem = normalizeWorkspaceStem(await readCardPrivateFieldViaMcpControlplane({
-    mcpServerUrl,
-    boardId,
-    cardId,
-    fieldName: 'copilot-ws',
-  }));
-  if (privateStem && knownStems.has(privateStem)) {
-    return privateStem;
-  }
-  return 'default';
-}
-
-function DBG_LOG(stage, details = {}) {
-  if (!ENABLE_DEBUG_LOGGING) {
-    return;
-  }
-
-  try {
-    fs.mkdirSync(path.dirname(DEBUG_LOG_PATH), { recursive: true });
-    fs.appendFileSync(
-      DEBUG_LOG_PATH,
-      JSON.stringify({
-        ts: new Date().toISOString(),
-        pid: process.pid,
-        stage,
-        bypassCopilotForTest,
-        ...details,
-      }) + '\n',
-      'utf-8'
-    );
-  } catch {}
-}
-
-function appendDebug(stage, details = {}) {
-  if (!DEBUG_FLAG || !DEBUG_LOG_FILE) {
-    return;
-  }
-
-  try {
-    fs.mkdirSync(path.dirname(DEBUG_LOG_FILE), { recursive: true });
-    fs.appendFileSync(
-      DEBUG_LOG_FILE,
-      JSON.stringify({
-        ts: new Date().toISOString(),
-        pid: process.pid,
-        stage,
-        ...details,
-      }) + '\n',
-      'utf-8'
-    );
-  } catch {}
-}
-
-function buildPrompt(cId, currentLogId, turnTranscript) {
-  const instructionsBlock = [
-    'You are responding for one live board chat turn.',
-    'Use the available agent instructions, skills, and MCP tools to discover what you need. Prefer the smallest additional read or tool call that resolves the current turn.',
-    'Treat the runtime handles below as authoritative. Every liveboards.* MCP tool call must use snake_case args and must include the provided opaque log_id exactly as given. Do not derive, alter, or omit it.',
-    'Stay grounded in the current turn context — the current-turn user message, any current-turn system messages (including attachments referenced by them), and the contents of files those attachments point to. Read referenced attachment contents before reasoning. Reach into nearby board state or prior chat history only when the user intent clearly requires it; never use prior chat history to guess the current turn\u2019s answer.',
-    'When the final user-visible reply is ready, use the provide-final-reply-to-user skill exactly once.',
-    'Do not expose internal orchestration details, logs, refs, paths, directory names, or implementation notes.',
-    'Do not include markdown fences. No fluff.',
-  ].join(' ');
-
-  const runtimeHandlesBlock = [
-    'Runtime handles:',
-    `- boardId: \"${boardId || '(not provided)'}\"`,
-    `- cardId / card_id: "${cId}"`,
-    `- logId / log_id: "${currentLogId || '(not provided)'}"`,
-    `- turnId / turn_id: "${turnId}"`,
-  ].join('\n');
-
-  return [
-    instructionsBlock,
-    '',
-    runtimeHandlesBlock,
-    '',
-    turnTranscript,
-  ].join('\n');
 }
 
 function parseSystemMessageFileRef(messageText) {
@@ -174,11 +46,6 @@ function parseSystemMessageFileRef(messageText) {
   }
 
   return { kind, fileName, fileIndex };
-}
-
-function parseSystemMessageFileIndex(messageText) {
-  const ref = parseSystemMessageFileRef(messageText);
-  return ref ? ref.fileIndex : null;
 }
 
 function extractVisibleMessageText(role, text) {
@@ -203,42 +70,12 @@ function extractVisibleMessageText(role, text) {
   return trimmed;
 }
 
-function formatTranscriptMessage(message, currentCardId) {
-  if (!message || typeof message !== 'object') {
-    return null;
-  }
-
-  const role = typeof message.role === 'string' && message.role.trim()
-    ? message.role.trim().toLowerCase()
-    : 'message';
-  const roleLabel = role === 'system'
-    ? 'System'
-    : role === 'user'
-      ? 'User'
-      : role === 'assistant'
-        ? 'Assistant'
-        : 'Message';
-  const text = extractVisibleMessageText(role, message.text);
-  const lines = [`${roleLabel}:`, text];
-
-  const retrievalHint = typeof message?.retrieval_hint === 'string' && message.retrieval_hint.trim()
-    ? message.retrieval_hint.trim()
-    : typeof message?.payload?.retrieval_hint === 'string' && message.payload.retrieval_hint.trim()
-      ? message.payload.retrieval_hint.trim()
-      : '';
-  if (retrievalHint) {
-    lines.push(retrievalHint);
-  }
-
-  return lines.join('\n');
-}
-
 function formatAttachmentRefLine(ref) {
   const label = ref.kind === 'ai-generated' ? 'AI-generated attachment' : 'uploaded attachment';
   return `[${label} name: ${ref.fileName}. file-index: ${ref.fileIndex}]`;
 }
 
-function formatChatTranscript(messages, currentCardId) {
+function formatChatTranscript(messages) {
   if (!Array.isArray(messages) || messages.length === 0) {
     return 'No current turn chat messages.';
   }
@@ -258,8 +95,7 @@ function formatChatTranscript(messages, currentCardId) {
         pendingAttachmentRefs.push(ref);
         continue;
       }
-      const rendered = formatTranscriptMessage(message, currentCardId);
-      if (rendered) blocks.push(rendered);
+      blocks.push(`System:\n${text}`);
       continue;
     }
 
@@ -283,24 +119,6 @@ function formatChatTranscript(messages, currentCardId) {
   return blocks.join('\n\n');
 }
 
-async function loadPromptChatMessages(currentCardId) {
-  const turnScopedMessages = await readEnhancedChatMessages(boardId, currentCardId, 30000, {
-    turnId,
-    logId,
-    mcpServerUrl,
-  });
-
-  if (Array.isArray(turnScopedMessages) && turnScopedMessages.length > 0) {
-    return turnScopedMessages;
-  }
-
-  return readChatMessagesViaMcp(boardId, currentCardId, {
-    logId,
-    turnId,
-    mcpServerUrl,
-  });
-}
-
 function findAssistantMessage(messages) {
   if (!Array.isArray(messages)) {
     return null;
@@ -316,6 +134,25 @@ function findAssistantMessage(messages) {
   return null;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForAssistantMessage(context, cardId, timeoutMs = 10000, pollMs = 250) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const turnMessages = await getEnhancedChatMessages(context, { cardId });
+    const assistantMessage = findAssistantMessage(turnMessages);
+    if (assistantMessage) {
+      return assistantMessage;
+    }
+    if (Date.now() < deadline) {
+      await sleep(pollMs);
+    }
+  }
+  return null;
+}
+
 function buildCombinedRepairPrompt(cardIdValue) {
   return [
     'The previous attempt did not produce an acceptable result. Fix the issues below before completing.',
@@ -326,247 +163,200 @@ function buildCombinedRepairPrompt(cardIdValue) {
   ].join('\n');
 }
 
-function runCopilot(prompt, workingDir, options = {}) {
-  const { continueSession = false, onCleanupDeferred = null } = options;
-  const ts = Date.now();
-  const tempRoot = scratchDir;
-  const outFile = agentOutputFile || path.join(tempRoot, `asst-out-${ts}.txt`);
-  const errFile = path.join(tempRoot, `asst-err-${ts}.txt`);
-
-  function cleanupWatchpartyFiles() {
-    if (agentWatchpartyCardDir) {
-      try {
-        fs.rmSync(agentWatchpartyCardDir, { recursive: true, force: true });
-      } catch {}
-      return;
-    }
-    if (typeof outFile === 'string' && outFile.trim()) {
-      try { fs.unlinkSync(outFile); } catch {}
-    }
-  }
-
-  cleanupWatchpartyFiles();
-
-  if (typeof onCleanupDeferred === 'function') {
-    onCleanupDeferred(cleanupWatchpartyFiles);
-  }
-
-  return new Promise((resolve, reject) => {
-  const copilotArgs = [
-    '-C', workingDir,
-    '-s',
-    '--no-ask-user',
-    '--allow-all-tools',
-    '--model', COPILOT_MODEL,
-  ];
-  if (continueSession) {
-    copilotArgs.splice(2, 0, '--continue');
-  }
-  const execCommand = process.platform === 'win32' ? 'cmd.exe' : 'copilot';
-  const execArgs = process.platform === 'win32'
-    ? ['/d', '/c', 'copilot', ...copilotArgs]
-    : copilotArgs;
-  fs.mkdirSync(path.dirname(outFile), { recursive: true });
-  fs.mkdirSync(path.dirname(errFile), { recursive: true });
-  const outStream = fs.createWriteStream(outFile, { flags: 'w' });
-  const errStream = fs.createWriteStream(errFile, { flags: 'w' });
-  outStream.write("Reasoning...\n");
-  let settled = false;
-  let timeoutId = null;
-
-  const finish = (handler) => {
-    if (settled) {
-      return;
-    }
-    settled = true;
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-      timeoutId = null;
-    }
-    outStream.end(() => {
-      errStream.end(() => handler());
-    });
-  };
-
-  try {
-    const child = spawn(execCommand, execArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      env: process.env,
-    });
-
-    child.stdout.on('data', (chunk) => {
-      outStream.write(chunk);
-    });
-    child.stderr.on('data', (chunk) => {
-      errStream.write(chunk);
-    });
-    child.on('error', (err) => {
-      finish(() => {
-        const errorText = fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf-8').trim() : '';
-        DBG_LOG('runCopilot:error', {
-          message: err?.message ?? String(err),
-          errFileText: errorText || undefined,
-        });
-        appendDebug('runCopilot:error', {
-          message: err?.message ?? String(err),
-          errFileText: errorText || undefined,
-        });
-        reject(errorText ? new Error(errorText) : err);
-      });
-    });
-    child.on('close', (code, signal) => {
-      finish(() => {
-        const outputText = fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf-8').trim() : '';
-        const errorText = fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf-8').trim() : '';
-        if (code === 0) {
-          resolve(outputText);
-          return;
-        }
-        reject(new Error(errorText || `copilot exited with code ${code ?? 'unknown'}`));
-      });
-    });
-
-    timeoutId = setTimeout(() => {
-      child.kill();
-    }, chatCopilotTimeoutMs);
-    child.stdin.end(prompt);
-  } catch (err) {
-    finish(() => {
-      const errorText = fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf-8').trim() : '';
-      DBG_LOG('runCopilot:error', {
-        message: err?.message ?? String(err),
-        errFileText: errorText || undefined,
-      });
-      appendDebug('runCopilot:error', {
-        message: err?.message ?? String(err),
-        errFileText: errorText || undefined,
-      });
-      reject(errorText ? new Error(errorText) : err);
-    });
-  }
-  }).finally(() => {
-    try { fs.unlinkSync(errFile); } catch {}
-  });
-}
-
-async function readAssistantMessageForTurn(cardIdValue) {
-  const turnMessages = await readChatMessagesViaMcp(boardId, cardIdValue, {
+export async function invokeAssistant(context, config = {}) {
+  const {
+    boardId,
+    cardId,
     logId,
     turnId,
-    mcpServerUrl,
-  });
-  return findAssistantMessage(turnMessages);
-}
+    watchPartyDir,
+  } = context;
+  const {
+    aiWorkspaceRoot = '',
+    chatCopilotTimeoutMs: rawChatCopilotTimeoutMs = 300000,
+    enableAssistantDebug = false,
+  } = config;
 
-async function runCopilotWithValidationRetries(prompt, workingDir, cardIdValue) {
-  const maxRetries = 3;
-  let attempt = 0;
-  let assistantMessage = null;
+  const chatCopilotTimeoutMs = Number.isFinite(Number(rawChatCopilotTimeoutMs)) && Number(rawChatCopilotTimeoutMs) > 0
+    ? Math.floor(Number(rawChatCopilotTimeoutMs))
+    : 300000;
 
-  while (attempt <= maxRetries) {
-    let cleanupAfterRead = () => {};
-    await runCopilot(
-      attempt === 0 ? prompt : buildCombinedRepairPrompt(cardIdValue),
-      workingDir,
-      {
-        continueSession: attempt > 0,
-        onCleanupDeferred: (fn) => { cleanupAfterRead = fn; },
-      },
-    );
-    assistantMessage = await readAssistantMessageForTurn(cardIdValue);
-    try { cleanupAfterRead(); } catch {}
-    if (assistantMessage) {
-      break;
+  const DEBUG_LOG_FILE = resolveBoardLogPath(context, 'copilot-assistant-debug.jsonl');
+  const agentOutputFile = path.join(watchPartyDir, AGENT_OUTPUT_FILE_STEM);
+  if (enableAssistantDebug) {
+    fs.mkdirSync(path.dirname(DEBUG_LOG_FILE), { recursive: true });
+  }
+
+  function appendDebug(stage, details = {}) {
+    if (!enableAssistantDebug) return;
+    try {
+      fs.appendFileSync(
+        DEBUG_LOG_FILE,
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          pid: process.pid,
+          stage,
+          ...details,
+        }) + '\n',
+        'utf-8'
+      );
+    } catch {}
+  }
+
+  function buildPrompt(cId, currentLogId, turnTranscript) {
+    const instructionsBlock = [
+      'You are responding for one live board chat turn.',
+      'Use the available agent instructions, skills, and MCP tools to discover what you need. Prefer the smallest additional read or tool call that resolves the current turn.',
+      'Treat the runtime handles below as authoritative. Every liveboards.* MCP tool call must use snake_case args and must include the provided opaque log_id exactly as given. Do not derive, alter, or omit it.',
+      'Stay grounded in the current turn context — the current-turn user message, any current-turn system messages (including attachments referenced by them), and the contents of files those attachments point to. Read referenced attachment contents before reasoning. Reach into nearby board state or prior chat history only when the user intent clearly requires it; never use prior chat history to guess the current turn\u2019s answer.',
+      'When the final user-visible reply is ready, use the provide-final-reply-to-user skill exactly once.',
+      'Do not expose internal orchestration details, logs, refs, paths, directory names, or implementation notes.',
+      'Do not include markdown fences. No fluff.',
+    ].join(' ');
+
+    const runtimeHandlesBlock = [
+      'Runtime handles:',
+      `- boardId: \"${boardId || '(not provided)'}\"`,
+      `- cardId / card_id: "${cId}"`,
+      `- logId / log_id: "${currentLogId || '(not provided)'}"`,
+      `- turnId / turn_id: "${turnId}"`,
+    ].join('\n');
+
+    return [
+      instructionsBlock,
+      '',
+      runtimeHandlesBlock,
+      '',
+      turnTranscript,
+    ].join('\n');
+  }
+
+  async function resolveWorkspaceStem() {
+    const copilotPrivate = await getCardPrivate(context, 'copilot');
+    return normalizeWorkspaceStem(copilotPrivate?.ws) || 'default';
+  }
+
+  function runCopilot(prompt, workingDir, options = {}) {
+    const { continueSession = false } = options;
+
+    return new Promise((resolve, reject) => {
+      const copilotArgs = [
+        '-C', workingDir,
+        ...(continueSession ? ['--continue'] : []),
+        '-s',
+        '--no-ask-user',
+        '--allow-all-tools',
+        '--model', COPILOT_MODEL,
+      ];
+      const execCommand = process.platform === 'win32' ? 'cmd.exe' : 'copilot';
+      const execArgs = process.platform === 'win32'
+        ? ['/d', '/c', 'copilot', ...copilotArgs]
+        : copilotArgs;
+      const outStream = fs.createWriteStream(agentOutputFile, { flags: 'w' });
+      outStream.write("Reasoning...\n");
+      let settled = false;
+      let timeoutId = null;
+      let stderrBuf = '';
+
+      const finish = (handler) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        outStream.end(() => handler());
+      };
+
+      const child = spawn(execCommand, execArgs, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+        env: process.env,
+      });
+
+      child.stdout.on('data', (chunk) => { outStream.write(chunk); });
+      child.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+      child.on('error', (err) => {
+        finish(() => {
+          const errorText = stderrBuf.trim();
+          appendDebug('runCopilot:error', { message: err?.message ?? String(err), stderr: errorText || undefined });
+          reject(errorText ? new Error(errorText) : err);
+        });
+      });
+      child.on('close', (code) => {
+        finish(() => {
+          if (code === 0) {
+            resolve();
+            return;
+          }
+          reject(new Error(stderrBuf.trim() || `copilot exited with code ${code ?? 'unknown'}`));
+        });
+      });
+
+      timeoutId = setTimeout(() => { child.kill(); }, chatCopilotTimeoutMs);
+      child.stdin.end(prompt);
+    });
+  }
+
+  async function runCopilotWithValidationRetries(prompt, workingDir, cardIdValue) {
+    const maxAttempts = 4;
+    let attempt = 0;
+    let assistantMessage = null;
+
+    while (attempt < maxAttempts) {
+      await runCopilot(
+        attempt === 0 ? prompt : buildCombinedRepairPrompt(cardIdValue),
+        workingDir,
+        { continueSession: attempt > 0 },
+      );
+      assistantMessage = await waitForAssistantMessage(context, cardIdValue);
+      if (assistantMessage) {
+        break;
+      }
+      attempt += 1;
     }
 
-    attempt += 1;
+    if (!assistantMessage) {
+      throw new Error("copilot couldn't produce a valid response");
+    }
+
+    return assistantMessage;
   }
 
-  if (!assistantMessage) {
-    throw new Error("copilot couldn't produce a valid response");
-  }
+  requireRequiredStrings({
+    aiWorkspaceRoot,
+  }, 'assistant');
 
-  return assistantMessage;
-}
+  appendDebug('assistant:start', {
+    boardId, cardId, turnId, aiWorkspaceRoot, chatCopilotTimeoutMs,
+  });
 
-requireRequiredStrings({
-  cardId,
-  logId,
-  turnId,
-  aiWorkspaceRoot,
-  boardSetupRoot,
-}, 'assistant');
-
-appendDebug('assistant:start', {
-  boardId,
-  cardId,
-  turnId,
-  aiWorkspaceRoot,
-  boardSetupRoot,
-  scratchDir,
-  chatCopilotTimeoutMs,
-});
-DBG_LOG('assistant:start', {
-  boardId,
-  cardId,
-  turnId,
-  aiWorkspaceRoot,
-  enableDebugLogging: ENABLE_DEBUG_LOGGING,
-});
-
-const workspaceStem = await resolveWorkspaceStem();
-const workingDir = resolveCopilotWorkspaceDirByStem(aiWorkspaceRoot, workspaceStem, 'assistant');
-const promptChatMessages = await loadPromptChatMessages(cardId);
-const turnTranscript = formatChatTranscript(promptChatMessages, cardId);
-const prompt = buildPrompt(cardId, logId, turnTranscript);
-appendDebug('assistant:promptBuilt', {
-  workingDir,
-  workspaceStem,
-  promptMessageCount: Array.isArray(promptChatMessages) ? promptChatMessages.length : 0,
-  historyDumpLength: turnTranscript.length,
-  promptLength: prompt.length,
-  prompt,
-});
-
-try {
-  if (bypassCopilotForTest) {
-    // Keep the bypass on the same final-reply MCP path as the real assistant flow.
-    appendDebug('assistant:testBypass', {
-      replyText: 'paris',
-    });
-    await stageAssistantReplyViaMcp(boardId, cardId, turnId, 'paris', [], { logId, mcpServerUrl });
-    process.stdout.write(JSON.stringify({ assistantHandled: true, bypassed: true }));
-    process.exit(0);
-  }
-
-  const assistantMessage = await runCopilotWithValidationRetries(
-    prompt,
+  const workspaceStem = await resolveWorkspaceStem();
+  const workingDir = resolveCopilotWorkspaceDirByStem(aiWorkspaceRoot, workspaceStem, 'assistant');
+  const promptChatMessages = await getEnhancedChatMessages(context, { cardId });
+  const turnTranscript = formatChatTranscript(promptChatMessages);
+  const prompt = buildPrompt(cardId, logId, turnTranscript);
+  appendDebug('assistant:promptBuilt', {
     workingDir,
-    cardId,
-  );
-  const assistantResponseText = typeof assistantMessage?.text === 'string'
-    ? assistantMessage.text
-    : '';
-  appendDebug('assistant:success', {
-    publishedAttachmentCount: Array.isArray(assistantMessage?.files) ? assistantMessage.files.length : 0,
-    assistantResponseText,
-    turnId,
+    workspaceStem,
+    promptMessageCount: Array.isArray(promptChatMessages) ? promptChatMessages.length : 0,
+    historyDumpLength: turnTranscript.length,
+    promptLength: prompt.length,
   });
-  DBG_LOG('assistant:success', {
-    publishedAttachmentCount: Array.isArray(assistantMessage?.files) ? assistantMessage.files.length : 0,
-    assistantResponseText,
-    turnId,
-  });
-  // The flow only consumes success or error from this process. Reply text must not be returned here.
-  process.stdout.write(JSON.stringify({ assistantHandled: true }));
-} catch (err) {
-  appendDebug('assistant:error', {
-    message: err?.message ?? String(err),
-  });
-  DBG_LOG('assistant:error', {
-    message: err?.message ?? String(err),
-  });
-  process.stderr.write((err?.message ?? String(err)) + '\n');
-  process.exit(1);
+
+  try {
+    const assistantMessage = await runCopilotWithValidationRetries(prompt, workingDir, cardId);
+    const assistantResponseText = typeof assistantMessage?.text === 'string'
+      ? assistantMessage.text
+      : '';
+    appendDebug('assistant:success', {
+      publishedAttachmentCount: Array.isArray(assistantMessage?.files) ? assistantMessage.files.length : 0,
+      assistantResponseText,
+      turnId,
+    });
+    return { assistantHandled: true };
+  } catch (err) {
+    appendDebug('assistant:error', { message: err?.message ?? String(err) });
+    throw err;
+  }
 }

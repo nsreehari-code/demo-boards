@@ -9,7 +9,7 @@ const workspaceDir = process.cwd();
 const args = process.argv.slice(2);
 const boardDirArg = args.find(a => !a.startsWith('--')) || 'demo-board';
 const boardDir = path.resolve(workspaceDir, boardDirArg);
-const runtimeLauncherPath = path.join(boardDir, 'scripts', 'start-firebase-hosts.cjs');
+const runtimeLauncherPath = path.join(boardDir, 'scripts', 'start-local-hosts.cjs');
 
 if (!fs.existsSync(runtimeLauncherPath)) {
   console.error(`[start-server] Missing ${runtimeLauncherPath}. Pass a valid board directory, for example "demo-board".`);
