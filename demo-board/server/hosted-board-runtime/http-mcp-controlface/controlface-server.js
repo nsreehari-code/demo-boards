@@ -326,6 +326,73 @@ function sendJson(res, status, payload) {
   res.end(body);
 }
 
+function readErrorMessageFromPayloadText(text) {
+  const bodyText = typeof text === 'string' ? text.trim() : '';
+  if (!bodyText) return '';
+  try {
+    const payload = JSON.parse(bodyText);
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      if (typeof payload.error === 'string' && payload.error.trim()) {
+        return payload.error.trim();
+      }
+      if (payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) {
+        const nestedError = payload.data.error;
+        if (typeof nestedError === 'string' && nestedError.trim()) {
+          return nestedError.trim();
+        }
+      }
+    }
+  } catch {
+    return bodyText;
+  }
+  return '';
+}
+
+function installResponseErrorCapture(res, requestDetailsRef) {
+  if (!res || res.__controlfaceErrorCaptureInstalled) {
+    return;
+  }
+  res.__controlfaceErrorCaptureInstalled = true;
+  const originalWrite = res.write.bind(res);
+  const originalEnd = res.end.bind(res);
+  const chunks = [];
+
+  function captureChunk(chunk, encoding) {
+    if (chunk === undefined || chunk === null) {
+      return;
+    }
+    if (Buffer.isBuffer(chunk)) {
+      chunks.push(chunk);
+      return;
+    }
+    if (typeof chunk === 'string') {
+      chunks.push(Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8'));
+    }
+  }
+
+  function maybeCaptureErrorMessage() {
+    const requestDetails = requestDetailsRef();
+    if (!requestDetails || requestDetails.errorMessage || (res.statusCode || 0) < 400 || chunks.length === 0) {
+      return;
+    }
+    const message = readErrorMessageFromPayloadText(Buffer.concat(chunks).toString('utf8'));
+    if (message) {
+      requestDetails.errorMessage = message;
+    }
+  }
+
+  res.write = function patchedWrite(...args) {
+    captureChunk(args[0], args[1]);
+    return originalWrite(...args);
+  };
+
+  res.end = function patchedEnd(...args) {
+    captureChunk(args[0], args[1]);
+    maybeCaptureErrorMessage();
+    return originalEnd(...args);
+  };
+}
+
 function createNamedPipeNotificationTransport() {
   return {
     async subscribe(ref, onEvent) {
@@ -595,6 +662,7 @@ async function main() {
     let requestDetails = null;
     let requestLogger = processLogger.child('controlface:api');
     const parsedBaseUrl = new URL(req.url || '/', `http://${hostConfig.host}:${hostConfig.port}`);
+    installResponseErrorCapture(res, () => requestDetails);
     let completionLogged = false;
     const logCompletionOnce = () => {
       if (completionLogged || !requestDetails) {
