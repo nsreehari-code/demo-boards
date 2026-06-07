@@ -461,7 +461,7 @@ async function main() {
     stopSubscriptions.push(stopRunner);
     stopSubscriptions.push(createSseWakeSubscriber({
       boardId,
-      sseUrl: `${callbackServerOrigin}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/sse`,
+      sseUrl: `${callbackServerOrigin}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/sse-q`,
       wakeTriggers,
       logger,
     }));
