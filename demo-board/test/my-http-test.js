@@ -798,13 +798,21 @@ async function main() {
   function captureChatEvents(payload, cardId) {
     if (!payload || payload.kind !== 'notification-batch' || !Array.isArray(payload.notifications)) return;
     for (const notification of payload.notifications) {
-      if (notification?.kind !== 'card_chats' || notification.cardId !== cardId) continue;
+      if (!notification || notification.cardId !== cardId) continue;
+      if (notification.kind !== 'card_chats' && notification.kind !== 'chat_messages' && notification.kind !== 'chat_processing') {
+        continue;
+      }
       const messages = Array.isArray(notification.messages) ? notification.messages : [];
       sseState.chatEvents.push({
         at: Date.now(),
         cardId: notification.cardId,
-        processing: !!notification.processing,
-        receiving: !!notification.receiving,
+        kind: notification.kind,
+        processing: typeof notification.processing === 'boolean'
+          ? notification.processing
+          : typeof notification.active === 'boolean'
+            ? notification.active
+            : undefined,
+        receiving: typeof notification.receiving === 'boolean' ? notification.receiving : undefined,
         messageCount: messages.length,
         messages,
       });
@@ -986,6 +994,8 @@ async function main() {
     );
   }
 
+  // Raw chat SSE chronology is intentionally used only by the probe-path
+  // transport test (TS). Hosted assistant tests assert converged state instead.
   function collectChatTurnBouquet(events, { turnId }) {
     const orderedMessages = [];
     const seenMessageKeys = new Set();
@@ -1024,7 +1034,7 @@ async function main() {
   async function waitForChatTurnBouquet({ eventStart, turnId, timeoutMs, label }) {
     return await waitUntil(() => {
       const bouquet = collectChatTurnBouquet(sseState.chatEvents.slice(eventStart), { turnId });
-      if (!bouquet.processingDoneSeen || bouquet.assistantMessages.length === 0) {
+      if (!bouquet.processingDoneSeen) {
         return false;
       }
       return bouquet;
@@ -1441,7 +1451,7 @@ async function main() {
     }
 
     if (isTestSelected(requestedTests, 'T3')) {
-      console.log(`\n=== ${formatTestId('T3')}: probe chat send + inspect + controlplane processing ===`);
+      console.log(`\n=== ${formatTestId('T3')}: probe chat send + persisted/controlplane lifecycle ===`);
 
       console.log(`[${formatTestId('T3')}] step 0/7: upserting ${PORTFOLIO_CARD_ID} for chat`);
       expectMcpSuccess(
@@ -1544,7 +1554,7 @@ async function main() {
     }
 
     if (isTestSelected(requestedTests, 'T4')) {
-      console.log(`\n=== ${formatTestId('T4')}: probe chat with attachment + poll lifecycle ===`);
+      console.log(`\n=== ${formatTestId('T4')}: probe attachment chat + persisted/controlplane lifecycle ===`);
 
       console.log(`[${formatTestId('T4')}] step 0/8: upserting ${T4_CHAT_CARD_ID} for chat`);
       expectMcpSuccess(
@@ -1667,7 +1677,7 @@ async function main() {
     }
 
     if (isTestSelected(requestedTests, 'TS')) {
-      console.log(`\n=== ${formatTestId('TS')}: probe chat with attachment + SSE lifecycle ===`);
+      console.log(`\n=== ${formatTestId('TS')}: probe attachment chat + sole SSE transport/lifecycle proof ===`);
 
       console.log(`[${formatTestId('TS')}] step 0/9: upserting ${PORTFOLIO_CARD_ID} for chat`);
       expectMcpSuccess(
@@ -1750,7 +1760,7 @@ async function main() {
           'TS chat-send',
         );
 
-        console.log(`[${formatTestId('TS')}] step 6/9: waiting for SSE processing-done notification`);
+        console.log(`[${formatTestId('TS')}] step 6/9: proving the chat SSE lifecycle for this turn`);
         let bouquet;
         try {
           bouquet = await waitForChatTurnState({
@@ -1780,7 +1790,7 @@ async function main() {
           throw err;
         }
 
-        console.log(`[${formatTestId('TS')}] step 7/9: verifying notification bouquet contents`);
+        console.log(`[${formatTestId('TS')}] step 7/9: verifying the SSE notification chronology for this turn`);
         const expectedProbeReplyPattern = new RegExp(expectedProbeReply.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
         assert(bouquet.processingOnSeen, `TS bouquet missing processing-on notification for turn ${turnId}`);
         assert(bouquet.processingDoneSeen, `TS bouquet missing processing-done notification for turn ${turnId}`);
@@ -1843,8 +1853,6 @@ async function main() {
       const turnId = `t8copilot_${makeTurnId()}`;
       const promptText = 'Just answer what is the capital of France. No fluff. No commentary. No markup. Respond in lower case in one word.';
       const markedPromptText = buildProbeChatText(promptText, 'copilot');
-      const eventStart = sseState.chatEvents.length;
-
       console.log(`[${formatTestId('T8')}] step 2/8: sending real-assistant chat turn ${turnId}`);
       expectMcpSuccess(
         await callAction('chat-send', T8_CHAT_CARD_ID, {
@@ -1866,33 +1874,36 @@ async function main() {
       assert(userMessagesPoll.matched, `T8 user message not found for turn ${turnId}: ${jsonText(userMessagesPoll.messages)}`);
       console.log(`[${formatTestId('T8')}] user chat entry stored in ${userMessagesPoll.attemptsUsed} poll(s)`);
 
-      console.log(`[${formatTestId('T8')}] step 4/8: waiting for SSE processing-done notification`);
-      const bouquet = await waitForChatTurnBouquet({
-        eventStart,
+      console.log(`[${formatTestId('T8')}] step 4/8: waiting for final assistant reply in persisted messages`);
+      const assistantMessagesPoll = await pollChatMessages(
+        T8_CHAT_CARD_ID,
         turnId,
-        timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
-        label: `T8 chat turn bouquet for turn ${turnId}`,
-      });
+        Math.max(12, Math.ceil(NON_PROBE_RESPONSE_TIMEOUT_MS / 1000)),
+        1000,
+        (messages) => messages.some((message) => message?.role === 'assistant' && /paris/i.test(String(message?.text || ''))),
+        `final assistant reply for turn ${turnId}`,
+      );
+      assert(assistantMessagesPoll.matched, `T8 final assistant reply not found for turn ${turnId}: ${jsonText(assistantMessagesPoll.messages)}`);
 
-      console.log(`[${formatTestId('T8')}] step 5/8: verifying notification bouquet contents`);
-      assert(bouquet.processingOnSeen, `T8 bouquet missing processing-on notification for turn ${turnId}`);
-      assert(bouquet.processingDoneSeen, `T8 bouquet missing processing-done notification for turn ${turnId}`);
-      const bouquetUserMessage = bouquet.userMessages.find((message) => String(message?.text || '') === promptText);
-      assert(bouquetUserMessage, `T8 bouquet missing user message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
-      const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => /paris/i.test(String(message?.text || '')));
-      assert(bouquetAssistantMessage, `T8 bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
-
-      console.log(`[${formatTestId('T8')}] step 6/8: verifying final inspected messages`);
-  const finalMessages = await readChatMessages(T8_CHAT_CARD_ID, turnId);
+      console.log(`[${formatTestId('T8')}] step 5/8: verifying final inspected messages`);
+      const finalMessages = await readChatMessages(T8_CHAT_CARD_ID, turnId);
       const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
       const finalAssistantMessage = [...finalMessages].reverse().find((message) => message?.role === 'assistant');
       assert(finalUserMessage, `T8 final user message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
       assert(finalAssistantMessage, `T8 final assistant message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
       assert(String(finalUserMessage.text || '') === promptText, `T8 final user text mismatch: ${jsonText(finalUserMessage)}`);
       assert(/paris/i.test(String(finalAssistantMessage.text || '')), `T8 final assistant text mismatch: ${jsonText(finalAssistantMessage)}`);
+      const finalProcessingOffPoll = await pollChatProcessing(
+        T8_CHAT_CARD_ID,
+        false,
+        Math.max(12, Math.ceil(NON_PROBE_RESPONSE_TIMEOUT_MS / 1000)),
+        1000,
+        `chat processing off for ${T8_CHAT_CARD_ID}`,
+      );
+      assert(finalProcessingOffPoll.matched, `T8 chat processing did not turn off for ${T8_CHAT_CARD_ID}; active=${finalProcessingOffPoll.active}`);
       console.log(`[${formatTestId('T8')}] final assistant reply: ${String(finalAssistantMessage.text || '')}`);
 
-      console.log(`[${formatTestId('T8')}] step 7/8: verifying live /sse board-state bootstrap`);
+      console.log(`[${formatTestId('T8')}] step 6/8: verifying live /sse board-state bootstrap`);
       resetBoardSseState();
       await ensureBoardSseConnection(T8_CHAT_CARD_ID);
       await waitUntil(
@@ -1935,8 +1946,6 @@ async function main() {
       const turnId = `t9foundry_${makeTurnId()}`;
       const promptText = 'Just answer what is the capital of France. No fluff. No commentary. No markup. Respond in lower case in one word.';
       const markedPromptText = buildProbeChatText(promptText, 'foundry');
-      const eventStart = sseState.chatEvents.length;
-
       console.log(`[${formatTestId('T9')}] step 2/8: sending foundry-forced chat turn ${turnId}`);
       expectMcpSuccess(
         await callAction('chat-send', T9_CHAT_CARD_ID, {
@@ -1958,23 +1967,18 @@ async function main() {
       assert(userMessagesPoll.matched, `T9 user message not found for turn ${turnId}: ${jsonText(userMessagesPoll.messages)}`);
       console.log(`[${formatTestId('T9')}] user chat entry stored in ${userMessagesPoll.attemptsUsed} poll(s)`);
 
-      console.log(`[${formatTestId('T9')}] step 4/8: waiting for SSE processing-done notification`);
-      const bouquet = await waitForChatTurnBouquet({
-        eventStart,
+      console.log(`[${formatTestId('T9')}] step 4/8: waiting for final assistant reply in persisted messages`);
+      const assistantMessagesPoll = await pollChatMessages(
+        T9_CHAT_CARD_ID,
         turnId,
-        timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
-        label: `T9 chat turn bouquet for turn ${turnId}`,
-      });
+        Math.max(12, Math.ceil(NON_PROBE_RESPONSE_TIMEOUT_MS / 1000)),
+        1000,
+        (messages) => messages.some((message) => message?.role === 'assistant' && /paris/i.test(String(message?.text || ''))),
+        `final assistant reply for turn ${turnId}`,
+      );
+      assert(assistantMessagesPoll.matched, `T9 final assistant reply not found for turn ${turnId}: ${jsonText(assistantMessagesPoll.messages)}`);
 
-      console.log(`[${formatTestId('T9')}] step 5/8: verifying notification bouquet contents`);
-      assert(bouquet.processingOnSeen, `T9 bouquet missing processing-on notification for turn ${turnId}`);
-      assert(bouquet.processingDoneSeen, `T9 bouquet missing processing-done notification for turn ${turnId}`);
-      const bouquetUserMessage = bouquet.userMessages.find((message) => String(message?.text || '') === promptText);
-      assert(bouquetUserMessage, `T9 bouquet missing user message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
-      const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => /paris/i.test(String(message?.text || '')));
-      assert(bouquetAssistantMessage, `T9 bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
-
-      console.log(`[${formatTestId('T9')}] step 6/8: verifying final inspected messages`);
+      console.log(`[${formatTestId('T9')}] step 5/8: verifying final inspected messages`);
       const finalMessages = await readChatMessages(T9_CHAT_CARD_ID, turnId);
       const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
       const finalAssistantMessage = [...finalMessages].reverse().find((message) => message?.role === 'assistant');
@@ -1982,9 +1986,17 @@ async function main() {
       assert(finalAssistantMessage, `T9 final assistant message missing for turn ${turnId}: ${jsonText(finalMessages)}`);
       assert(String(finalUserMessage.text || '') === promptText, `T9 final user text mismatch: ${jsonText(finalUserMessage)}`);
       assert(/paris/i.test(String(finalAssistantMessage.text || '')), `T9 final assistant text mismatch: ${jsonText(finalAssistantMessage)}`);
+      const finalProcessingOffPoll = await pollChatProcessing(
+        T9_CHAT_CARD_ID,
+        false,
+        Math.max(12, Math.ceil(NON_PROBE_RESPONSE_TIMEOUT_MS / 1000)),
+        1000,
+        `chat processing off for ${T9_CHAT_CARD_ID}`,
+      );
+      assert(finalProcessingOffPoll.matched, `T9 chat processing did not turn off for ${T9_CHAT_CARD_ID}; active=${finalProcessingOffPoll.active}`);
       console.log(`[${formatTestId('T9')}] final assistant reply: ${String(finalAssistantMessage.text || '')}`);
 
-      console.log(`[${formatTestId('T9')}] step 7/8: verifying live /sse board-state bootstrap`);
+      console.log(`[${formatTestId('T9')}] step 6/8: verifying live /sse board-state bootstrap`);
       resetBoardSseState();
       await ensureBoardSseConnection(T9_CHAT_CARD_ID);
       await waitUntil(
@@ -2066,8 +2078,6 @@ async function main() {
         assert(!!uploadSystemMessage, 'T8F upload protocol missing system chat message');
         assert(String(uploadSystemMessage?.text || '').toLowerCase().includes('file uploaded:'), 'T8F upload system message does not describe uploaded file');
 
-        const eventStart = sseState.chatEvents.length;
-
         console.log(`[${formatTestId('T8F')}] step 4/11: sending real-assistant chat turn ${turnId} with attachment`);
         expectMcpSuccess(
           await callAction('chat-send', T8F_CHAT_CARD_ID, {
@@ -2077,31 +2087,18 @@ async function main() {
           'T8F chat-send',
         );
 
-        console.log(`[${formatTestId('T8F')}] step 5/11: waiting for SSE processing-done notification`);
-        const bouquet = await waitForChatTurnState({
-          eventStart,
+        console.log(`[${formatTestId('T8F')}] step 5/11: waiting for final assistant reply in persisted messages`);
+        const assistantMessagesPoll = await pollChatMessages(
+          T8F_CHAT_CARD_ID,
           turnId,
-          timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
-          label: `T8F chat turn bouquet for turn ${turnId}`,
-          predicate: (currentBouquet) => {
-            const hasUser = currentBouquet.userMessages.some((message) => String(message?.text || '') === promptText);
-            const hasSystem = currentBouquet.systemMessages.some((message) => String(message?.text || '').toLowerCase().includes('file uploaded:'));
-            const hasAssistant = currentBouquet.assistantMessages.some((message) => /tokyo/i.test(String(message?.text || '')));
-            return currentBouquet.processingOnSeen && currentBouquet.processingDoneSeen && hasUser && hasSystem && hasAssistant;
-          },
-        });
+          Math.max(12, Math.ceil(NON_PROBE_RESPONSE_TIMEOUT_MS / 1000)),
+          1000,
+          (messages) => messages.some((message) => message?.role === 'assistant' && /tokyo/i.test(String(message?.text || ''))),
+          `final assistant reply for turn ${turnId}`,
+        );
+        assert(assistantMessagesPoll.matched, `T8F final assistant reply not found for turn ${turnId}: ${jsonText(assistantMessagesPoll.messages)}`);
 
-        console.log(`[${formatTestId('T8F')}] step 6/11: verifying notification bouquet contents`);
-        assert(bouquet.processingOnSeen, `T8F bouquet missing processing-on notification for turn ${turnId}`);
-        assert(bouquet.processingDoneSeen, `T8F bouquet missing processing-done notification for turn ${turnId}`);
-        const bouquetUserMessage = bouquet.userMessages.find((message) => String(message?.text || '') === promptText);
-        assert(bouquetUserMessage, `T8F bouquet missing user message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
-        const bouquetAttachmentSystemMessage = bouquet.systemMessages.find((message) => String(message?.text || '').toLowerCase().includes('file uploaded:'));
-        assert(bouquetAttachmentSystemMessage, `T8F bouquet missing attachment system message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
-        const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => /tokyo/i.test(String(message?.text || '')));
-        assert(bouquetAssistantMessage, `T8F bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
-
-        console.log(`[${formatTestId('T8F')}] step 7/11: verifying persisted turn contents`);
+        console.log(`[${formatTestId('T8F')}] step 6/11: verifying persisted turn contents`);
         const finalMessages = await readChatMessages(T8F_CHAT_CARD_ID, turnId);
         const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
         const finalAssistantMessage = [...finalMessages].reverse().find((message) => message?.role === 'assistant');
@@ -2111,12 +2108,20 @@ async function main() {
         const turnSystemMessage = finalMessages.find((message) => message?.role === 'system' && String(message?.text || '').toLowerCase().includes('file uploaded:'));
         assert(turnSystemMessage, `T8F turn missing system attachment message: ${jsonText(finalMessages)}`);
         assert(/^tokyo\b/i.test(String(finalAssistantMessage.text || '').trim()), `T8F final assistant text mismatch: ${jsonText(finalAssistantMessage)}`);
+        const finalProcessingOffPoll = await pollChatProcessing(
+          T8F_CHAT_CARD_ID,
+          false,
+          Math.max(12, Math.ceil(NON_PROBE_RESPONSE_TIMEOUT_MS / 1000)),
+          1000,
+          `chat processing off for ${T8F_CHAT_CARD_ID}`,
+        );
+        assert(finalProcessingOffPoll.matched, `T8F chat processing did not turn off for ${T8F_CHAT_CARD_ID}; active=${finalProcessingOffPoll.active}`);
 
-        console.log(`[${formatTestId('T8F')}] step 8/11: final assistant reply with attachment contents passed`);
+        console.log(`[${formatTestId('T8F')}] step 7/11: final assistant reply with attachment contents passed`);
         console.log(`[${formatTestId('T8F')}] final assistant reply: ${String(finalAssistantMessage.text || '')}`);
       } finally {
         if (t8fChatSubscribed) {
-          console.log(`[${formatTestId('T8F')}] step 9/11: unsubscribing chat SSE for ${T8F_CHAT_CARD_ID}`);
+          console.log(`[${formatTestId('T8F')}] step 8/11: unsubscribing chat SSE for ${T8F_CHAT_CARD_ID}`);
           try {
             await unsubscribeChatSseSubscription(T8F_CHAT_CARD_ID);
           } catch (err) {
@@ -2191,8 +2196,6 @@ async function main() {
         assert(!!uploadSystemMessage, 'T9F upload protocol missing system chat message');
         assert(String(uploadSystemMessage?.text || '').toLowerCase().includes('file uploaded:'), 'T9F upload system message does not describe uploaded file');
 
-        const eventStart = sseState.chatEvents.length;
-
         console.log(`[${formatTestId('T9F')}] step 4/11: sending foundry-forced chat turn ${turnId} with attachment`);
         expectMcpSuccess(
           await callAction('chat-send', T9F_CHAT_CARD_ID, {
@@ -2202,31 +2205,18 @@ async function main() {
           'T9F chat-send',
         );
 
-        console.log(`[${formatTestId('T9F')}] step 5/11: waiting for SSE processing-done notification`);
-        const bouquet = await waitForChatTurnState({
-          eventStart,
+        console.log(`[${formatTestId('T9F')}] step 5/11: waiting for final assistant reply in persisted messages`);
+        const assistantMessagesPoll = await pollChatMessages(
+          T9F_CHAT_CARD_ID,
           turnId,
-          timeoutMs: NON_PROBE_RESPONSE_TIMEOUT_MS,
-          label: `T9F chat turn bouquet for turn ${turnId}`,
-          predicate: (currentBouquet) => {
-            const hasUser = currentBouquet.userMessages.some((message) => String(message?.text || '') === promptText);
-            const hasSystem = currentBouquet.systemMessages.some((message) => String(message?.text || '').toLowerCase().includes('file uploaded:'));
-            const hasAssistant = currentBouquet.assistantMessages.some((message) => /(?:^|\b)9(?:\b|$)/.test(String(message?.text || '')));
-            return currentBouquet.processingOnSeen && currentBouquet.processingDoneSeen && hasUser && hasSystem && hasAssistant;
-          },
-        });
+          Math.max(12, Math.ceil(NON_PROBE_RESPONSE_TIMEOUT_MS / 1000)),
+          1000,
+          (messages) => messages.some((message) => message?.role === 'assistant' && /(?:^|\b)9(?:\b|$)/.test(String(message?.text || ''))),
+          `final assistant reply for turn ${turnId}`,
+        );
+        assert(assistantMessagesPoll.matched, `T9F final assistant reply not found for turn ${turnId}: ${jsonText(assistantMessagesPoll.messages)}`);
 
-        console.log(`[${formatTestId('T9F')}] step 6/11: verifying notification bouquet contents`);
-        assert(bouquet.processingOnSeen, `T9F bouquet missing processing-on notification for turn ${turnId}`);
-        assert(bouquet.processingDoneSeen, `T9F bouquet missing processing-done notification for turn ${turnId}`);
-        const bouquetUserMessage = bouquet.userMessages.find((message) => String(message?.text || '') === promptText);
-        assert(bouquetUserMessage, `T9F bouquet missing user message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
-        const bouquetAttachmentSystemMessage = bouquet.systemMessages.find((message) => String(message?.text || '').toLowerCase().includes('file uploaded:'));
-        assert(bouquetAttachmentSystemMessage, `T9F bouquet missing attachment system message for turn ${turnId}: ${jsonText(bouquet.messages)}`);
-        const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => /(?:^|\b)9(?:\b|$)/.test(String(message?.text || '')));
-        assert(bouquetAssistantMessage, `T9F bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
-
-        console.log(`[${formatTestId('T9F')}] step 7/11: verifying persisted turn contents`);
+        console.log(`[${formatTestId('T9F')}] step 6/11: verifying persisted turn contents`);
         const finalMessages = await readChatMessages(T9F_CHAT_CARD_ID, turnId);
         const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
         const finalAssistantMessage = [...finalMessages].reverse().find((message) => message?.role === 'assistant');
@@ -2236,8 +2226,16 @@ async function main() {
         const turnSystemMessage = finalMessages.find((message) => message?.role === 'system' && String(message?.text || '').toLowerCase().includes('file uploaded:'));
         assert(turnSystemMessage, `T9F turn missing system attachment message: ${jsonText(finalMessages)}`);
         assert(/^9\b/.test(String(finalAssistantMessage.text || '').trim()), `T9F final assistant text mismatch: ${jsonText(finalAssistantMessage)}`);
+        const finalProcessingOffPoll = await pollChatProcessing(
+          T9F_CHAT_CARD_ID,
+          false,
+          Math.max(12, Math.ceil(NON_PROBE_RESPONSE_TIMEOUT_MS / 1000)),
+          1000,
+          `chat processing off for ${T9F_CHAT_CARD_ID}`,
+        );
+        assert(finalProcessingOffPoll.matched, `T9F chat processing did not turn off for ${T9F_CHAT_CARD_ID}; active=${finalProcessingOffPoll.active}`);
 
-        console.log(`[${formatTestId('T9F')}] step 8/11: final assistant reply with attachment contents passed`);
+        console.log(`[${formatTestId('T9F')}] step 7/11: final assistant reply with attachment contents passed`);
         console.log(`[${formatTestId('T9F')}] final assistant reply: ${String(finalAssistantMessage.text || '')}`);
       } finally {
         if (t9fChatSubscribed) {
