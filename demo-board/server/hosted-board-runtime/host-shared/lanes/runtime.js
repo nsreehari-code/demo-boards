@@ -80,6 +80,60 @@ export async function drainLaneToIdle(lane, maxPasses = 256) {
   throw new Error(`Exceeded ${maxPasses} drain passes for lane ${lane.id}`);
 }
 
+export function startLaneRunner(lane) {
+  const pollIntervalMs = Math.max(1, Math.floor(lane.pollIntervalMs ?? 250));
+  const visibilityMs = Math.max(1, Math.floor(lane.visibilityMs ?? 60000));
+  const concurrency = Math.max(1, Math.floor(lane.concurrency ?? 1));
+  let stopped = false;
+  let leasing = false;
+  let inFlight = 0;
+
+  async function tick() {
+    if (stopped || leasing || inFlight >= concurrency) {
+      return;
+    }
+
+    leasing = true;
+    try {
+      const leases = await lane.lease({ max: Math.max(1, concurrency - inFlight), visibilityMs });
+      for (const lease of leases) {
+        inFlight += 1;
+        void runLaneLease(lane, lease).finally(() => {
+          inFlight = Math.max(0, inFlight - 1);
+          if (!stopped) {
+            void tick();
+          }
+        });
+      }
+    } finally {
+      leasing = false;
+    }
+  }
+
+  const timer = setInterval(() => {
+    void tick();
+  }, pollIntervalMs);
+  if (typeof timer?.unref === 'function') {
+    timer.unref();
+  }
+  void tick();
+
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
+export function startLaneRunners(registryOrLanes) {
+  const lanes = Array.isArray(registryOrLanes) ? registryOrLanes : registryOrLanes.lanes;
+  const stops = lanes.map((lane) => startLaneRunner(lane));
+  return () => {
+    for (const stop of stops) {
+      stop();
+    }
+  };
+}
+
 export function createWakeTrigger(lane, logger) {
   let running = false;
   let pending = false;

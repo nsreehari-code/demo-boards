@@ -30,6 +30,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.config.json');
 const SETUP_SCRIPT_PATH = path.resolve(__dirname, '..', 'scripts', 'setup-single-ai-workspace.js');
+const HOSTED_QUEUE_LANE_TUNING = {
+  chatAgent: {
+    concurrency: 2,
+  },
+};
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -479,6 +484,7 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
     boards: [{
       ...bundle.boardContextConfig,
     }],
+    queueLaneTuning: HOSTED_QUEUE_LANE_TUNING,
     async handleChatAgentRequest(request) {
       await executeChatAgentRequest(request, boardId, boardRuntimeNeeds);
     },

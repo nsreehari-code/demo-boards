@@ -5,7 +5,7 @@ import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHostedBoardQueueLaneRegistry, createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
-import { createHttpBoardCallbackTransport, startQueueLaneRunners } from 'yaml-flow/board-live-cards-node';
+import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
 import { buildBoardBundle as buildFirebaseBoardBundle } from '../firebase-adapter/build-board-bundle.js';
 import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js';
 import { loadFirebaseHostConfig, resolveConfigRelativePath } from '../firebase-adapter/load-config.js';
@@ -18,11 +18,16 @@ import {
   createHostedImmediateTaskExecutorRef,
   loadTaskExecutorModule,
 } from '../host-shared/worker-modules/task-executor-module.js';
-import { createWakeTrigger, queueCollectionPath } from '../host-shared/lanes/runtime.js';
+import { createWakeTrigger, queueCollectionPath, startLaneRunners } from '../host-shared/lanes/runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.config.json');
+const HOSTED_QUEUE_LANE_TUNING = {
+  chatAgent: {
+    concurrency: 2,
+  },
+};
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -272,6 +277,7 @@ async function main() {
       apiBasePath: `${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}`,
       boardId,
       boards: [bundle.boardContextConfig],
+      queueLaneTuning: HOSTED_QUEUE_LANE_TUNING,
       invocationAdapter: {
         async invoke(ref) {
           return {
@@ -303,7 +309,7 @@ async function main() {
       apiBasePrefix: hostConfig.apiBasePrefix,
     }), boardId, processLogger);
 
-    const stopRunner = startQueueLaneRunners(laneRegistry);
+    const stopRunner = startLaneRunners(laneRegistry);
     stopSubscriptions.push(stopRunner);
     if (!keepAliveTimer) {
       keepAliveTimer = setInterval(() => {}, 1 << 30);
