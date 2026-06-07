@@ -264,7 +264,7 @@ function formatWatchpartyToolMessage(phase, toolName, body) {
 function appendWatchpartyToolsLog(boardId, logId, phase, toolName, body) {
   const sanitizedCardId = deriveCardIdFromLogId(logId);
   if (!sanitizedCardId || !boardId) {
-    return;
+    return null;
   }
 
   const outputPath = resolveBoardAgentToolsLogFilePath(boardId, sanitizedCardId);
@@ -273,8 +273,30 @@ function appendWatchpartyToolsLog(boardId, logId, phase, toolName, body) {
   try {
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.appendFileSync(outputPath, `${line}\n`, 'utf8');
+    const text = fs.readFileSync(outputPath, 'utf8');
+    return { cardId: sanitizedCardId, channel: 'agent-tools', line, text };
   } catch {
     // Watchparty tool logging must never block request handling.
+    return { cardId: sanitizedCardId, channel: 'agent-tools', line, text: line };
+  }
+}
+
+function emitWatchpartyToolsNotification(runtime, boardId, logId, phase, toolName, body) {
+  const appended = appendWatchpartyToolsLog(boardId, logId, phase, toolName, body);
+  if (!appended || !runtime || typeof runtime.emitNotification !== 'function') {
+    return;
+  }
+  try {
+    runtime.emitNotification({
+      kind: 'card_watchparty',
+      cardId: appended.cardId,
+      channel: appended.channel,
+      replace: true,
+      payload: { text: appended.text },
+      sentAtMs: Date.now(),
+    });
+  } catch {
+    // Watchparty emission must never block request handling.
   }
 }
 
@@ -750,7 +772,7 @@ async function main() {
           res.once('finish', logCompletionOnce);
           res.once('close', logCompletionOnce);
 
-          appendWatchpartyToolsLog(boardId, logId, 'Invoking', toolName, strippedBody);
+          emitWatchpartyToolsNotification(entry.runtime, boardId, logId, 'Invoking', toolName, strippedBody);
 
           let watchpartyCompletionLogged = false;
           const logWatchpartyCompletionOnce = () => {
@@ -758,7 +780,7 @@ async function main() {
               return;
             }
             watchpartyCompletionLogged = true;
-            appendWatchpartyToolsLog(boardId, logId, 'Completed', toolName, strippedBody);
+            emitWatchpartyToolsNotification(entry.runtime, boardId, logId, 'Completed', toolName, strippedBody);
           };
           res.once('finish', logWatchpartyCompletionOnce);
           res.once('close', logWatchpartyCompletionOnce);
