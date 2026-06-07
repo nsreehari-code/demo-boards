@@ -13,6 +13,8 @@ import { initializeFirebaseServices } from '../server/hosted-board-runtime/fireb
 import { initializeLocalFsServices } from '../server/hosted-board-runtime/localfs-adapter/localfs-init.js';
 import { loadFirebaseHostConfig } from '../server/hosted-board-runtime/firebase-adapter/load-config.js';
 import { createDynamicBoards } from '../server/hosted-board-runtime/boards-index/dynamic-boards.js';
+import { applyNotification, buildBoardState } from '../../../yaml-flow/lib/board-state-reducer.js';
+import { runtimeNotificationsFromPayload } from '../../../yaml-flow/lib/notification-consumer/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,6 +95,84 @@ function roundMoney(value) {
 
 function jsonText(value) {
   return JSON.stringify(value);
+}
+
+function normalizeRequiredTokens(requires) {
+  if (!Array.isArray(requires)) return [];
+  return requires.flatMap((entry) => {
+    if (typeof entry === 'string' && entry.trim()) return [entry.trim()];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const bindTo = typeof entry.bindTo === 'string'
+      ? entry.bindTo.trim()
+      : typeof entry.key === 'string'
+        ? entry.key.trim()
+        : '';
+    return bindTo ? [bindTo] : [];
+  });
+}
+
+function normalizeChatState(chatSnapshot = null) {
+  return {
+    messages: Array.isArray(chatSnapshot?.messages) ? chatSnapshot.messages : [],
+    receiving: chatSnapshot?.receiving === true,
+    processing: chatSnapshot?.processing === true,
+  };
+}
+
+function buildStatusCardIndex(statusSnapshot) {
+  const index = new Map();
+  for (const entry of (statusSnapshot?.cards ?? [])) {
+    const cardId = typeof entry?.name === 'string' ? entry.name.trim() : '';
+    if (cardId) index.set(cardId, entry);
+  }
+  return index;
+}
+
+function summarizeBoardState(boardState) {
+  const summary = {
+    card_count: Array.isArray(boardState?.cardIds) ? boardState.cardIds.length : 0,
+    completed: 0,
+    failed: 0,
+    running: 0,
+    pending: 0,
+  };
+  for (const cardId of (boardState?.cardIds ?? [])) {
+    const taskStatus = String(boardState?.modelsById?.[cardId]?.runtime_state?.task_status || '');
+    if (taskStatus === 'completed') summary.completed += 1;
+    else if (taskStatus === 'failed') summary.failed += 1;
+    else if (taskStatus === 'running' || taskStatus === 'in-progress') summary.running += 1;
+    else summary.pending += 1;
+  }
+  return summary;
+}
+
+function selectLiveCardModelFromPayload(payload, cardId) {
+  const cardDefinitions = Array.isArray(payload?.cardDefinitions) ? payload.cardDefinitions : [];
+  const card = cardDefinitions.find((entry) => entry?.id === cardId) ?? { id: cardId, card_data: {} };
+  const statusEntry = buildStatusCardIndex(payload?.statusSnapshot).get(cardId) ?? null;
+  const runtimeEntry = payload?.cardRuntimeById?.[cardId] ?? null;
+  const requires = {};
+  for (const token of normalizeRequiredTokens(card?.requires)) {
+    requires[token] = Object.prototype.hasOwnProperty.call(payload?.dataObjectsByToken ?? {}, token)
+      ? payload.dataObjectsByToken[token]
+      : null;
+  }
+  return {
+    id: cardId,
+    card,
+    card_data: card?.card_data ?? {},
+    requires,
+    computed_values: runtimeEntry?.computed_values ?? {},
+    runtime_state: {
+      task_status: statusEntry?.status ?? null,
+      card_status: statusEntry?.status ?? null,
+      runtime: statusEntry?.runtime ?? runtimeEntry?.runtime ?? {},
+      error: statusEntry?.error ?? null,
+      blocked_by: Array.isArray(statusEntry?.blocked_by) ? statusEntry.blocked_by : [],
+      requires_missing: Array.isArray(statusEntry?.requires_missing) ? statusEntry.requires_missing : [],
+    },
+    card_chats: payload?.cardChatsByCardId?.[cardId] ? normalizeChatState(payload.cardChatsByCardId[cardId]) : null,
+  };
 }
 
 function makeTurnId() {
@@ -676,6 +756,7 @@ async function main() {
     latestPayload: null,
     latestStatusData: null,
     statusSummary: null,
+    boardState: null,
     chatEvents: [],
     statusHistory: [],
     cardRefreshedEvents: [],
@@ -756,18 +837,36 @@ async function main() {
     return null;
   }
 
+  function syncProjectedSseState() {
+    if (!sseState.boardState) return;
+    sseState.statusSummary = summarizeBoardState(sseState.boardState);
+  }
+
   function applySseFrame(payload, cardId) {
     if (payload && Array.isArray(payload.cardDefinitions)) {
       if (!sseState.initialPayload && payload.cardDefinitions.length > 0) {
         sseState.initialPayload = payload;
       }
       sseState.latestPayload = payload;
+      sseState.boardState = buildBoardState(payload, sseState.boardState, selectLiveCardModelFromPayload);
+      syncProjectedSseState();
+    } else {
+      const notifications = runtimeNotificationsFromPayload(payload);
+      if (notifications.length > 0 && sseState.boardState) {
+        sseState.boardState = applyNotification(
+          sseState.boardState,
+          notifications,
+          selectLiveCardModelFromPayload,
+          () => sseState.latestPayload,
+        );
+        syncProjectedSseState();
+      }
     }
 
     const statusData = extractStatusDataFromSsePayload(payload);
     if (statusData) {
       sseState.latestStatusData = statusData;
-      if (statusData.summary) {
+      if (!sseState.statusSummary && statusData.summary) {
         sseState.statusSummary = statusData.summary;
       }
       sseState.statusHistory.push({ at: Date.now(), statusData });
@@ -808,6 +907,7 @@ async function main() {
     sseState.latestPayload = null;
     sseState.latestStatusData = null;
     sseState.statusSummary = null;
+    sseState.boardState = null;
     sseState.statusHistory = [];
     sseState.cardRefreshedEvents = [];
     if (clearChatEvents) {

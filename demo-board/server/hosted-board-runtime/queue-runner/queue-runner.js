@@ -2,6 +2,7 @@
 
 import http from 'node:http';
 import https from 'node:https';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHostedBoardQueueLaneRegistry, createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
@@ -23,11 +24,39 @@ import { createWakeTrigger, queueCollectionPath, startLaneRunners } from '../hos
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.config.json');
-const HOSTED_QUEUE_LANE_TUNING = {
-  chatAgent: {
-    concurrency: 2,
-  },
-};
+
+function readPositiveInt(value, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return Math.floor(num);
+}
+
+function defaultQueueRunnerConcurrency() {
+  if (typeof os.availableParallelism === 'function') {
+    return Math.max(1, os.availableParallelism());
+  }
+  return Math.max(1, os.cpus().length || 1);
+}
+
+function buildHostedQueueLaneTuning(hostConfig) {
+  const defaultConcurrency = readPositiveInt(
+    process.env.DEMO_BOARDS_QUEUE_CONCURRENCY,
+    readPositiveInt(hostConfig?.queueConcurrency, defaultQueueRunnerConcurrency()),
+  );
+  const fallbackPollIntervalMs = readPositiveInt(
+    process.env.DEMO_BOARDS_QUEUE_FALLBACK_POLL_MS,
+    readPositiveInt(hostConfig?.queueFallbackPollMs, 3000),
+  );
+  const shared = {
+    concurrency: defaultConcurrency,
+    pollIntervalMs: fallbackPollIntervalMs,
+  };
+  return {
+    processAccumulated: shared,
+    chatAgent: shared,
+    taskExecutor: shared,
+  };
+}
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -124,6 +153,120 @@ function traceEnabled() {
 function trace(message) {
   if (!traceEnabled()) return;
   console.log(`[queue-runner-trace] ${message}`);
+}
+
+function runtimeNotificationsFromSsePayload(payload) {
+  if (!payload || typeof payload !== 'object') return [];
+  if (payload.kind === 'notification-batch' && Array.isArray(payload.notifications)) {
+    return payload.notifications;
+  }
+  return [];
+}
+
+function drainWakeTriggersFromNotifications(notifications, wakeTriggers) {
+  let triggered = false;
+  for (const notification of notifications) {
+    if (!notification || typeof notification !== 'object') continue;
+    if (notification.kind !== 'message_enqueued') continue;
+    const lane = normalizeText(notification.lane);
+    if (!lane) continue;
+    const wakeTrigger = wakeTriggers.get(lane);
+    if (!wakeTrigger) continue;
+    wakeTrigger();
+    triggered = true;
+  }
+  return triggered;
+}
+
+function createSseWakeSubscriber({ boardId, sseUrl, wakeTriggers, logger }) {
+  const clientId = `queue-runner-${process.pid}-${boardId}`;
+  const reconnectDelayMs = 1000;
+  let stopped = false;
+  let activeRequest = null;
+  let reconnectTimer = null;
+
+  function scheduleReconnect() {
+    if (stopped || reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, reconnectDelayMs);
+  }
+
+  function handlePayload(payload) {
+    const notifications = runtimeNotificationsFromSsePayload(payload);
+    if (notifications.length === 0) return;
+    const triggered = drainWakeTriggersFromNotifications(notifications, wakeTriggers);
+    if (triggered) {
+      trace(`queue-wake board=${boardId} notifications=${notifications.length}`);
+    }
+  }
+
+  function connect() {
+    if (stopped) return;
+    const targetUrl = new URL(sseUrl);
+    targetUrl.searchParams.set('clientId', clientId);
+    const transport = targetUrl.protocol === 'https:' ? https : http;
+    const request = transport.request({
+      hostname: targetUrl.hostname,
+      port: targetUrl.port,
+      path: `${targetUrl.pathname}${targetUrl.search}`,
+      method: 'GET',
+      headers: { Accept: 'text/event-stream' },
+    });
+    activeRequest = request;
+    request.on('response', (response) => {
+      if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) {
+        logger.warn(`[queue-runner] SSE subscribe failed for ${boardId}: HTTP ${response.statusCode || 0}`);
+        response.resume();
+        scheduleReconnect();
+        return;
+      }
+      let buffer = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        buffer += chunk;
+        while (true) {
+          const frameBoundary = buffer.indexOf('\n\n');
+          if (frameBoundary < 0) break;
+          const frame = buffer.slice(0, frameBoundary);
+          buffer = buffer.slice(frameBoundary + 2);
+          const dataLines = frame
+            .split(/\r?\n/g)
+            .filter((line) => line.startsWith('data:'))
+            .map((line) => line.slice(5).trimStart());
+          if (dataLines.length === 0) continue;
+          try {
+            handlePayload(JSON.parse(dataLines.join('\n')));
+          } catch {
+            // Ignore malformed SSE payloads.
+          }
+        }
+      });
+      response.on('end', scheduleReconnect);
+      response.on('close', scheduleReconnect);
+      response.on('error', scheduleReconnect);
+    });
+    request.on('error', (error) => {
+      logger.warn(`[queue-runner] SSE subscribe failed for ${boardId}: ${error instanceof Error ? error.message : String(error)}`);
+      scheduleReconnect();
+    });
+    request.end();
+  }
+
+  connect();
+
+  return () => {
+    stopped = true;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (activeRequest) {
+      activeRequest.destroy();
+      activeRequest = null;
+    }
+  };
 }
 
 function isDummyTaskExecutorRequest(args) {
@@ -241,6 +384,7 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
 async function main() {
   const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'queueRunner');
+  const queueLaneTuning = buildHostedQueueLaneTuning(hostConfig);
   const adapterServices = hostConfig.storageAdapter === 'localfs'
     ? await initializeLocalFsServices(hostConfig.localfs)
     : await initializeFirebaseServices(hostConfig.firebase);
@@ -277,7 +421,7 @@ async function main() {
       apiBasePath: `${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}`,
       boardId,
       boards: [bundle.boardContextConfig],
-      queueLaneTuning: HOSTED_QUEUE_LANE_TUNING,
+      queueLaneTuning,
       invocationAdapter: {
         async invoke(ref) {
           return {
@@ -309,8 +453,18 @@ async function main() {
       apiBasePrefix: hostConfig.apiBasePrefix,
     }), boardId, processLogger);
 
+    const wakeTriggers = new Map(
+      laneRegistry.lanes.map((lane) => [lane.id, createWakeTrigger(lane, logger)]),
+    );
+
     const stopRunner = startLaneRunners(laneRegistry);
     stopSubscriptions.push(stopRunner);
+    stopSubscriptions.push(createSseWakeSubscriber({
+      boardId,
+      sseUrl: `${callbackServerOrigin}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/sse`,
+      wakeTriggers,
+      logger,
+    }));
     if (!keepAliveTimer) {
       keepAliveTimer = setInterval(() => {}, 1 << 30);
     }
