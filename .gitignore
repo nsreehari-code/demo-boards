@@ -34,3 +34,4 @@ demo-board/server/hosted-board-runtime/.runtime-pids.json
 
 demo-board/workspaces/**
 demo-board/server/hosted-board-runtime/copilot-sessions/**
+package.local.json
