@@ -13,8 +13,8 @@ import { initializeFirebaseServices } from '../server/hosted-board-runtime/fireb
 import { initializeLocalFsServices } from '../server/hosted-board-runtime/localfs-adapter/localfs-init.js';
 import { loadFirebaseHostConfig } from '../server/hosted-board-runtime/firebase-adapter/load-config.js';
 import { createDynamicBoards } from '../server/hosted-board-runtime/boards-index/dynamic-boards.js';
-import { applyNotification, buildBoardState } from '../../../yaml-flow/lib/board-state-reducer.js';
-import { runtimeNotificationsFromPayload } from '../../../yaml-flow/lib/notification-consumer/index.js';
+import { applyNotification, buildBoardState } from 'yaml-flow/board-state-reducer';
+import { runtimeNotificationsFromPayload } from 'yaml-flow/notification-consumer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
