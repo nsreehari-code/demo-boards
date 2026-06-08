@@ -405,6 +405,23 @@ async function invokeBoardRuntimeJson(entry, hostConfig, boardId, routeKind, bod
   return payload;
 }
 
+function isBoardSseConnectRequest(req, parsedUrl, boardId, apiBasePrefix) {
+  if ((req?.method || '').toUpperCase() !== 'GET') return false;
+  const normalizedBoardId = normalizeText(boardId);
+  if (!normalizedBoardId) return false;
+  const expectedPath = `${String(apiBasePrefix || '').replace(/\/$/, '')}/${encodeURIComponent(normalizedBoardId)}/sse`;
+  return normalizeText(parsedUrl?.pathname) === expectedPath;
+}
+
+function fireAndForgetProcessAccumulated(entry, hostConfig, boardId, logger) {
+  void invokeBoardRuntimeJson(entry, hostConfig, boardId, 'mcp-webhooks', {
+    tool: 'webhook.process-accumulated',
+    args: {},
+  }).catch((error) => {
+    logger.warn(`[controlface] fire-and-forget process-accumulated failed for ${boardId}: ${error?.message || error}`);
+  });
+}
+
 function parseBoardPayloadEnvelope(payload) {
   if (Array.isArray(payload)) {
     return { label: '', subtitle: '', cards: payload };
@@ -1245,8 +1262,11 @@ async function main() {
         res.once('close', logCompletionOnce);
       }
 
-      for (const { runtime } of boardRuntimes.values()) {
-        if (await runtime.handleRuntimeApi(req, res, parsedUrl)) {
+      for (const [boardId, entry] of boardRuntimes.entries()) {
+        if (await entry.runtime.handleRuntimeApi(req, res, parsedUrl)) {
+          if (isBoardSseConnectRequest(req, parsedUrl, boardId, hostConfig.apiBasePrefix)) {
+            fireAndForgetProcessAccumulated(entry, hostConfig, boardId, requestLogger);
+          }
           return;
         }
       }
