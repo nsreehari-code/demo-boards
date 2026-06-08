@@ -331,6 +331,177 @@ function createReplayableRequest(req, rawBodyBuffer) {
   return replayReq;
 }
 
+function createCaptureResponse() {
+  let statusCode = 200;
+  let headers = {};
+  const chunks = [];
+
+  return {
+    get statusCode() {
+      return statusCode;
+    },
+    set statusCode(value) {
+      statusCode = value;
+    },
+    writeHead(nextStatusCode, nextHeaders = {}) {
+      statusCode = nextStatusCode;
+      headers = { ...headers, ...nextHeaders };
+      return this;
+    },
+    setHeader(name, value) {
+      headers[String(name || '').toLowerCase()] = value;
+    },
+    getHeader(name) {
+      return headers[String(name || '').toLowerCase()];
+    },
+    write(chunk, encoding) {
+      if (chunk !== undefined && chunk !== null) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8'));
+      }
+      return true;
+    },
+    end(chunk, encoding) {
+      if (chunk !== undefined && chunk !== null) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8'));
+      }
+      return this;
+    },
+    once() {
+      return this;
+    },
+    on() {
+      return this;
+    },
+    get bodyText() {
+      return Buffer.concat(chunks).toString('utf8');
+    },
+  };
+}
+
+async function invokeBoardRuntimeJson(entry, hostConfig, boardId, routeKind, body) {
+  const routePath = `${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/${routeKind}`;
+  const requestBody = Buffer.from(JSON.stringify(body), 'utf8');
+  const replayReq = Readable.from(requestBody.length > 0 ? [requestBody] : []);
+  replayReq.method = 'POST';
+  replayReq.url = routePath;
+  replayReq.headers = {
+    'content-type': 'application/json',
+    'content-length': String(requestBody.length),
+  };
+  replayReq.httpVersion = '1.1';
+  const captureRes = createCaptureResponse();
+  const parsedUrl = new URL(`http://${hostConfig.host}:${hostConfig.port}${routePath}`);
+  const handled = await entry.runtime.handleRuntimeApi(replayReq, captureRes, parsedUrl);
+  if (!handled) {
+    throw new Error(`board runtime did not handle ${routeKind} for '${boardId}'`);
+  }
+  const payload = captureRes.bodyText ? JSON.parse(captureRes.bodyText) : null;
+  if ((captureRes.statusCode || 0) >= 400) {
+    const message = typeof payload?.error === 'string' && payload.error.trim()
+      ? payload.error.trim()
+      : `board runtime request failed with status ${captureRes.statusCode || 0}`;
+    throw new Error(message);
+  }
+  return payload;
+}
+
+function parseBoardPayloadEnvelope(payload) {
+  if (Array.isArray(payload)) {
+    return { label: '', subtitle: '', cards: payload };
+  }
+  if (payload && typeof payload === 'object' && Array.isArray(payload.cards)) {
+    return {
+      label: typeof payload.boardLabel === 'string' ? payload.boardLabel.trim() : '',
+      subtitle: typeof payload.boardSubtitle === 'string' ? payload.boardSubtitle.trim() : '',
+      cards: payload.cards,
+    };
+  }
+  return null;
+}
+
+function buildBoardImportPreview(currentCards, nextCards, mode = 'replace') {
+  const currentCardMap = new Map(
+    (Array.isArray(currentCards) ? currentCards : [])
+      .map((card) => [String(card?.id || '').trim(), card])
+      .filter(([id]) => id),
+  );
+  const nextCardMap = new Map(
+    (Array.isArray(nextCards) ? nextCards : [])
+      .map((card) => [String(card?.id || '').trim(), card])
+      .filter(([id]) => id),
+  );
+  const replaceIds = [];
+  const addIds = [];
+  const removeIds = [];
+
+  for (const [id, card] of nextCardMap.entries()) {
+    const title = typeof card?.meta?.title === 'string' ? card.meta.title.trim() : '';
+    if (currentCardMap.has(id)) {
+      replaceIds.push({ id, title });
+    } else {
+      addIds.push({ id, title });
+    }
+  }
+
+  if (mode === 'replace') {
+    for (const [id, card] of currentCardMap.entries()) {
+      if (!nextCardMap.has(id)) {
+        const title = typeof card?.meta?.title === 'string' ? card.meta.title.trim() : '';
+        removeIds.push({ id, title });
+      }
+    }
+  }
+
+  replaceIds.sort((left, right) => left.id.localeCompare(right.id));
+  addIds.sort((left, right) => left.id.localeCompare(right.id));
+  removeIds.sort((left, right) => left.id.localeCompare(right.id));
+  return { replaceIds, addIds, removeIds };
+}
+
+async function validateImportCards(boardEntry, hostConfig, boardId, cards) {
+  const results = [];
+  for (const card of Array.isArray(cards) ? cards : []) {
+    const summary = summarizeCardForImport(card);
+    const issues = [];
+    let isValid = false;
+
+    if (!summary.id) {
+      issues.push('Every card in the runtime dump must have a non-empty string id');
+    } else {
+      try {
+        const payload = await invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, 'mcp', {
+          tool: 'preflight.validate-candidate-card-definition',
+          args: {
+            candidate_card_content: card,
+          },
+        });
+        const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
+        isValid = data?.isValid === true;
+        if (Array.isArray(data?.issues)) {
+          for (const issue of data.issues) {
+            if (typeof issue === 'string' && issue.trim()) {
+              issues.push(issue.trim());
+            }
+          }
+        }
+      } catch (err) {
+        const message = typeof err?.message === 'string' ? err.message.trim() : '';
+        if (message) {
+          issues.push(message);
+        }
+      }
+    }
+
+    results.push({
+      id: summary.id,
+      title: summary.title,
+      isValid: isValid && issues.length === 0,
+      issues,
+    });
+  }
+  return results;
+}
+
 function escapeRegex(text) {
   return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -572,6 +743,108 @@ function summarizeBoardForList(board) {
   };
 }
 
+function normalizeImportMode(value) {
+  const mode = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return mode === 'ingest' ? 'ingest' : 'replace';
+}
+
+function summarizeCardForImport(card) {
+  return {
+    id: typeof card?.id === 'string' ? card.id.trim() : '',
+    title: typeof card?.meta?.title === 'string' ? card.meta.title.trim() : '',
+  };
+}
+
+async function listRuntimeCardsForBoard(boardEntry, hostConfig, boardId) {
+  const payload = await invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, 'mcp-controlplane', {
+    tool: 'list-runtime-cards',
+    args: { board_id: boardId },
+  });
+  const cards = Array.isArray(payload?.data)
+    ? payload.data
+    : (Array.isArray(payload?.data?.cards) ? payload.data.cards : []);
+  return Array.isArray(cards) ? cards : [];
+}
+
+async function applyBoardImport({ boardEntry, hostConfig, dynamicBoards, boardId, envelope, mode, applyBoardMetadata }) {
+  const nextCards = envelope.cards;
+  const currentCards = await listRuntimeCardsForBoard(boardEntry, hostConfig, boardId);
+  const validation = await validateImportCards(boardEntry, hostConfig, boardId, nextCards);
+  const invalidCards = validation.filter((entry) => !entry.isValid);
+  if (invalidCards.length > 0) {
+    const error = new Error(`Import validation failed for ${invalidCards.length} card${invalidCards.length === 1 ? '' : 's'}`);
+    error.statusCode = 400;
+    error.validation = {
+      validCards: validation.filter((entry) => entry.isValid),
+      invalidCards,
+    };
+    throw error;
+  }
+  const nextIds = new Set(nextCards.map((card) => String(card?.id || '').trim()).filter(Boolean));
+
+  for (const card of nextCards) {
+    const cardId = typeof card?.id === 'string' ? card.id.trim() : '';
+    if (!cardId) {
+      throw new Error('Every card in the runtime dump must have a non-empty string id');
+    }
+    await invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, 'mcp-controlplane', {
+      tool: 'manage.upsert-card',
+      args: {
+        board_id: boardId,
+        card_id: cardId,
+        candidate_card_content: card,
+      },
+    });
+  }
+
+  if (mode === 'replace') {
+    for (const card of currentCards) {
+      const cardId = typeof card?.id === 'string' ? card.id.trim() : '';
+      if (cardId && !nextIds.has(cardId)) {
+        await invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, 'mcp-controlplane', {
+          tool: 'manage.remove-card',
+          args: {
+            board_id: boardId,
+            card_id: cardId,
+          },
+        });
+      }
+    }
+  }
+
+  let board = null;
+  if (applyBoardMetadata && (envelope.label || envelope.subtitle)) {
+    board = await dynamicBoards.saveMeta(boardId, {
+      ...(envelope.label ? { pageTitle: envelope.label } : {}),
+      ...(envelope.subtitle ? { pageSubtitle: envelope.subtitle } : {}),
+    });
+  }
+
+  return {
+    board: board ? summarizeBoardForList(board) : null,
+    preview: {
+      mode,
+      ...buildBoardImportPreview(currentCards, nextCards, mode),
+      boardLabel: envelope.label,
+      boardSubtitle: envelope.subtitle,
+      validCards: validation,
+      invalidCards: [],
+    },
+  };
+}
+
+async function buildBoardExport(boardEntry, board, hostConfig) {
+  const cards = await listRuntimeCardsForBoard(boardEntry, hostConfig, board.id);
+  return {
+    version: 1,
+    boardId: board.id,
+    exportedAt: new Date().toISOString(),
+    boardLabel: typeof board?.metadata?.pageTitle === 'string' ? board.metadata.pageTitle : board.label,
+    boardSubtitle: typeof board?.metadata?.pageSubtitle === 'string' ? board.metadata.pageSubtitle : '',
+    cards,
+  };
+}
+
 async function handleManageBoardsRoute({
   req,
   res,
@@ -673,6 +946,98 @@ async function handleManageBoardsRoute({
     return;
   }
 
+  if (subcommand === 'export-board') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const board = await dynamicBoards.get(id);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    const entry = boardRuntimes.get(id);
+    if (!entry) {
+      sendJson(res, 404, { status: 'error', error: `board runtime '${id}' not found` });
+      return;
+    }
+    const payload = await buildBoardExport(entry, board, hostConfig);
+    sendJson(res, 200, { status: 'success', data: { payload } });
+    return;
+  }
+
+  if (subcommand === 'preview-import-board') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const board = await dynamicBoards.get(id);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    const envelope = parseBoardPayloadEnvelope(args?.payload);
+    if (!Array.isArray(envelope?.cards)) {
+      sendJson(res, 400, { status: 'error', error: 'args.payload must be a JSON array of cards or an object with a cards array' });
+      return;
+    }
+    const mode = normalizeImportMode(args?.mode);
+    const entry = boardRuntimes.get(id);
+    if (!entry) {
+      sendJson(res, 404, { status: 'error', error: `board runtime '${id}' not found` });
+      return;
+    }
+    const currentCards = await listRuntimeCardsForBoard(entry, hostConfig, id);
+    const validation = await validateImportCards(entry, hostConfig, id, envelope.cards);
+    const preview = {
+      mode,
+      ...buildBoardImportPreview(currentCards, envelope.cards, mode),
+      boardLabel: envelope.label,
+      boardSubtitle: envelope.subtitle,
+      validCards: validation.filter((entry) => entry.isValid),
+      invalidCards: validation.filter((entry) => !entry.isValid),
+    };
+    sendJson(res, 200, { status: 'success', data: { preview } });
+    return;
+  }
+
+  if (subcommand === 'apply-import-board') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const board = await dynamicBoards.get(id);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    const envelope = parseBoardPayloadEnvelope(args?.payload);
+    if (!Array.isArray(envelope?.cards)) {
+      sendJson(res, 400, { status: 'error', error: 'args.payload must be a JSON array of cards or an object with a cards array' });
+      return;
+    }
+    const mode = normalizeImportMode(args?.mode);
+    const entry = boardRuntimes.get(id);
+    if (!entry) {
+      sendJson(res, 404, { status: 'error', error: `board runtime '${id}' not found` });
+      return;
+    }
+    const result = await applyBoardImport({
+      boardEntry: entry,
+      hostConfig,
+      dynamicBoards,
+      boardId: id,
+      envelope,
+      mode,
+      applyBoardMetadata: args?.applyBoardMetadata === true,
+    });
+    sendJson(res, 200, { status: 'success', data: result });
+    return;
+  }
+
   sendJson(res, 400, { status: 'error', error: `unknown subcommand '${subcommand}'` });
 }
 
@@ -734,15 +1099,29 @@ async function main() {
       requestLogger.info(formatControlfacePickupMessage(req, parsedUrl, requestDetails));
       res.once('finish', logCompletionOnce);
       res.once('close', logCompletionOnce);
-      await handleManageBoardsRoute({
-        req,
-        res,
-        dynamicBoards,
-        hostConfig,
-        adapterServices,
-        boardRuntimes,
-        processLogger,
-      });
+      try {
+        await handleManageBoardsRoute({
+          req,
+          res,
+          dynamicBoards,
+          hostConfig,
+          adapterServices,
+          boardRuntimes,
+          processLogger,
+        });
+      } catch (err) {
+        const statusCode = Number.isInteger(err?.statusCode) && err.statusCode >= 400 ? err.statusCode : 500;
+        const payload = {
+          status: 'error',
+          error: typeof err?.message === 'string' && err.message.trim()
+            ? err.message.trim()
+            : 'manage-boards request failed',
+        };
+        if (err?.validation && typeof err.validation === 'object') {
+          payload.data = err.validation;
+        }
+        sendJson(res, statusCode, payload);
+      }
       return;
     }
 
