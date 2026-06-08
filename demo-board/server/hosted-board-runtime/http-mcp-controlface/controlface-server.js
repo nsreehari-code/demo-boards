@@ -739,6 +739,7 @@ function summarizeBoardForList(board) {
     label: board.label,
     ai: board.ai,
     aiWorkspaceTemplate: board.aiWorkspaceTemplate,
+    uiTemplate: board.uiTemplate,
     metadata: board.metadata,
   };
 }
@@ -924,6 +925,29 @@ async function handleManageBoardsRoute({
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
     }
+    sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
+    return;
+  }
+
+  if (subcommand === 'save-board-record') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const record = args?.record;
+    if (!record || typeof record !== 'object' || Array.isArray(record)) {
+      sendJson(res, 400, { status: 'error', error: 'args.record is required (object)' });
+      return;
+    }
+    const board = await dynamicBoards.saveRecord(id, record);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    await runSetupSingleAiWorkspaceScript(id, hostConfig.configPath);
+    const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
+    boardRuntimes.set(id, runtimePair);
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;
   }
