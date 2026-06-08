@@ -31,6 +31,10 @@ function readPositiveInt(value, fallback) {
   return Math.floor(num);
 }
 
+function boardConfigSignature(boardConfig) {
+  return JSON.stringify(boardConfig ?? null);
+}
+
 function defaultQueueRunnerConcurrency() {
   if (typeof os.availableParallelism === 'function') {
     return Math.max(1, os.availableParallelism());
@@ -388,19 +392,42 @@ async function main() {
   const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'queueRunner');
   const queueLaneTuning = buildHostedQueueLaneTuning(hostConfig);
+  const boardRefreshIntervalMs = readPositiveInt(
+    process.env.DEMO_BOARDS_QUEUE_BOARD_REFRESH_MS,
+    readPositiveInt(hostConfig?.queueBoardRefreshMs, 5000),
+  );
   const adapterServices = hostConfig.storageAdapter === 'localfs'
     ? await initializeLocalFsServices(hostConfig.localfs)
     : await initializeFirebaseServices(hostConfig.firebase);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
   await dynamicBoards.ensureSeeded();
   const stopSubscriptions = [];
+  const watchedBoards = new Map();
   let keepAliveTimer = null;
+  let refreshTimer = null;
   const buildBoardBundle = hostConfig.storageAdapter === 'localfs'
     ? buildLocalFsBoardBundle
     : buildFirebaseBoardBundle;
 
-  const boardConfigs = await dynamicBoards.list();
-  for (const boardConfig of boardConfigs) {
+  function stopWatchedBoard(boardId) {
+    const watched = watchedBoards.get(boardId);
+    if (!watched) return;
+    watchedBoards.delete(boardId);
+    for (const stop of watched.stops) {
+      try {
+        stop();
+      } catch {
+      }
+    }
+  }
+
+  function ensureKeepAliveTimer() {
+    if (!keepAliveTimer) {
+      keepAliveTimer = setInterval(() => {}, 1 << 30);
+    }
+  }
+
+  function startWatchingBoard(boardConfig) {
     const boardId = boardConfig.id;
     const logger = processLogger.child(`${boardId}:queue`);
     const callbackServerOrigin = hostConfig.serverOrigin || 'http://127.0.0.1:7799';
@@ -463,25 +490,73 @@ async function main() {
       laneRegistry.lanes.map((lane) => [lane.id, createWakeTrigger(lane, logger)]),
     );
 
+    const stops = [];
     const stopRunner = startLaneRunners(laneRegistry);
-    stopSubscriptions.push(stopRunner);
-    stopSubscriptions.push(createSseWakeSubscriber({
+    stops.push(stopRunner);
+    stops.push(createSseWakeSubscriber({
       boardId,
       sseUrl: `${callbackServerOrigin}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/sse-q`,
       wakeTriggers,
       logger,
     }));
-    if (!keepAliveTimer) {
-      keepAliveTimer = setInterval(() => {}, 1 << 30);
-    }
+    watchedBoards.set(boardId, {
+      signature: boardConfigSignature(boardConfig),
+      stops,
+    });
+    ensureKeepAliveTimer();
+    processLogger.info(`[queue-runner] watching board ${boardId}`);
   }
 
-  processLogger.info(`Watching ${boardConfigs.length} board(s)`);
+  async function reconcileBoards() {
+    const boardConfigs = await dynamicBoards.list();
+    const nextBoardIds = new Set(boardConfigs.map((boardConfig) => boardConfig.id));
+
+    for (const [boardId] of watchedBoards) {
+      if (!nextBoardIds.has(boardId)) {
+        stopWatchedBoard(boardId);
+        processLogger.info(`[queue-runner] stopped watching removed board ${boardId}`);
+      }
+    }
+
+    for (const boardConfig of boardConfigs) {
+      const signature = boardConfigSignature(boardConfig);
+      const watched = watchedBoards.get(boardConfig.id);
+      if (!watched) {
+        startWatchingBoard(boardConfig);
+        continue;
+      }
+      if (watched.signature === signature) {
+        continue;
+      }
+      stopWatchedBoard(boardConfig.id);
+      startWatchingBoard(boardConfig);
+      processLogger.info(`[queue-runner] reloaded board ${boardConfig.id}`);
+    }
+
+    processLogger.info(`Watching ${watchedBoards.size} board(s)`);
+  }
+
+  await reconcileBoards();
+  refreshTimer = setInterval(() => {
+    void reconcileBoards().catch((error) => {
+      processLogger.error(`[queue-runner] board refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, boardRefreshIntervalMs);
+  if (typeof refreshTimer.unref === 'function') {
+    refreshTimer.unref();
+  }
 
   function shutdown() {
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
     if (keepAliveTimer) {
       clearInterval(keepAliveTimer);
       keepAliveTimer = null;
+    }
+    for (const boardId of [...watchedBoards.keys()]) {
+      stopWatchedBoard(boardId);
     }
     for (const stop of stopSubscriptions.splice(0)) {
       try {
