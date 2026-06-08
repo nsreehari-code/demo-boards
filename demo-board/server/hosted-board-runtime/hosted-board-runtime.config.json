@@ -102,7 +102,28 @@
       "filters": {
         "gandalf": "meta.gandalf = true",
         "truthset": "meta.truthset = true"
-      }
+      },
+      "admin-cards": [
+        {
+          "id": "gandalf-intake",
+          "meta": {
+            "title": "Evidence Intake",
+            "gandalf": true,
+            "desc": "Board intake card for reviewing and managing incoming evidence."
+          },
+          "view": {
+            "elements": [
+              {
+                "kind": "markdown",
+                "data": {
+                  "value": "Review and manage incoming evidence for this board."
+                }
+              }
+            ]
+          },
+          "card_data": {}
+        }
+      ]
     }
   },
   "sample-boards": {

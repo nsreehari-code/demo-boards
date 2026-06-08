@@ -756,6 +756,35 @@ function summarizeCardForImport(card) {
   };
 }
 
+function listAdminTemplateCards(board) {
+  const cards = board?.ui?.['admin-cards'];
+  return Array.isArray(cards) ? cards.filter((card) => card && typeof card === 'object' && !Array.isArray(card)) : [];
+}
+
+async function upsertAdminTemplateCards({ boardEntry, hostConfig, board }) {
+  const boardId = typeof board?.id === 'string' ? board.id.trim() : '';
+  if (!boardId) {
+    throw new Error('Board id is required to upsert admin template cards');
+  }
+
+  const cards = listAdminTemplateCards(board);
+  for (const card of cards) {
+    const cardId = typeof card?.id === 'string' ? card.id.trim() : '';
+    if (!cardId) {
+      throw new Error(`Admin template card for board '${boardId}' must have a non-empty string id`);
+    }
+
+    await invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, 'mcp-controlplane', {
+      tool: 'manage.admin-upsert-card',
+      args: {
+        board_id: boardId,
+        card_id: cardId,
+        candidate_card_content: card,
+      },
+    });
+  }
+}
+
 async function listRuntimeCardsForBoard(boardEntry, hostConfig, boardId) {
   const payload = await invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, 'mcp-controlplane', {
     tool: 'list-runtime-cards',
@@ -905,6 +934,7 @@ async function handleManageBoardsRoute({
     await runSetupSingleAiWorkspaceScript(id, hostConfig.configPath);
     const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
     boardRuntimes.set(id, runtimePair);
+    await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;
   }
@@ -948,6 +978,7 @@ async function handleManageBoardsRoute({
     await runSetupSingleAiWorkspaceScript(id, hostConfig.configPath);
     const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
     boardRuntimes.set(id, runtimePair);
+    await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;
   }
@@ -964,8 +995,12 @@ async function handleManageBoardsRoute({
       return;
     }
     await runSetupSingleAiWorkspaceScript(id, hostConfig.configPath);
-    const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
-    boardRuntimes.set(id, runtimePair);
+    const runtimePair = boardRuntimes.get(id);
+    if (!runtimePair) {
+      sendJson(res, 409, { status: 'error', error: `board runtime for '${id}' is not active` });
+      return;
+    }
+    await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;
   }
