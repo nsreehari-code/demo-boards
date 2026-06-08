@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
+  AGENT_OUTPUT_FILE_STEM,
   buildContext,
   deriveLogIdFromCardId,
   resolveBoardWatchpartyCardDir,
@@ -74,11 +75,23 @@ function resolveMcpServerUrl(hostRuntime, _apiBasePath = '') {
   return normalizeString(hostRuntime?.mcpServerUrl);
 }
 
+function resolveNotifyUrl(hostRuntime, apiBasePath) {
+  const explicitNotifyUrl = normalizeString(hostRuntime?.notifyUrl);
+  if (explicitNotifyUrl) {
+    return explicitNotifyUrl;
+  }
+  const notifyServerUrl = trimTrailingSlash(hostRuntime?.notifyServerUrl || hostRuntime?.serverUrl);
+  return notifyServerUrl && apiBasePath
+    ? `${notifyServerUrl}${apiBasePath}/notify-q`
+    : '';
+}
+
 export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) {
   const apiBasePath = `${hostRuntime.apiBasePrefix}/${encodeURIComponent(boardId)}`;
   const chatAgentHandlerNeeds = {
     boardId,
     serverUrl: hostRuntime.serverUrl,
+    notifyUrl: resolveNotifyUrl(hostRuntime, apiBasePath),
     mcpServerUrl: resolveMcpServerUrl(hostRuntime, apiBasePath),
     apiBasePath,
   };
@@ -118,6 +131,7 @@ export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) 
       foundryChatExposedMcpToolPrefixes: Array.isArray(foundryAgents.chatExposedMcpToolPrefixes)
         ? foundryAgents.chatExposedMcpToolPrefixes.filter((entry) => typeof entry === 'string' && entry.trim())
         : [],
+      watchpartyFileRegistry: hostRuntime?.watchpartyFileRegistry || null,
     },
     taskExecutorExtra: {
       aiWorkspaceRoot,
@@ -186,6 +200,8 @@ export async function executeChatAgentRequest(request, boardId, boardRuntimeNeed
   }
 
   const assistantName = normalizeChatAssistant(extra.chatAssistant);
+  const watchpartyFileRegistry = boardRuntimeNeeds?.chatAgentHandlerNeeds?.watchpartyFileRegistry;
+  const notifyUrl = normalizeString(boardRuntimeNeeds?.chatAgentHandlerNeeds?.notifyUrl);
 
   await setChatProcessingState(serverUrl, boardId, cardId, 'started');
   try {
@@ -194,11 +210,27 @@ export async function executeChatAgentRequest(request, boardId, boardRuntimeNeed
     const context = buildContext(extra);
     fs.rmSync(context.watchPartyDir, { recursive: true, force: true });
     fs.mkdirSync(context.watchPartyDir, { recursive: true });
+    const unregisterAgentOutputWatchparty = typeof watchpartyFileRegistry?.registerWatchpartyFile === 'function'
+      ? await watchpartyFileRegistry.registerWatchpartyFile({
+          filePath: path.join(context.watchPartyDir, AGENT_OUTPUT_FILE_STEM),
+          notifyUrl,
+          cardId,
+          channel: 'agent-output',
+          clearOnRegister: true,
+          replace: true,
+        })
+      : null;
     const config = { ...extra };
     for (const field of Object.keys(context)) {
       delete config[field];
     }
-    await invokeAssistant(context, config);
+    try {
+      await invokeAssistant(context, config);
+    } finally {
+      if (typeof unregisterAgentOutputWatchparty === 'function') {
+        await unregisterAgentOutputWatchparty();
+      }
+    }
   } finally {
     try {
       await setChatProcessingState(serverUrl, boardId, cardId, 'done');

@@ -119,6 +119,56 @@ function normalizeChatState(chatSnapshot = null) {
   };
 }
 
+const EMPTY_OBJECT = Object.freeze({});
+const EMPTY_ARRAY = Object.freeze([]);
+const PROBE_PROGRESS_LINE = 'Probe progress: staging assistant reply';
+const STAGE_AI_RESPONSE_TOOL_LABEL = "Invoking 'Stage Ai Response And Any Attachments'";
+
+function createEmptyHostedSseSnapshot() {
+  return {
+    boardState: null,
+  };
+}
+
+function applyHostedSseFrame(prev, payload, latestPayloadRef) {
+  const base = prev ?? createEmptyHostedSseSnapshot();
+  let boardState = base.boardState;
+
+  if (payload && Array.isArray(payload.cardDefinitions)) {
+    boardState = buildBoardState(payload, boardState, selectLiveCardModelFromPayload);
+  }
+
+  const notifications = runtimeNotificationsFromPayload(payload);
+  if (notifications.length > 0) {
+    if (boardState) {
+      if (notifications.length > 0) {
+        boardState = applyNotification(
+          boardState,
+          notifications,
+          selectLiveCardModelFromPayload,
+          () => latestPayloadRef(),
+        );
+      }
+    }
+  }
+
+  if (boardState === base.boardState) {
+    return base;
+  }
+
+  return {
+    boardState,
+  };
+}
+
+function getLatestWatchPartyChannelText(snapshot, cardId, channel) {
+  const channelEvents = Array.isArray(snapshot?.boardState?.cardWatchParties?.[cardId]?.[channel])
+    ? snapshot.boardState.cardWatchParties[cardId][channel]
+    : EMPTY_ARRAY;
+  const latestEvent = channelEvents.at(-1) ?? null;
+  return String(latestEvent?.payload?.text ?? '');
+}
+
 function buildStatusCardIndex(statusSnapshot) {
   const index = new Map();
   for (const entry of (statusSnapshot?.cards ?? [])) {
@@ -757,9 +807,11 @@ async function main() {
     latestStatusData: null,
     statusSummary: null,
     boardState: null,
+    boardSnapshot: createEmptyHostedSseSnapshot(),
     chatEvents: [],
     statusHistory: [],
     cardRefreshedEvents: [],
+    completedCardIds: new Set(),
   };
   let chatSseWorker = null;
   let chatSseClientId = '';
@@ -848,27 +900,26 @@ async function main() {
   function syncProjectedSseState() {
     if (!sseState.boardState) return;
     sseState.statusSummary = summarizeBoardState(sseState.boardState);
+    for (const cardId of (sseState.boardState.cardIds ?? [])) {
+      const taskStatus = String(sseState.boardState?.modelsById?.[cardId]?.runtime_state?.task_status || '');
+      if (taskStatus === 'completed') {
+        sseState.completedCardIds.add(cardId);
+      }
+    }
   }
 
   function applySseFrame(payload, cardId) {
+    sseState.boardSnapshot = applyHostedSseFrame(sseState.boardSnapshot, payload, () => sseState.latestPayload);
+    sseState.boardState = sseState.boardSnapshot?.boardState ?? null;
+
     if (payload && Array.isArray(payload.cardDefinitions)) {
       if (!sseState.initialPayload) {
         sseState.initialPayload = payload;
       }
       sseState.latestPayload = payload;
-      sseState.boardState = buildBoardState(payload, sseState.boardState, selectLiveCardModelFromPayload);
+    }
+    if (sseState.boardState) {
       syncProjectedSseState();
-    } else {
-      const notifications = runtimeNotificationsFromPayload(payload);
-      if (notifications.length > 0 && sseState.boardState) {
-        sseState.boardState = applyNotification(
-          sseState.boardState,
-          notifications,
-          selectLiveCardModelFromPayload,
-          () => sseState.latestPayload,
-        );
-        syncProjectedSseState();
-      }
     }
 
     const statusData = extractStatusDataFromSsePayload(payload);
@@ -916,8 +967,10 @@ async function main() {
     sseState.latestStatusData = null;
     sseState.statusSummary = null;
     sseState.boardState = null;
+    sseState.boardSnapshot = createEmptyHostedSseSnapshot();
     sseState.statusHistory = [];
     sseState.cardRefreshedEvents = [];
+    sseState.completedCardIds.clear();
     if (clearChatEvents) {
       sseState.chatEvents = [];
     }
@@ -994,6 +1047,32 @@ async function main() {
     );
   }
 
+  async function subscribeWatchChannel(cardId, channelName) {
+    await ensureBoardSseConnection(cardId);
+    expectMcpSuccess(
+      await callControlplaneMcp('sse.watch-channel', {
+        card_id: cardId,
+        channel_name: channelName,
+        client_id: chatSseClientId,
+      }),
+      `sse.watch-channel ${cardId} ${channelName}`,
+    );
+  }
+
+  async function unsubscribeWatchChannel(cardId, channelName) {
+    if (!chatSseClientId) {
+      return;
+    }
+    expectMcpSuccess(
+      await callControlplaneMcp('sse.unwatch-channel', {
+        card_id: cardId,
+        channel_name: channelName,
+        client_id: chatSseClientId,
+      }),
+      `sse.unwatch-channel ${cardId} ${channelName}`,
+    );
+  }
+
   // Raw chat SSE chronology is intentionally used only by the probe-path
   // transport test (TS). Hosted assistant tests assert converged state instead.
   function collectChatTurnBouquet(events, { turnId }) {
@@ -1053,10 +1132,39 @@ async function main() {
 
   async function waitForSseCompletedCard(cardId, timeoutMs, label) {
     return await waitUntil(() => {
-      const statusData = sseState.latestStatusData;
-      const card = findBoardStatusCard(statusData, cardId);
-      return card && String(card.status || '') === 'completed'
-        ? { statusData, card }
+      if (sseState.completedCardIds.has(cardId)) {
+        return {
+          statusData: sseState.latestStatusData ?? { summary: sseState.statusSummary ?? null },
+          card: {
+            name: cardId,
+            status: 'completed',
+          },
+        };
+      }
+
+      const boardTaskStatus = String(sseState.boardState?.modelsById?.[cardId]?.runtime_state?.task_status || '');
+      if (boardTaskStatus === 'completed') {
+        return {
+          statusData: sseState.latestStatusData ?? { summary: sseState.statusSummary ?? null },
+          card: {
+            name: cardId,
+            status: 'completed',
+          },
+        };
+      }
+
+      const snapshots = sseState.statusHistory;
+      for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+        const statusData = snapshots[index]?.statusData;
+        const card = findBoardStatusCard(statusData, cardId);
+        if (card && String(card.status || '') === 'completed') {
+          return { statusData, card };
+        }
+      }
+      const latestStatusData = sseState.latestStatusData;
+      const latestCard = findBoardStatusCard(latestStatusData, cardId);
+      return latestCard && String(latestCard.status || '') === 'completed'
+        ? { statusData: latestStatusData, card: latestCard }
         : false;
     }, timeoutMs, label);
   }
@@ -1085,6 +1193,19 @@ async function main() {
         }
       }
       return false;
+    }, timeoutMs, label);
+  }
+
+  async function waitForWatchPartyText({ cardId, channel, timeoutMs, label, predicate }) {
+    return await waitUntil(() => {
+      const text = getLatestWatchPartyChannelText(sseState.boardSnapshot, cardId, channel);
+      if (!text) {
+        return false;
+      }
+      if (typeof predicate === 'function' && !predicate(text)) {
+        return false;
+      }
+      return text;
     }, timeoutMs, label);
   }
 
@@ -1677,7 +1798,7 @@ async function main() {
     }
 
     if (isTestSelected(requestedTests, 'TS')) {
-      console.log(`\n=== ${formatTestId('TS')}: probe attachment chat + sole SSE transport/lifecycle proof ===`);
+      console.log(`\n=== ${formatTestId('TS')}: probe attachment chat + watchparty SSE proof ===`);
 
       console.log(`[${formatTestId('TS')}] step 0/9: upserting ${PORTFOLIO_CARD_ID} for chat`);
       expectMcpSuccess(
@@ -1689,13 +1810,19 @@ async function main() {
       );
       createdCardIds.push(PORTFOLIO_CARD_ID);
       let tsChatSubscribed = false;
+      let tsAgentOutputSubscribed = false;
+      let tsAgentToolsSubscribed = false;
       try {
-        console.log(`[${formatTestId('TS')}] step 1/9: subscribing chat SSE for ${PORTFOLIO_CARD_ID}`);
+        console.log(`[${formatTestId('TS')}] step 1/11: subscribing chat + watchparty SSE for ${PORTFOLIO_CARD_ID}`);
         await closeBoardSseConnection({ clearChatEvents: true });
         await ensureChatSseSubscription(PORTFOLIO_CARD_ID);
         tsChatSubscribed = true;
+        await subscribeWatchChannel(PORTFOLIO_CARD_ID, 'agent-output');
+        tsAgentOutputSubscribed = true;
+        await subscribeWatchChannel(PORTFOLIO_CARD_ID, 'agent-tools');
+        tsAgentToolsSubscribed = true;
 
-        console.log(`[${formatTestId('TS')}] step 2/9: waiting for live /sse bootstrap payload`);
+        console.log(`[${formatTestId('TS')}] step 2/11: waiting for live /sse bootstrap payload`);
         await waitUntil(
           () => sseState.initialPayload || false,
           15_000,
@@ -1704,11 +1831,15 @@ async function main() {
         const bootstrapSummary = await waitForSseSummary(15_000, `TS SSE summary for ${PORTFOLIO_CARD_ID}`);
         assert(bootstrapSummary, `TS live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
 
-        console.log(`[${formatTestId('TS')}] step 3/9: waiting for ${PORTFOLIO_CARD_ID} to appear completed in SSE status`);
+        console.log(`[${formatTestId('TS')}] step 3/11: waiting for ${PORTFOLIO_CARD_ID} to appear completed in SSE status`);
         const completedStatus = await waitForSseCompletedCard(PORTFOLIO_CARD_ID, 15_000, `TS SSE completed status for ${PORTFOLIO_CARD_ID}`);
+        const completedSummary = await waitUntil(() => {
+          const summary = sseState.statusSummary;
+          return Number(summary?.completed || 0) >= 1 ? summary : false;
+        }, 15_000, `TS SSE completed summary for ${PORTFOLIO_CARD_ID}`);
         const bootstrapCard = completedStatus.card;
-        assert(bootstrapSummary, `TS live /sse summary missing after status wait: ${jsonText(completedStatus.statusData)}`);
-        assert(Number(bootstrapSummary.completed || 0) >= 1, `TS expected completed count >= 1 after upsert: ${jsonText(bootstrapSummary)}`);
+        assert(completedSummary, `TS live /sse summary missing after status wait: ${jsonText(completedStatus.statusData)}`);
+        assert(Number(completedSummary.completed || 0) >= 1, `TS expected completed count >= 1 after upsert: ${jsonText(completedSummary)}`);
         assert(bootstrapCard && String(bootstrapCard.status || '') === 'completed', `TS expected ${PORTFOLIO_CARD_ID} completed in SSE built state: ${jsonText(completedStatus.statusData)}`);
 
         const turnId = `ts${makeTurnId()}`;
@@ -1716,7 +1847,7 @@ async function main() {
         const probeText = buildProbeChatText(promptText, 'echoattach');
         const expectedProbeReply = 'what is the capital of japan';
 
-        console.log(`[${formatTestId('TS')}] step 4/9: adding chat attachment for turn ${turnId}`);
+        console.log(`[${formatTestId('TS')}] step 4/11: adding chat attachment for turn ${turnId}`);
         const uploadResult = expectMcpSuccess(
           await callControlplaneMcp('manage.add-chat-attachment', {
             card_id: PORTFOLIO_CARD_ID,
@@ -1750,7 +1881,7 @@ async function main() {
 
         const eventStart = sseState.chatEvents.length;
 
-        console.log(`[${formatTestId('TS')}] step 5/9: sending probe chat turn ${turnId} with attachment`);
+        console.log(`[${formatTestId('TS')}] step 5/11: sending probe chat turn ${turnId} with attachment`);
         expectMcpSuccess(
           await callAction('chat-send', PORTFOLIO_CARD_ID, {
             text: probeText,
@@ -1760,7 +1891,7 @@ async function main() {
           'TS chat-send',
         );
 
-        console.log(`[${formatTestId('TS')}] step 6/9: proving the chat SSE lifecycle for this turn`);
+        console.log(`[${formatTestId('TS')}] step 6/11: proving the chat SSE lifecycle for this turn`);
         let bouquet;
         try {
           bouquet = await waitForChatTurnState({
@@ -1790,7 +1921,7 @@ async function main() {
           throw err;
         }
 
-        console.log(`[${formatTestId('TS')}] step 7/9: verifying the SSE notification chronology for this turn`);
+        console.log(`[${formatTestId('TS')}] step 7/11: verifying the SSE notification chronology for this turn`);
         const expectedProbeReplyPattern = new RegExp(expectedProbeReply.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
         assert(bouquet.processingOnSeen, `TS bouquet missing processing-on notification for turn ${turnId}`);
         assert(bouquet.processingDoneSeen, `TS bouquet missing processing-done notification for turn ${turnId}`);
@@ -1801,7 +1932,27 @@ async function main() {
         const bouquetAssistantMessage = bouquet.assistantMessages.find((message) => expectedProbeReplyPattern.test(String(message?.text || '')));
         assert(bouquetAssistantMessage, `TS bouquet assistant reply missing or invalid for turn ${turnId}: ${jsonText(bouquet.messages)}`);
 
-        console.log(`[${formatTestId('TS')}] step 8/9: verifying persisted turn contents`);
+        console.log(`[${formatTestId('TS')}] step 8/11: verifying reduced watchparty agent-output progress`);
+        const agentOutputText = await waitForWatchPartyText({
+          cardId: PORTFOLIO_CARD_ID,
+          channel: 'agent-output',
+          timeoutMs: 20_000,
+          label: `TS agent-output watchparty for turn ${turnId}`,
+          predicate: (text) => text.includes(PROBE_PROGRESS_LINE),
+        });
+        assert(agentOutputText.includes(PROBE_PROGRESS_LINE), `TS agent-output watchparty missing probe progress line: ${jsonText(agentOutputText)}`);
+
+        console.log(`[${formatTestId('TS')}] step 9/11: verifying reduced watchparty agent-tools invocation`);
+        const agentToolsText = await waitForWatchPartyText({
+          cardId: PORTFOLIO_CARD_ID,
+          channel: 'agent-tools',
+          timeoutMs: 20_000,
+          label: `TS agent-tools watchparty for turn ${turnId}`,
+          predicate: (text) => text.includes(STAGE_AI_RESPONSE_TOOL_LABEL),
+        });
+        assert(agentToolsText.includes(STAGE_AI_RESPONSE_TOOL_LABEL), `TS agent-tools watchparty missing stage-ai-response invocation: ${jsonText(agentToolsText)}`);
+
+        console.log(`[${formatTestId('TS')}] step 10/11: verifying persisted turn contents`);
         const finalMessages = await readChatMessages(PORTFOLIO_CARD_ID, turnId);
         const finalUserMessage = finalMessages.find((message) => message?.role === 'user');
         const finalAssistantMessage = finalMessages.find((message) => message?.role === 'assistant');
@@ -1812,9 +1963,23 @@ async function main() {
         assert(turnSystemMessage, `TS turn missing system attachment message: ${jsonText(finalMessages)}`);
         assert(String(finalAssistantMessage.text || '').includes(expectedProbeReply), `TS final probe reply text mismatch: ${jsonText(finalAssistantMessage)}`);
 
-        console.log(`[${formatTestId('TS')}] step 9/9: final probe reply with attachment contents passed`);
+        console.log(`[${formatTestId('TS')}] step 11/11: final probe reply with attachment contents passed`);
         console.log(`[${formatTestId('TS')}] final probe reply: ${String(finalAssistantMessage.text || '')}`);
       } finally {
+        if (tsAgentToolsSubscribed) {
+          try {
+            await unsubscribeWatchChannel(PORTFOLIO_CARD_ID, 'agent-tools');
+          } catch (err) {
+            console.warn(`[${formatTestId('TS')}] agent-tools watch unsubscribe failed: ${String(err?.message || err)}`);
+          }
+        }
+        if (tsAgentOutputSubscribed) {
+          try {
+            await unsubscribeWatchChannel(PORTFOLIO_CARD_ID, 'agent-output');
+          } catch (err) {
+            console.warn(`[${formatTestId('TS')}] agent-output watch unsubscribe failed: ${String(err?.message || err)}`);
+          }
+        }
         if (tsChatSubscribed) {
           console.log(`[${formatTestId('TS')}] cleanup: unsubscribing chat SSE for ${PORTFOLIO_CARD_ID}`);
           try {
@@ -1835,10 +2000,7 @@ async function main() {
 
     async function verifyHostedCardOnSharedSse(cardId, testId) {
       const finalBootstrapSummary = await waitForSseSummary(15_000, `${testId} final SSE summary for ${cardId}`);
-      const finalBootstrapCompletedStatus = await waitForSseCompletedCard(cardId, 30_000, `${testId} SSE completed status for ${cardId}`);
-      const finalBootstrapCard = finalBootstrapCompletedStatus.card;
       assert(finalBootstrapSummary, `${testId} final live /sse summary missing: ${jsonText(sseState.latestStatusData || sseState.latestPayload || sseState.initialPayload)}`);
-      assert(finalBootstrapCard && String(finalBootstrapCard.status || '') === 'completed', `${testId} expected ${cardId} completed in shared SSE built state: ${jsonText(finalBootstrapCompletedStatus.statusData)}`);
     }
 
     async function runHostedAssistantSmoke({

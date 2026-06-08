@@ -1,10 +1,30 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {
+  AGENT_OUTPUT_FILE_STEM,
   getEnhancedChatMessages,
   invokeMcpServerTool,
 } from '../shared.js';
 
 const FILE_INDEX_PATTERN = /#(\d+)\s*$/;
 const ATTACHMENT_MARKER = '[attachment]';
+const PROBE_PROGRESS_LINE = 'Probe progress: staging assistant reply';
+
+function appendProbeOutputProgress(context, text) {
+  const watchPartyDir = typeof context?.watchPartyDir === 'string' ? context.watchPartyDir.trim() : '';
+  const line = typeof text === 'string' ? text.trim() : '';
+  if (!watchPartyDir || !line) {
+    return;
+  }
+
+  const outputPath = path.join(watchPartyDir, AGENT_OUTPUT_FILE_STEM);
+  try {
+    fs.mkdirSync(watchPartyDir, { recursive: true });
+    fs.appendFileSync(outputPath, `${line}\n`, 'utf8');
+  } catch {
+    // Probe progress output is best-effort only.
+  }
+}
 
 async function stageProbeReply({ context, text, files }) {
   const payload = await invokeMcpServerTool(context, 'liveboards.stage-ai-response-and-any-attachments', {
@@ -158,6 +178,7 @@ async function resolveProbeResponseText(context, config = {}) {
 
 export async function invokeAssistant(context, config = {}) {
   const probeResponseText = await resolveProbeResponseText(context, config);
+  appendProbeOutputProgress(context, PROBE_PROGRESS_LINE);
   await stageProbeReply({
     context,
     text: probeResponseText,

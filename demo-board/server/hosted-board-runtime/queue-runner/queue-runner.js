@@ -327,9 +327,11 @@ async function postMcp(url, tool, args = {}) {
   return payload;
 }
 
-function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, serverUrl, mcpServerUrl, apiBasePrefix }) {
+function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, serverUrl, notifyServerUrl, notifyUrl, mcpServerUrl, apiBasePrefix, watchpartyFileRegistry }) {
   const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
     serverUrl,
+    notifyServerUrl,
+    notifyUrl,
     mcpServerUrl,
     apiBasePrefix,
     configDir: runtime.configDir,
@@ -337,6 +339,7 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
     chatFlowTimeoutMs: runtime.chatFlowTimeoutMs,
     chatInvokeRefTimeoutMs: runtime.chatInvokeRefTimeoutMs,
     chatCopilotTimeoutMs: runtime.chatCopilotTimeoutMs,
+    watchpartyFileRegistry,
   });
   const queueStoreRef = bundle.boardContextConfig.queueStoreRef;
   if (!queueStoreRef) {
@@ -449,8 +452,11 @@ async function main() {
       taskExecutor,
       controlplaneUrl,
       serverUrl: callbackServerOrigin,
+      notifyServerUrl: callbackServerOrigin,
+      notifyUrl: `${apiBaseUrl}/notify-q`,
       mcpServerUrl: hostConfig.mcpServerUrl,
       apiBasePrefix: hostConfig.apiBasePrefix,
+      watchpartyFileRegistry: adapterServices?.watchpartyFileRegistry,
     }), boardId, processLogger);
 
     const wakeTriggers = new Map(
@@ -480,6 +486,12 @@ async function main() {
     for (const stop of stopSubscriptions.splice(0)) {
       try {
         stop();
+      } catch {
+      }
+    }
+    if (typeof adapterServices?.watchpartyFileRegistry?.dispose === 'function') {
+      try {
+        adapterServices.watchpartyFileRegistry.dispose();
       } catch {
       }
     }
