@@ -444,7 +444,6 @@ async function getHostedRuntimeContext() {
         ? await initializeLocalFsServices(hostConfig.localfs)
         : await initializeFirebaseServices(hostConfig.firebase);
       const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
-      await dynamicBoards.ensureSeeded();
       const firebaseServices = hostConfig.storageAdapter === 'firebase' ? adapterServices : null;
       return { hostConfig, firebaseServices, dynamicBoards };
     })();
@@ -666,7 +665,7 @@ const portArg = readCliOptionValue(cliArgs, '--port');
 const cliBoardId = readCliOptionValue(cliArgs, '--board-id') || readCliOptionValue(cliArgs, '--board');
 const requestedTests = parseRequestedTests(readCliOptionValue(cliArgs, '--run-tests'));
 
-const BOARD_ID = cliBoardId || 'live-test';
+const BOARD_ID = cliBoardId || 'live-test-backend';
 const BOARD_SERVER_URL = portArg ? `http://127.0.0.1:${portArg}` : 'http://127.0.0.1:7799';
 const API_BASE = `${BOARD_SERVER_URL}/api/boards/${encodeURIComponent(BOARD_ID)}`;
 
@@ -777,6 +776,7 @@ async function main() {
           ai: 'copilot',
           aiWorkspaceTemplate: 'default',
           refsTemplate: 'localfs-default',
+          uiTemplate: 'default',
         },
       },
     });

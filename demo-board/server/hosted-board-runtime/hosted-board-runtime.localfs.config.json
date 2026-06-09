@@ -30,13 +30,6 @@
       "aiWorkspaceTemplate": "default",
       "refsTemplate": "localfs-default",
       "uiTemplate": "default"
-    },
-    "live-test": {
-      "label": "Live Test",
-      "ai": "copilot",
-      "aiWorkspaceTemplate": "default",
-      "refsTemplate": "localfs-default",
-      "uiTemplate": "default"
     }
   }
 }

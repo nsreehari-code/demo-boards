@@ -6,11 +6,12 @@ const { spawn } = require('node:child_process');
 
 const boardDir = path.resolve(__dirname, '..');
 const runtimeDir = path.join(boardDir, 'server', 'hosted-board-runtime');
+const prepareHostsEntry = path.join(runtimeDir, 'scripts', 'prepare-local-hosts.js');
 const controlfaceEntry = path.join(runtimeDir, 'http-mcp-controlface', 'controlface-server.js');
 const queueRunnerEntry = path.join(runtimeDir, 'queue-runner', 'queue-runner.js');
 const localfsConfigArgv = ['--config', './hosted-board-runtime.localfs.config.json'];
 
-for (const entryPath of [controlfaceEntry, queueRunnerEntry]) {
+for (const entryPath of [prepareHostsEntry, controlfaceEntry, queueRunnerEntry]) {
   if (!fs.existsSync(entryPath)) {
     console.error(`[start-local-hosts] Missing ${entryPath}`);
     process.exit(1);
@@ -19,6 +20,41 @@ for (const entryPath of [controlfaceEntry, queueRunnerEntry]) {
 
 const sharedEnv = { ...process.env };
 let shuttingDown = false;
+let runtimeChildren = [];
+
+function shutdown(exitCode = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  for (const runtimeChild of runtimeChildren) {
+    if (runtimeChild && !runtimeChild.killed) runtimeChild.kill('SIGTERM');
+  }
+  setTimeout(() => {
+    for (const runtimeChild of runtimeChildren) {
+      if (runtimeChild && !runtimeChild.killed) runtimeChild.kill('SIGKILL');
+    }
+    process.exit(exitCode);
+  }, 1200);
+}
+
+function prepareHosts() {
+  const child = spawn(process.execPath, [prepareHostsEntry, ...localfsConfigArgv], {
+    cwd: runtimeDir,
+    env: sharedEnv,
+    stdio: 'inherit',
+  });
+  child.on('exit', (code) => {
+    if ((code ?? 0) !== 0) {
+      console.error(`[start-local-hosts] prepare-local-hosts exited with code ${code ?? 0}`);
+      process.exit(code ?? 1);
+    }
+    const controlface = startRuntime(controlfaceEntry, 'controlface');
+    const queueRunner = startRuntime(queueRunnerEntry, 'queue-runner');
+    runtimeChildren = [controlface, queueRunner];
+
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+  });
+}
 
 function startRuntime(entryPath, label) {
   const child = spawn(process.execPath, [entryPath, ...localfsConfigArgv], {
@@ -29,27 +65,9 @@ function startRuntime(entryPath, label) {
   child.on('exit', (code) => {
     if (shuttingDown) return;
     console.error(`[start-local-hosts] ${label} exited with code ${code ?? 0}`);
-    shutdown();
+    shutdown(code ?? 0);
   });
   return child;
 }
 
-const controlface = startRuntime(controlfaceEntry, 'controlface');
-const queueRunner = startRuntime(queueRunnerEntry, 'queue-runner');
-
-function shutdown() {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  for (const child of [controlface, queueRunner]) {
-    if (child && !child.killed) child.kill('SIGTERM');
-  }
-  setTimeout(() => {
-    for (const child of [controlface, queueRunner]) {
-      if (child && !child.killed) child.kill('SIGKILL');
-    }
-    process.exit(0);
-  }, 1200);
-}
-
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+prepareHosts();

@@ -400,7 +400,6 @@ async function main() {
     ? await initializeLocalFsServices(hostConfig.localfs)
     : await initializeFirebaseServices(hostConfig.firebase);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
-  await dynamicBoards.ensureSeeded();
   const stopSubscriptions = [];
   const watchedBoards = new Map();
   let keepAliveTimer = null;

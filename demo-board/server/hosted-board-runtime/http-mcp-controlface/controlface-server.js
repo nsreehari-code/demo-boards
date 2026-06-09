@@ -19,6 +19,10 @@ import {
   buildHostedBoardRuntimeNeeds,
   executeChatAgentRequest,
 } from '../host-shared/chat-agent-handler/execute-chat-agent-request.js';
+import {
+  boardNeedsAiWorkspaceSetup,
+  runSetupSingleAiWorkspaceScript,
+} from '../host-shared/ai-workspace-setup.js';
 import { createLogger, HOSTED_SERVER_LOG_PATH } from '../host-shared/logging.js';
 import { deriveCardIdFromLogId, resolveBoardAgentToolsLogFilePath } from '../../chat-flow/shared.js';
 import {
@@ -722,37 +726,17 @@ async function buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards) {
   const runtimes = new Map();
   const boardConfigs = await dynamicBoards.list();
   for (const boardConfig of boardConfigs) {
-    await runSetupSingleAiWorkspaceScript(boardConfig.id, hostConfig.configPath);
     runtimes.set(boardConfig.id, await buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig, processLogger));
   }
   return runtimes;
 }
 
-function runSetupSingleAiWorkspaceScript(boardId, configPath) {
-  return new Promise((resolve, reject) => {
-    const args = [SETUP_SCRIPT_PATH, boardId];
-    if (configPath) {
-      args.push('--config', configPath);
-    }
-    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const stdoutChunks = [];
-    const stderrChunks = [];
-    child.stdout.on('data', (chunk) => stdoutChunks.push(chunk));
-    child.stderr.on('data', (chunk) => stderrChunks.push(chunk));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      const stdout = Buffer.concat(stdoutChunks).toString('utf8');
-      const stderr = Buffer.concat(stderrChunks).toString('utf8');
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        const err = new Error(`setup-single-ai-workspace.js exited with code ${code}: ${stderr || stdout}`);
-        err.stdout = stdout;
-        err.stderr = stderr;
-        reject(err);
-      }
-    });
-  });
+async function ensureBoardAiWorkspaceReady(boardConfig, hostConfig) {
+  if (!boardNeedsAiWorkspaceSetup(boardConfig)) {
+    return;
+  }
+
+  await runSetupSingleAiWorkspaceScript(SETUP_SCRIPT_PATH, boardConfig.id, hostConfig.configPath);
 }
 
 function summarizeBoardForList(board) {
@@ -953,7 +937,7 @@ async function handleManageBoardsRoute({
       }
       throw err;
     }
-    await runSetupSingleAiWorkspaceScript(id, hostConfig.configPath);
+    await ensureBoardAiWorkspaceReady(board, hostConfig);
     const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
     boardRuntimes.set(id, runtimePair);
     await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
@@ -997,7 +981,7 @@ async function handleManageBoardsRoute({
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
     }
-    await runSetupSingleAiWorkspaceScript(id, hostConfig.configPath);
+    await ensureBoardAiWorkspaceReady(board, hostConfig);
     const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
     boardRuntimes.set(id, runtimePair);
     await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
@@ -1016,7 +1000,7 @@ async function handleManageBoardsRoute({
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
     }
-    await runSetupSingleAiWorkspaceScript(id, hostConfig.configPath);
+    await ensureBoardAiWorkspaceReady(board, hostConfig);
     const runtimePair = boardRuntimes.get(id);
     if (!runtimePair) {
       sendJson(res, 409, { status: 'error', error: `board runtime for '${id}' is not active` });
@@ -1155,7 +1139,6 @@ async function main() {
     ? await initializeLocalFsServices(hostConfig.localfs)
     : await initializeFirebaseServices(hostConfig.firebase);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
-  await dynamicBoards.ensureSeeded();
   const boardRuntimes = await buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards);
 
   const server = http.createServer(async (req, res) => {

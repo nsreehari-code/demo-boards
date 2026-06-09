@@ -32,7 +32,6 @@ const adapterServices = hostConfig.storageAdapter === 'localfs'
   ? await initializeLocalFsServices(hostConfig.localfs)
   : await initializeFirebaseServices(hostConfig.firebase);
 const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
-await dynamicBoards.ensureSeeded();
 const boardConfig = await dynamicBoards.get(boardIdArg);
 if (!boardConfig) {
   console.error(`[${TAG}] Board "${boardIdArg}" not found in boards-index for ${hostConfig.configPath || defaultConfigPath}`);
