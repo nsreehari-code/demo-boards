@@ -1,0 +1,87 @@
+{
+  "boardLabel": "Foundry AI Brief",
+  "boardSubtitle": "Single-card Azure AI Foundry brief template",
+  "cards": [
+    {
+      "id": "card-foundry-brief",
+      "meta": {
+        "title": "AI Brief",
+        "tags": [
+          "foundry",
+          "ai",
+          "live"
+        ],
+        "desc": "Generates a concise AI brief for any portfolio or market topic using Azure AI Foundry."
+      },
+      "requires": [],
+      "source_defs": [
+        {
+          "bindTo": "ai_brief",
+          "outputFile": "card-foundry-brief.json",
+          "projections": {
+            "query": "card_data.query"
+          },
+          "foundry": {
+            "prompt_template": "{{query}}\n\nRespond concisely. Plain text or short markdown only, no headers. Max 200 words."
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "brief_text",
+          "expr": "fetched_sources.ai_brief ? fetched_sources.ai_brief : '_Hit refresh to generate the brief._'"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "form",
+            "label": "Topic",
+            "data": {
+              "writeTo": "card_data",
+              "saveLabel": "Apply",
+              "discardLabel": "Reset",
+              "fields": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "title": "Question or topic"
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Brief",
+            "data": {
+              "bind": "computed_values.brief_text"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 6,
+            "order": 20
+          },
+          "canvas": {
+            "x": 1200,
+            "y": 900,
+            "w": 520,
+            "h": 380
+          }
+        },
+        "features": {
+          "refresh": true
+        }
+      },
+      "card_data": {
+        "query": "Give a brief summary of current market themes to watch for an equity portfolio investor."
+      }
+    }
+  ]
+}

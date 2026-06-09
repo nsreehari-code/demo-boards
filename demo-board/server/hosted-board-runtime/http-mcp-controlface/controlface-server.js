@@ -25,6 +25,10 @@ import {
   createHostedImmediateTaskExecutorRef,
   loadTaskExecutorModule,
 } from '../host-shared/worker-modules/task-executor-module.js';
+import {
+  getSampleTemplateEnvelope,
+  listSampleTemplateEntries,
+} from '../host-shared/mcp-extras/sample-template-catalog.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,7 +76,7 @@ function resolveControlfaceRouteLabel(parsedUrl, details = {}) {
 function formatControlfacePickupMessage(req, parsedUrl, details = {}) {
   const method = normalizeText(req?.method) || 'GET';
   const routeLabel = resolveControlfaceRouteLabel(parsedUrl, details);
-  if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions') {
+  if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions' || details.routeKind === 'mcp-extras') {
     return joinParts([method, routeLabel, normalizeText(details.toolName), normalizeText(details.cardId), normalizeText(details.turnId)]);
   }
   return joinParts([method, routeLabel]);
@@ -82,7 +86,7 @@ function formatControlfaceCompletionMessage(req, parsedUrl, details = {}, status
   const method = normalizeText(req?.method) || 'GET';
   const status = String(statusCode || 0);
   const routeLabel = resolveControlfaceRouteLabel(parsedUrl, details);
-  if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions') {
+  if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions' || details.routeKind === 'mcp-extras') {
     return joinParts([method, routeLabel, normalizeText(details.toolName), normalizeText(details.cardId), normalizeText(details.turnId), status, normalizeText(details.errorMessage)]);
   }
   return joinParts([method, routeLabel, status, normalizeText(details.errorMessage)]);
@@ -236,7 +240,7 @@ function formatMcpLogDetails(toolName, body) {
       break;
     case 'manage.upload-card-file':
       parts.push(phraseForCard(cardId));
-      parts.push(phraseForFileName(readMcpArg(args, 'file_name', 'fileName')));
+      parts.push(phraseForFileName(readMcpArg(args, 'key', 'templateKey')));
       break;
     case 'stage-ai-response-and-any-attachments': {
       parts.push(phraseForCard(cardId));
@@ -1117,6 +1121,32 @@ async function handleManageBoardsRoute({
   sendJson(res, 400, { status: 'error', error: `unknown subcommand '${subcommand}'` });
 }
 
+async function handleMcpExtrasRoute({ rawBody, res, hostConfig }) {
+  const body = parseJsonObjectOrEmpty(rawBody);
+  const toolName = typeof body?.tool === 'string' ? body.tool.trim() : '';
+  const args = normalizeMcpArgs(body);
+
+  if (!toolName) {
+    sendJson(res, 400, { error: 'tool is required' });
+    return;
+  }
+
+  if (toolName === 'explore.list-sample-templates') {
+    sendJson(res, 200, listSampleTemplateEntries(hostConfig));
+    return;
+  }
+
+  if (toolName === 'explore.get-sample-template') {
+    const key = typeof readMcpArg(args, 'key', 'templateKey') === 'string'
+      ? readMcpArg(args, 'key', 'templateKey').trim()
+      : '';
+    sendJson(res, 200, getSampleTemplateEnvelope(hostConfig, key));
+    return;
+  }
+
+  sendJson(res, 400, { error: `unknown mcp-extras tool '${toolName}'` });
+}
+
 async function main() {
   const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'controlface');
@@ -1197,6 +1227,30 @@ async function main() {
           payload.data = err.validation;
         }
         sendJson(res, statusCode, payload);
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && parsedUrl.pathname === '/mcp-extras') {
+      const rawBody = await readRawRequestBody(req);
+      const body = parseJsonObjectOrEmpty(rawBody);
+      requestDetails = {
+        routeKind: 'mcp-extras',
+        toolName: typeof body?.tool === 'string' ? body.tool.trim() : '',
+      };
+      requestLogger = processLogger.child(normalizeControlfaceScope('mcp-extras', '', boardRuntimes));
+      requestLogger.info(formatControlfacePickupMessage(req, parsedUrl, requestDetails));
+      res.once('finish', logCompletionOnce);
+      res.once('close', logCompletionOnce);
+      try {
+        await handleMcpExtrasRoute({ rawBody, res, hostConfig });
+      } catch (err) {
+        const statusCode = Number.isInteger(err?.statusCode) && err.statusCode >= 400 ? err.statusCode : 500;
+        sendJson(res, statusCode, {
+          error: typeof err?.message === 'string' && err.message.trim()
+            ? err.message.trim()
+            : 'mcp-extras request failed',
+        });
       }
       return;
     }

@@ -172,6 +172,18 @@ function requireBoardId(args) {
   return boardId;
 }
 
+function isBoardScopedTool(tool) {
+  return tool?.config?.boardScoped !== false;
+}
+
+function resolveRouteKind(tool, upstreamTool) {
+  const configuredRouteKind = typeof tool?.config?.routeKind === 'string' ? tool.config.routeKind.trim() : '';
+  if (configuredRouteKind) {
+    return configuredRouteKind;
+  }
+  return upstreamTool === 'inspect.file-contents' ? 'mcp-raw' : 'mcp';
+}
+
 function resolveUpstreamTool(tool) {
   const configuredTool = typeof tool?.config?.remoteTool === 'string' && tool.config.remoteTool.trim()
     ? tool.config.remoteTool.trim()
@@ -236,14 +248,17 @@ async function callBoardServer(routeUrl, payload, responseType) {
 }
 
 export async function handleLiveboardsTool(args, tool) {
-  const boardId = requireBoardId(args);
   const upstreamTool = resolveUpstreamTool(tool);
+  const routeKind = resolveRouteKind(tool, upstreamTool);
+  const boardScoped = isBoardScopedTool(tool);
+  const boardId = boardScoped ? requireBoardId(args) : '';
   const upstreamArgs = stripLocalArgs(args);
   const liveboardsConfig = loadLiveboardsConfig(tool);
   const boardServerBaseUrl = liveboardsConfig.boardServerUrl.replace(/\/+$/, '');
-  const isRawTool = upstreamTool === 'inspect.file-contents';
-  const routePath = isRawTool ? 'mcp-raw' : 'mcp';
-  const routeUrl = `${boardServerBaseUrl}/api/boards/${encodeURIComponent(boardId)}/${routePath}`;
+  const isRawTool = routeKind === 'mcp-raw';
+  const routeUrl = boardScoped
+    ? `${boardServerBaseUrl}/api/boards/${encodeURIComponent(boardId)}/${routeKind}`
+    : `${boardServerBaseUrl}/${routeKind}`;
   const payload = {
     tool: upstreamTool,
     args: upstreamArgs,

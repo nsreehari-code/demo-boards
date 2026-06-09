@@ -11,6 +11,46 @@
   },
   "tools": [
     {
+      "name": "liveboards.explore.list-sample-templates",
+      "title": "Live Boards Explore List Sample Templates",
+      "description": "List backend-owned sample card templates exposed by the live board controlface.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "explore.list-sample-templates",
+        "routeKind": "mcp-extras",
+        "boardScoped": false,
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "liveboards.explore.get-sample-template",
+      "title": "Live Boards Explore Get Sample Template",
+      "description": "Read one backend-owned sample card template payload by template key.",
+      "handler": "liveboards.mcp",
+      "config": {
+        "remoteTool": "explore.get-sample-template",
+        "routeKind": "mcp-extras",
+        "boardScoped": false,
+        "configPath": "../liveboards.config.json"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Opaque template key from explore.list-sample-templates."
+          }
+        },
+        "required": ["key"],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "liveboards.discover.source-kinds",
       "title": "Live Boards Discover Source Kinds",
       "description": "Discover the source kinds supported by a live board.",

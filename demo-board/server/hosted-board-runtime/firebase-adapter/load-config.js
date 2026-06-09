@@ -271,6 +271,30 @@ function resolveBoardsIndexRef(config, tokens = {}) {
   };
 }
 
+function resolveConfiguredHostPath(configDir, rawValue, tokens = {}) {
+  if (typeof rawValue !== 'string' || !rawValue.trim()) {
+    return '';
+  }
+  return resolveConfigRelativePath(configDir, replaceTemplateTokens(rawValue.trim(), tokens));
+}
+
+function resolveSampleTemplateCatalogConfig(config, configDir, tokens = {}) {
+  const source = config?.sampleTemplateCatalog && typeof config.sampleTemplateCatalog === 'object' && !Array.isArray(config.sampleTemplateCatalog)
+    ? config.sampleTemplateCatalog
+    : {};
+  const dir = resolveConfiguredHostPath(configDir, source.dir, tokens) || path.resolve(configDir, 'sample-card-templates');
+  const rawIndexFile = typeof source.indexFile === 'string' ? source.indexFile.trim() : '';
+  const indexFile = rawIndexFile
+    ? (path.isAbsolute(replaceTemplateTokens(rawIndexFile, tokens))
+        ? path.normalize(replaceTemplateTokens(rawIndexFile, tokens))
+        : path.resolve(dir, replaceTemplateTokens(rawIndexFile, tokens)))
+    : path.resolve(dir, '_index.json');
+  return {
+    dir,
+    indexFile,
+  };
+}
+
 export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv.slice(2), processName = '') {
   const configPath = parseCliConfigPath(defaultConfigPath, cliArgs);
   const rawConfig = readJsonFile(configPath);
@@ -293,6 +317,7 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
     : {};
   const sampleBoards = collectSampleBoards(config);
   const boardsIndexRef = resolveBoardsIndexRef(config, hostTokens);
+  const sampleTemplateCatalog = resolveSampleTemplateCatalogConfig(config, configDir, hostTokens);
 
   return {
     configPath,
@@ -326,6 +351,7 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
       : {},
     sampleBoards,
     boardsIndexRef,
+    sampleTemplateCatalog,
   };
 }
 

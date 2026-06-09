@@ -1,0 +1,34 @@
+{
+  "entries": [
+    {
+      "key": "portfolio-management",
+      "label": "Portfolio Management (8 cards)",
+      "description": "Portfolio monitoring, risk, and rebalance workflow starter board",
+      "fileName": "portfolio-management.json"
+    },
+    {
+      "key": "foundry-ai-brief",
+      "label": "Foundry AI Brief (1 card)",
+      "description": "Single-card Azure AI Foundry brief template",
+      "fileName": "foundry-ai-brief.json"
+    },
+    {
+      "key": "workiq-m365",
+      "label": "WorkIQ / M365 (3 cards)",
+      "description": "WorkIQ priorities, collaboration, and identity starter board",
+      "fileName": "workiq-m365.json"
+    },
+    {
+      "key": "teams-graph-api",
+      "label": "Teams Graph API (1 card)",
+      "description": "Teams channel reader starter board for Graph-backed exploration",
+      "fileName": "teams-graph-api.json"
+    },
+    {
+      "key": "wfpv1-prompt-tuning",
+      "label": "WFPv1 Prompt Tuning (15 cards)",
+      "description": "Alert-focused prompt tuning workbench with sample review, revisions, validation, and batch scoring",
+      "fileName": "wfpv1-prompt-tuning.json"
+    }
+  ]
+}

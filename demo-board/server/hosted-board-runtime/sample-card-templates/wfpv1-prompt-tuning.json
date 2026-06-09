@@ -1,0 +1,1648 @@
+{
+  "version": 1,
+  "boardId": "wfpv1-prompt-tuning",
+  "exportedAt": "2026-06-08T00:00:00.000Z",
+  "boardLabel": "WFPv1 Prompt Tuning",
+  "boardSubtitle": "Alert-focused prompt tuning workbench with sample review, revisions, validation, and batch scoring",
+  "cards": [
+    {
+      "id": "card-wfpv1-alert-context",
+      "meta": {
+        "title": "Alert Context",
+        "tags": [
+          "wfpv1",
+          "sample",
+          "alert"
+        ],
+        "desc": "Loads the current alert from the sample cursor and shows the concrete rows the prompt is being judged against."
+      },
+      "requires": [
+        "current_sample"
+      ],
+      "source_defs": [
+        {
+          "bindTo": "alert_context",
+          "outputFile": "card-wfpv1-alert-context.json",
+          "projections": {
+            "alert_id": "requires.current_sample.alert_id",
+            "preview_rows": "8"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.read_alert_context",
+            "input": {
+              "alertId": "{{alert_id}}",
+              "previewRows": "{{preview_rows}}"
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "summary",
+          "expr": "'**Alert:** ' & fetched_sources.alert_context.alert_id & '  \n**Ground Truth:** ' & fetched_sources.alert_context.ground_truth_label & '  \n**Preview Source:** ' & fetched_sources.alert_context.preview_source"
+        },
+        {
+          "bindTo": "sample_note",
+          "expr": "$exists(fetched_sources.alert_context.sample_note) and $trim(fetched_sources.alert_context.sample_note) != '' ? fetched_sources.alert_context.sample_note : 'Use this alert as a concrete tuning sample. Preview rows should make the failure mode visible.'"
+        },
+        {
+          "bindTo": "alert_metadata",
+          "expr": "fetched_sources.alert_context.alert_metadata"
+        },
+        {
+          "bindTo": "user_metadata",
+          "expr": "fetched_sources.alert_context.user_metadata"
+        },
+        {
+          "bindTo": "activity_preview_rows",
+          "expr": "fetched_sources.alert_context.activity_preview_rows"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "alert_context",
+          "ref": "fetched_sources.alert_context"
+        },
+        {
+          "bindTo": "ground_truth_label",
+          "ref": "fetched_sources.alert_context.ground_truth_label"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "label": "Summary",
+            "data": {
+              "bind": "computed_values.summary"
+            }
+          },
+          {
+            "kind": "list",
+            "label": "Alert Metadata",
+            "data": {
+              "bind": "computed_values.alert_metadata"
+            }
+          },
+          {
+            "kind": "list",
+            "label": "User Metadata",
+            "data": {
+              "bind": "computed_values.user_metadata"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Why This Sample",
+            "data": {
+              "bind": "computed_values.sample_note"
+            }
+          },
+          {
+            "kind": "table",
+            "label": "Activity Preview",
+            "data": {
+              "bind": "computed_values.activity_preview_rows",
+              "columns": [
+                "Date (UTC)",
+                "Activity",
+                "Object ID",
+                "Workload",
+                "Operation",
+                "Client IP",
+                "Printer name",
+                "AadDeviceId"
+              ],
+              "maxRows": 8
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 2
+          },
+          "canvas": {
+            "x": 40,
+            "y": 330,
+            "w": 520,
+            "h": 520
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-wfpv1-batch-runner",
+      "meta": {
+        "title": "Batch Runner",
+        "tags": [
+          "wfpv1",
+          "batch",
+          "runner"
+        ],
+        "desc": "Run the current prompt across a sample set to see whether changes generalize beyond one alert."
+      },
+      "requires": [
+        "batch_request",
+        "tuning_target",
+        "prompt_text"
+      ],
+      "source_defs": [
+        {
+          "bindTo": "batch_run",
+          "outputFile": "card-wfpv1-batch-run.json",
+          "projections": {
+            "sample_set_id": "requires.batch_request.sample_set_id",
+            "max_alerts": "requires.batch_request.max_alerts",
+            "execute_code": "requires.batch_request.execute_code",
+            "slot_id": "requires.tuning_target.prompt_slot",
+            "user_question": "requires.tuning_target.user_question",
+            "preview_rows": "requires.tuning_target.preview_rows",
+            "prompt_text": "requires.prompt_text"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.run_prompt_stage_batch",
+            "input": {
+              "sampleSetId": "{{sample_set_id}}",
+              "maxAlerts": "{{max_alerts}}",
+              "executeCode": "{{execute_code}}",
+              "slotId": "{{slot_id}}",
+              "userQuestion": "{{user_question}}",
+              "previewRows": "{{preview_rows}}",
+              "promptText": "{{prompt_text}}"
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "batch_summary",
+          "expr": "'**Set:** ' & fetched_sources.batch_run.sample_set_title & '  \n**Stage:** ' & fetched_sources.batch_run.stage_kind & '  \n**Samples:** ' & $string(fetched_sources.batch_run.scorecard.total_samples) & '  \n**Needs Revision:** ' & $string(fetched_sources.batch_run.scorecard.needs_revision_count)"
+        },
+        {
+          "bindTo": "batch_results_table",
+          "expr": "fetched_sources.batch_run.results"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "batch_stage_results",
+          "ref": "fetched_sources.batch_run"
+        },
+        {
+          "bindTo": "batch_scorecard",
+          "ref": "fetched_sources.batch_run.scorecard"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "label": "Batch Summary",
+            "data": {
+              "bind": "computed_values.batch_summary"
+            }
+          },
+          {
+            "kind": "table",
+            "label": "Per-Sample Results",
+            "data": {
+              "bind": "computed_values.batch_results_table",
+              "columns": [
+                "alert_id",
+                "ground_truth_label",
+                "status",
+                "failure_category",
+                "plan_step_count",
+                "has_code",
+                "execution_status"
+              ],
+              "maxRows": 12
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 10
+          },
+          "canvas": {
+            "x": 1200,
+            "y": 900,
+            "w": 560,
+            "h": 500
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-wfpv1-batch-scorecard",
+      "meta": {
+        "title": "Run Scorecard",
+        "tags": [
+          "wfpv1",
+          "batch",
+          "scorecard"
+        ],
+        "desc": "Summarize the accumulated run ledger so you can see whether the prompt is improving across iterated samples."
+      },
+      "requires": [
+        "batch_request",
+        "tuning_target",
+        "run_ledger"
+      ],
+      "source_defs": [
+        {
+          "bindTo": "ledger_summary",
+          "outputFile": "card-wfpv1-ledger-summary.json",
+          "projections": {
+            "sample_set_id": "requires.batch_request.sample_set_id",
+            "slot_id": "requires.tuning_target.prompt_slot",
+            "run_ledger": "requires.run_ledger"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.summarize_run_ledger",
+            "input": {
+              "sampleSetId": "{{sample_set_id}}",
+              "slotId": "{{slot_id}}",
+              "runLedger": "{{run_ledger}}"
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "scorecard_markdown",
+          "expr": "'**Total Samples:** ' & $string(fetched_sources.ledger_summary.scorecard.total_samples) & '  \n**Structured Plans:** ' & $string(fetched_sources.ledger_summary.scorecard.structured_plan_count) & '  \n**Code Extracted:** ' & $string(fetched_sources.ledger_summary.scorecard.code_extracted_count) & '  \n**Strong Candidates:** ' & $string(fetched_sources.ledger_summary.scorecard.strong_candidate_count) & '  \n**Partial Passes:** ' & $string(fetched_sources.ledger_summary.scorecard.partial_pass_count) & '  \n**Needs Revision:** ' & $string(fetched_sources.ledger_summary.scorecard.needs_revision_count)"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "run_ledger_summary",
+          "ref": "fetched_sources.ledger_summary"
+        },
+        {
+          "bindTo": "batch_failure_summary",
+          "ref": "fetched_sources.ledger_summary"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "label": "Scorecard",
+            "data": {
+              "bind": "computed_values.scorecard_markdown"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 11
+          },
+          "canvas": {
+            "x": 40,
+            "y": 1460,
+            "w": 520,
+            "h": 260
+          }
+        },
+        "features": {
+          "chat": true
+        }
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-wfpv1-code-exec",
+      "meta": {
+        "title": "Code Execution",
+        "tags": [
+          "wfpv1",
+          "code",
+          "execution"
+        ],
+        "desc": "Runs extracted code for the current sample through the existing ModularCode executor."
+      },
+      "requires": [
+        "current_sample",
+        "generated_code"
+      ],
+      "source_defs": [
+        {
+          "bindTo": "code_execution",
+          "outputFile": "card-wfpv1-code-execution.json",
+          "optionalForCompletionGating": true,
+          "projections": {
+            "alert_id": "requires.current_sample.alert_id",
+            "generated_code": "requires.generated_code"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.execute_generated_code",
+            "input": {
+              "alertId": "{{alert_id}}",
+              "code": "{{generated_code}}"
+            }
+          }
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "execution_result",
+          "ref": "fetched_sources.code_execution"
+        },
+        {
+          "bindTo": "execution_feedback",
+          "ref": "fetched_sources.code_execution.direct_feedback"
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "execution_summary",
+          "expr": "fetched_sources.code_execution.summary_markdown"
+        },
+        {
+          "bindTo": "execution_output",
+          "expr": "fetched_sources.code_execution.output"
+        },
+        {
+          "bindTo": "execution_files",
+          "expr": "fetched_sources.code_execution.output_files"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "label": "Execution Summary",
+            "data": {
+              "bind": "computed_values.execution_summary"
+            }
+          },
+          {
+            "kind": "text",
+            "label": "Execution Output",
+            "data": {
+              "bind": "computed_values.execution_output",
+              "hideIfEmpty": true
+            }
+          },
+          {
+            "kind": "list",
+            "label": "Output Files",
+            "data": {
+              "bind": "computed_values.execution_files"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 6,
+            "order": 5
+          },
+          "canvas": {
+            "x": 600,
+            "y": 1060,
+            "w": 560,
+            "h": 320
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-wfpv1-failure-patterns",
+      "meta": {
+        "title": "Failure Patterns",
+        "tags": [
+          "wfpv1",
+          "batch",
+          "failures"
+        ],
+        "desc": "Cluster repeated failure modes from the run ledger so prompt changes target patterns instead of anecdotes."
+      },
+      "requires": [
+        "run_ledger_summary"
+      ],
+      "compute": [
+        {
+          "bindTo": "failure_markdown",
+          "expr": "requires.run_ledger_summary.markdown"
+        },
+        {
+          "bindTo": "failure_patterns_table",
+          "expr": "requires.run_ledger_summary.failure_patterns"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "label": "Failure Summary",
+            "data": {
+              "bind": "computed_values.failure_markdown"
+            }
+          },
+          {
+            "kind": "table",
+            "label": "Failure Patterns",
+            "data": {
+              "bind": "computed_values.failure_patterns_table",
+              "columns": [
+                "category",
+                "count",
+                "alert_ids"
+              ],
+              "maxRows": 8
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 12
+          },
+          "canvas": {
+            "x": 40,
+            "y": 1760,
+            "w": 560,
+            "h": 340
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-wfpv1-guidance",
+      "meta": {
+        "title": "Tuning Guidance",
+        "tags": [
+          "wfpv1",
+          "guidance",
+          "prompt-tuning"
+        ],
+        "desc": "Capture the durable guidance this stage should optimize for across many samples."
+      },
+      "compute": [
+        {
+          "bindTo": "guidance_preview",
+          "expr": "$exists(card_data.guidance_text) and $trim(card_data.guidance_text) != '' ? card_data.guidance_text : '_Write the rules of what good output should look like for this stage._'"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "tuning_guidance",
+          "ref": "card_data.guidance_text"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "notes",
+            "label": "Guidance",
+            "data": {
+              "bind": "card_data.guidance_text",
+              "writeTo": "card_data.guidance_text"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Current Guidance",
+            "data": {
+              "bind": "computed_values.guidance_preview"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 8
+          },
+          "canvas": {
+            "x": 40,
+            "y": 1440,
+            "w": 520,
+            "h": 340
+          }
+        },
+        "features": {
+          "chat": true
+        }
+      },
+      "card_data": {
+        "guidance_text": "- Output should be structurally parseable before it is considered useful.\n- Prefer concise, stage-specific instructions over broad generic language.\n- Tune for robustness across TP and FP samples, not one-off wins."
+      }
+    },
+    {
+      "id": "card-wfpv1-observations",
+      "meta": {
+        "title": "Observations",
+        "tags": [
+          "wfpv1",
+          "observations",
+          "prompt-tuning"
+        ],
+        "desc": "Capture short empirical notes about regressions, improvements, and repeated failure behavior."
+      },
+      "compute": [
+        {
+          "bindTo": "observations_preview",
+          "expr": "$exists(card_data.observation_text) and $trim(card_data.observation_text) != '' ? card_data.observation_text : '_Write short observations after batch runs._'"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "tuning_observations",
+          "ref": "card_data.observation_text"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "notes",
+            "label": "Observations",
+            "data": {
+              "bind": "card_data.observation_text",
+              "writeTo": "card_data.observation_text"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Current Observations",
+            "data": {
+              "bind": "computed_values.observations_preview"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 9
+          },
+          "canvas": {
+            "x": 600,
+            "y": 1440,
+            "w": 560,
+            "h": 340
+          }
+        },
+        "features": {
+          "chat": true
+        }
+      },
+      "card_data": {
+        "observation_text": "- Use this card to record what changed across multiple samples, not just one run."
+      }
+    },
+    {
+      "id": "card-wfpv1-prompt-workbench",
+      "meta": {
+        "title": "Prompt Workbench",
+        "tags": [
+          "wfpv1",
+          "prompt",
+          "medeina"
+        ],
+        "desc": "Browse the available Medeina prompt slots, inspect the selected prompt file, and draft edits in card_data."
+      },
+      "requires": [
+        "tuning_target"
+      ],
+      "source_defs": [
+        {
+          "bindTo": "prompt_slots",
+          "outputFile": "card-wfpv1-prompt-slots.json",
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.list_prompt_slots",
+            "input": {}
+          }
+        },
+        {
+          "bindTo": "selected_prompt",
+          "outputFile": "card-wfpv1-selected-prompt.json",
+          "projections": {
+            "slot_id": "requires.tuning_target.prompt_slot"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.read_prompt_slot",
+            "input": {
+              "slotId": "{{slot_id}}"
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "selected_prompt_summary",
+          "expr": "'**Slot:** ' & fetched_sources.selected_prompt.slot_id & '  \n**Agent:** ' & fetched_sources.selected_prompt.agent & '  \n**Phase:** ' & fetched_sources.selected_prompt.phase & '  \n**Kind:** ' & fetched_sources.selected_prompt.kind"
+        },
+        {
+          "bindTo": "prompt_slots_table",
+          "expr": "$exists(fetched_sources.prompt_slots.prompt_slots) ? fetched_sources.prompt_slots.prompt_slots : fetched_sources.prompt_slots"
+        },
+        {
+          "bindTo": "effective_prompt",
+          "expr": "$exists(card_data.prompt_draft) and $trim(card_data.prompt_draft) != '' ? card_data.prompt_draft : fetched_sources.selected_prompt.content"
+        },
+        {
+          "bindTo": "draft_status",
+          "expr": "$exists(card_data.prompt_draft) and $trim(card_data.prompt_draft) != '' ? '**Draft mode:** using the edited prompt draft for the next run.' : '**File mode:** next run will use the current repo prompt unchanged.'"
+        },
+        {
+          "bindTo": "prompt_file_markdown",
+          "expr": "$exists(fetched_sources.selected_prompt.content) and $trim(fetched_sources.selected_prompt.content) != '' ? '```markdown\n' & fetched_sources.selected_prompt.content & '\n```' : '_Prompt file contents unavailable._'"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "prompt_text",
+          "ref": "computed_values.effective_prompt"
+        },
+        {
+          "bindTo": "selected_prompt_meta",
+          "ref": "fetched_sources.selected_prompt"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "table",
+            "label": "Prompt Slots",
+            "data": {
+              "bind": "computed_values.prompt_slots_table",
+              "columns": [
+                "slot_id",
+                "agent",
+                "phase",
+                "kind"
+              ],
+              "maxRows": 12
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Selected Prompt",
+            "data": {
+              "bind": "computed_values.selected_prompt_summary"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Draft Status",
+            "data": {
+              "bind": "computed_values.draft_status"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Prompt File Contents",
+            "data": {
+              "bind": "computed_values.prompt_file_markdown"
+            }
+          },
+          {
+            "kind": "notes",
+            "label": "Prompt Draft",
+            "data": {
+              "bind": "card_data.prompt_draft",
+              "writeTo": "card_data.prompt_draft"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 3
+          },
+          "canvas": {
+            "x": 600,
+            "y": 40,
+            "w": 560,
+            "h": 980
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {
+        "prompt_draft": ""
+      }
+    },
+    {
+      "id": "card-wfpv1-revision-proposal",
+      "meta": {
+        "title": "Revision Proposal",
+        "tags": [
+          "wfpv1",
+          "prompt",
+          "revision"
+        ],
+        "desc": "Propose the next prompt revision from current failures, guidance, and observations."
+      },
+      "requires": [
+        "prompt_text",
+        "selected_prompt_meta",
+        "run_ledger_summary",
+        "tuning_guidance",
+        "tuning_observations"
+      ],
+      "source_defs": [
+        {
+          "bindTo": "revision_proposal",
+          "outputFile": "card-wfpv1-revision-proposal.json",
+          "projections": {
+            "slot_id": "requires.selected_prompt_meta.slot_id",
+            "stage_kind": "requires.selected_prompt_meta.kind",
+            "current_prompt": "requires.prompt_text",
+            "failure_summary": "requires.run_ledger_summary",
+            "guidance_text": "requires.tuning_guidance",
+            "observation_text": "requires.tuning_observations"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.propose_prompt_revision",
+            "input": {
+              "slotId": "{{slot_id}}",
+              "stageKind": "{{stage_kind}}",
+              "currentPrompt": "{{current_prompt}}",
+              "failureSummary": "{{failure_summary}}",
+              "guidanceText": "{{guidance_text}}",
+              "observationText": "{{observation_text}}"
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "strategy_markdown",
+          "expr": "'**Strategy:** ' & fetched_sources.revision_proposal.revision_strategy"
+        },
+        {
+          "bindTo": "why_markdown",
+          "expr": "$exists(fetched_sources.revision_proposal.why) ? $join($map(fetched_sources.revision_proposal.why, function($v){ '- ' & $v }), '\n') : '_No rationale returned._'"
+        },
+        {
+          "bindTo": "watchouts_markdown",
+          "expr": "$exists(fetched_sources.revision_proposal.watchouts) ? $join($map(fetched_sources.revision_proposal.watchouts, function($v){ '- ' & $v }), '\n') : '_No watchouts returned._'"
+        },
+        {
+          "bindTo": "proposed_prompt_markdown",
+          "expr": "$exists(fetched_sources.revision_proposal.proposed_prompt) and $trim(fetched_sources.revision_proposal.proposed_prompt) != '' ? '```markdown\n' & fetched_sources.revision_proposal.proposed_prompt & '\n```' : '_No revised prompt returned._'"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "revision_proposal",
+          "ref": "fetched_sources.revision_proposal"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "label": "Revision Strategy",
+            "data": {
+              "bind": "computed_values.strategy_markdown"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Why This Change",
+            "data": {
+              "bind": "computed_values.why_markdown"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Watchouts",
+            "data": {
+              "bind": "computed_values.watchouts_markdown"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Proposed Prompt",
+            "data": {
+              "bind": "computed_values.proposed_prompt_markdown"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 8,
+            "order": 13
+          },
+          "canvas": {
+            "x": 1200,
+            "y": 1460,
+            "w": 560,
+            "h": 520
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-wfpv1-run-ledger",
+      "meta": {
+        "title": "Run Ledger",
+        "tags": [
+          "wfpv1",
+          "ledger",
+          "samples"
+        ],
+        "desc": "Accumulate one row per sample run so the board can summarize repeated behavior without one giant batch call."
+      },
+      "requires": [
+        "batch_request",
+        "tuning_target",
+        "current_sample",
+        "stage_run_result",
+        "execution_result"
+      ],
+      "source_defs": [
+        {
+          "bindTo": "ledger_write",
+          "outputFile": "card-wfpv1-ledger-write.json",
+          "optionalForCompletionGating": true,
+          "projections": {
+            "sample_set_id": "requires.batch_request.sample_set_id",
+            "slot_id": "requires.tuning_target.prompt_slot",
+            "current_sample": "requires.current_sample",
+            "stage_run_result": "requires.stage_run_result",
+            "execution_result": "requires.execution_result"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.append_run_ledger_entry",
+            "input": {
+              "sampleSetId": "{{sample_set_id}}",
+              "slotId": "{{slot_id}}",
+              "currentSample": "{{current_sample}}",
+              "stageRunResult": "{{stage_run_result}}",
+              "executionResult": "{{execution_result}}"
+            }
+          }
+        },
+        {
+          "bindTo": "run_ledger",
+          "outputFile": "card-wfpv1-run-ledger.json",
+          "projections": {
+            "sample_set_id": "requires.batch_request.sample_set_id",
+            "slot_id": "requires.tuning_target.prompt_slot"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.read_run_ledger",
+            "input": {
+              "sampleSetId": "{{sample_set_id}}",
+              "slotId": "{{slot_id}}"
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "ledger_status",
+          "expr": "fetched_sources.ledger_write.skipped ? '**Ledger:** no new entry was written yet.' : ('**Ledger:** ' & (fetched_sources.ledger_write.appended ? 'appended' : (fetched_sources.ledger_write.updated ? 'updated' : 'unchanged')) & ' sample ' & fetched_sources.ledger_write.entry.alert_id & '.')"
+        },
+        {
+          "bindTo": "ledger_rows",
+          "expr": "fetched_sources.run_ledger.entries"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "run_ledger",
+          "ref": "fetched_sources.run_ledger"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "label": "Ledger Status",
+            "data": {
+              "bind": "computed_values.ledger_status"
+            }
+          },
+          {
+            "kind": "table",
+            "label": "Ledger Entries",
+            "data": {
+              "bind": "computed_values.ledger_rows",
+              "columns": [
+                "sample_index",
+                "alert_id",
+                "ground_truth_label",
+                "status",
+                "failure_category",
+                "plan_step_count",
+                "has_code",
+                "execution_status"
+              ],
+              "maxRows": 12
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 9
+          },
+          "canvas": {
+            "x": 1200,
+            "y": 900,
+            "w": 560,
+            "h": 420
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-wfpv1-sample-cursor",
+      "meta": {
+        "title": "Sample Cursor",
+        "tags": [
+          "wfpv1",
+          "cursor",
+          "samples"
+        ],
+        "desc": "Advance through the chosen sample set one alert at a time. This is the counter that drives the single-run chain."
+      },
+      "requires": [
+        "batch_request"
+      ],
+      "source_defs": [
+        {
+          "bindTo": "cursor_state",
+          "outputFile": "card-wfpv1-sample-cursor.json",
+          "projections": {
+            "sample_set_id": "requires.batch_request.sample_set_id",
+            "max_alerts": "requires.batch_request.max_alerts",
+            "current_index": "card_data.cursor.current_index"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.resolve_sample_cursor",
+            "input": {
+              "sampleSetId": "{{sample_set_id}}",
+              "maxAlerts": "{{max_alerts}}",
+              "currentIndex": "{{current_index}}"
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "cursor_summary",
+          "expr": "'**Sample Set:** ' & fetched_sources.cursor_state.sample_set_title & '  \n**Position:** ' & fetched_sources.cursor_state.current_position_label & '  \n**Current Alert:** ' & fetched_sources.cursor_state.current_sample.alert_id & '  \n**Ground Truth:** ' & fetched_sources.cursor_state.current_sample.ground_truth_label"
+        },
+        {
+          "bindTo": "current_sample_row",
+          "expr": "[$merge([fetched_sources.cursor_state.current_sample, {'has_previous': fetched_sources.cursor_state.has_previous, 'has_next': fetched_sources.cursor_state.has_next}])]"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "current_sample",
+          "ref": "fetched_sources.cursor_state.current_sample"
+        },
+        {
+          "bindTo": "current_cursor_state",
+          "ref": "fetched_sources.cursor_state"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "form",
+            "label": "Cursor",
+            "data": {
+              "writeTo": "card_data.cursor",
+              "fields": {
+                "type": "object",
+                "properties": {
+                  "current_index": {
+                    "type": "number",
+                    "title": "Current Index",
+                    "default": 0
+                  }
+                },
+                "required": [
+                  "current_index"
+                ]
+              }
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Current Sample",
+            "data": {
+              "bind": "computed_values.cursor_summary"
+            }
+          },
+          {
+            "kind": "table",
+            "label": "Cursor State",
+            "data": {
+              "bind": "computed_values.current_sample_row",
+              "columns": [
+                "alert_id",
+                "ground_truth_label",
+                "index",
+                "total",
+                "has_previous",
+                "has_next"
+              ],
+              "maxRows": 1
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 8
+          },
+          "canvas": {
+            "x": 600,
+            "y": 900,
+            "w": 560,
+            "h": 300
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {
+        "cursor": {
+          "current_index": 0
+        }
+      }
+    },
+    {
+      "id": "card-wfpv1-sample-set",
+      "meta": {
+        "title": "Sample Set",
+        "tags": [
+          "wfpv1",
+          "batch",
+          "samples"
+        ],
+        "desc": "Choose the sample set and iteration limits that the board will walk through one sample at a time."
+      },
+      "source_defs": [
+        {
+          "bindTo": "sample_sets",
+          "outputFile": "card-wfpv1-sample-sets.json",
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.list_sample_sets",
+            "input": {}
+          }
+        },
+        {
+          "bindTo": "selected_set",
+          "outputFile": "card-wfpv1-selected-sample-set.json",
+          "projections": {
+            "sample_set_id": "card_data.sample_set.sample_set_id"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.read_sample_set",
+            "input": {
+              "sampleSetId": "{{sample_set_id}}"
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "sample_sets_table",
+          "expr": "$exists(fetched_sources.sample_sets.sample_sets) ? fetched_sources.sample_sets.sample_sets : fetched_sources.sample_sets"
+        },
+        {
+          "bindTo": "selected_summary",
+          "expr": "'**Sample Set:** ' & fetched_sources.selected_set.title & '  \n**Description:** ' & fetched_sources.selected_set.description & '  \n**Counts:** ' & $string(fetched_sources.selected_set.counts.total) & ' total / ' & $string(fetched_sources.selected_set.counts.tp) & ' TP / ' & $string(fetched_sources.selected_set.counts.fp) & ' FP / ' & $string(fetched_sources.selected_set.counts.bp) & ' BP'"
+        },
+        {
+          "bindTo": "selected_alert_rows",
+          "expr": "$map(fetched_sources.selected_set.alert_ids, function($id){ {'alert_id': $id} })"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "batch_request",
+          "ref": "card_data.sample_set"
+        },
+        {
+          "bindTo": "selected_sample_set",
+          "ref": "fetched_sources.selected_set"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "form",
+            "label": "Iteration Inputs",
+            "data": {
+              "writeTo": "card_data.sample_set",
+              "fields": {
+                "type": "object",
+                "properties": {
+                  "sample_set_id": {
+                    "type": "string",
+                    "title": "Sample Set",
+                    "enum": [
+                      "quick-5",
+                      "tp-core",
+                      "fp-core",
+                      "mixed-8",
+                      "benchmark-12",
+                      "all-33"
+                    ],
+                    "default": "quick-5"
+                  },
+                  "max_alerts": {
+                    "type": "number",
+                    "title": "Max Alerts",
+                    "enum": [
+                      3,
+                      5,
+                      8,
+                      12
+                    ],
+                    "default": 5
+                  },
+                  "execute_code": {
+                    "type": "boolean",
+                    "title": "Execute Generated Code",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "sample_set_id",
+                  "max_alerts"
+                ]
+              }
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Selected Set",
+            "data": {
+              "bind": "computed_values.selected_summary"
+            }
+          },
+          {
+            "kind": "table",
+            "label": "Available Sets",
+            "data": {
+              "bind": "computed_values.sample_sets_table",
+              "columns": [
+                "sample_set_id",
+                "title",
+                "description"
+              ],
+              "maxRows": 6
+            }
+          },
+          {
+            "kind": "table",
+            "label": "Alert IDs In Set",
+            "data": {
+              "bind": "computed_values.selected_alert_rows",
+              "columns": [
+                "alert_id"
+              ],
+              "maxRows": 12
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 7
+          },
+          "canvas": {
+            "x": 40,
+            "y": 900,
+            "w": 520,
+            "h": 460
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {
+        "sample_set": {
+          "sample_set_id": "quick-5",
+          "max_alerts": 5,
+          "execute_code": false
+        }
+      }
+    },
+    {
+      "id": "card-wfpv1-stage-runner",
+      "meta": {
+        "title": "Stage Runner",
+        "tags": [
+          "wfpv1",
+          "stage",
+          "copilot"
+        ],
+        "desc": "Run the current prompt stage against the sample selected by the cursor."
+      },
+      "requires": [
+        "tuning_target",
+        "prompt_text",
+        "current_sample"
+      ],
+      "source_defs": [
+        {
+          "bindTo": "stage_run",
+          "outputFile": "card-wfpv1-stage-run.json",
+          "projections": {
+            "alert_id": "requires.current_sample.alert_id",
+            "prompt_slot": "requires.tuning_target.prompt_slot",
+            "user_question": "requires.tuning_target.user_question",
+            "preview_rows": "8",
+            "prompt_text": "requires.prompt_text",
+            "investigation_plan": "card_data.investigation_plan_json",
+            "direct_feedback": "card_data.direct_feedback"
+          },
+          "mcp": {
+            "server": "wfpv1-modularcode",
+            "tool": "modularcode.run_prompt_stage",
+            "input": {
+              "alertId": "{{alert_id}}",
+              "slotId": "{{prompt_slot}}",
+              "userQuestion": "{{user_question}}",
+              "previewRows": "{{preview_rows}}",
+              "promptText": "{{prompt_text}}",
+              "investigationPlan": "{{investigation_plan}}",
+              "directFeedback": "{{direct_feedback}}"
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "run_summary",
+          "expr": "fetched_sources.stage_run.summary_markdown"
+        },
+        {
+          "bindTo": "plan_markdown",
+          "expr": "$exists(fetched_sources.stage_run.investigation_plan_json) and $trim(fetched_sources.stage_run.investigation_plan_json) != '' ? '```json\n' & fetched_sources.stage_run.investigation_plan_json & '\n```' : '_No structured plan parsed._'"
+        },
+        {
+          "bindTo": "code_markdown",
+          "expr": "$exists(fetched_sources.stage_run.extracted_code) and $trim(fetched_sources.stage_run.extracted_code) != '' ? '```python\n' & fetched_sources.stage_run.extracted_code & '\n```' : '_No code extracted._'"
+        },
+        {
+          "bindTo": "next_step",
+          "expr": "fetched_sources.stage_run.stage_kind = 'plan' ? (fetched_sources.stage_run.plan_step_count > 0 ? '**Next:** move to codegen only if this plan is specific enough to be executable.' : '**Next:** tighten the planner prompt so it returns a rigid, parseable plan with non-empty steps.') : (($exists(fetched_sources.stage_run.extracted_code) and $trim(fetched_sources.stage_run.extracted_code) != '') ? '**Next:** run the generated code and inspect the execution output.' : '**Next:** make the codegen prompt explicit about returning exactly one fenced python block.')"
+        },
+        {
+          "bindTo": "raw_output",
+          "expr": "fetched_sources.stage_run.output_text"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "stage_run_result",
+          "ref": "fetched_sources.stage_run"
+        },
+        {
+          "bindTo": "generated_code",
+          "ref": "fetched_sources.stage_run.extracted_code"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "notes",
+            "label": "Investigation Plan Seed (for codegen)",
+            "data": {
+              "bind": "card_data.investigation_plan_json",
+              "writeTo": "card_data.investigation_plan_json"
+            }
+          },
+          {
+            "kind": "notes",
+            "label": "Direct Feedback Seed",
+            "data": {
+              "bind": "card_data.direct_feedback",
+              "writeTo": "card_data.direct_feedback"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Run Summary",
+            "data": {
+              "bind": "computed_values.run_summary"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Next Step",
+            "data": {
+              "bind": "computed_values.next_step"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Parsed Plan",
+            "data": {
+              "bind": "computed_values.plan_markdown"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Extracted Code",
+            "data": {
+              "bind": "computed_values.code_markdown"
+            }
+          },
+          {
+            "kind": "text",
+            "label": "Raw Output",
+            "data": {
+              "bind": "computed_values.raw_output",
+              "hideIfEmpty": true
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 4
+          },
+          "canvas": {
+            "x": 1200,
+            "y": 40,
+            "w": 560,
+            "h": 980
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {
+        "investigation_plan_json": "",
+        "direct_feedback": ""
+      }
+    },
+    {
+      "id": "card-wfpv1-target",
+      "meta": {
+        "title": "Tuning Target",
+        "tags": [
+          "wfpv1",
+          "control",
+          "prompt-tuning"
+        ],
+        "desc": "Select the alert sample and prompt slot to tune. This card publishes the working target for the rest of the board."
+      },
+      "compute": [
+        {
+          "bindTo": "target_summary",
+          "expr": "'**Alert:** ' & card_data.target.alert_id & '  \n**Prompt Slot:** ' & card_data.target.prompt_slot & '  \n**Question:** ' & card_data.target.user_question"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "tuning_target",
+          "ref": "card_data.target"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "form",
+            "label": "Tuning Inputs",
+            "data": {
+              "writeTo": "card_data.target",
+              "fields": {
+                "type": "object",
+                "properties": {
+                  "alert_id": {
+                    "type": "string",
+                    "title": "Alert ID",
+                    "default": "1ab18610"
+                  },
+                  "prompt_slot": {
+                    "type": "string",
+                    "title": "Prompt Slot",
+                    "default": "IrmTriageAgent_Focused_ExploratoryPhase_PlanTemplate"
+                  },
+                  "user_question": {
+                    "type": "string",
+                    "title": "User Question",
+                    "default": "You will be given activities of a single user. Investigate all activities and highlight risky behavior based on the data."
+                  },
+                  "preview_rows": {
+                    "type": "number",
+                    "title": "Preview Rows",
+                    "enum": [
+                      5,
+                      8,
+                      12,
+                      20
+                    ],
+                    "default": 8
+                  }
+                },
+                "required": [
+                  "alert_id",
+                  "prompt_slot",
+                  "user_question"
+                ]
+              }
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Current Target",
+            "data": {
+              "bind": "computed_values.target_summary"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 1
+          },
+          "canvas": {
+            "x": 40,
+            "y": 40,
+            "w": 520,
+            "h": 250
+          }
+        },
+        "features": {
+          "chat": true
+        }
+      },
+      "card_data": {
+        "target": {
+          "alert_id": "1ab18610",
+          "prompt_slot": "IrmTriageAgent_Focused_ExploratoryPhase_PlanTemplate",
+          "user_question": "You will be given activities of a single user. Investigate all activities and highlight risky behavior based on the data.",
+          "preview_rows": 8
+        }
+      }
+    },
+    {
+      "id": "card-wfpv1-validator",
+      "meta": {
+        "title": "Validator",
+        "tags": [
+          "wfpv1",
+          "validation",
+          "feedback"
+        ],
+        "desc": "Deterministic heuristic validation for v1. It judges whether the current stage output is usable enough to keep iterating."
+      },
+      "requires": [
+        "ground_truth_label",
+        "stage_run_result",
+        "execution_result"
+      ],
+      "compute": [
+        {
+          "bindTo": "summary",
+          "expr": "requires.stage_run_result.stage_kind = 'plan' ? (requires.stage_run_result.plan_step_count > 0 ? '**Plan looks usable** — ' & $string(requires.stage_run_result.plan_step_count) & ' structured steps parsed.' : '**Plan needs revision** — no structured steps were parsed from the response.') : (($exists(requires.stage_run_result.extracted_code) and $trim(requires.stage_run_result.extracted_code) != '') ? (requires.execution_result.status = 'success' ? (requires.execution_result.has_output ? '**Strong candidate** — code executed and produced output.' : '**Partial pass** — code executed but produced no output.') : (requires.execution_result.status = 'error' ? '**Needs revision** — generated code failed in the executor.' : '**Awaiting execution** — code is present but has not been executed yet.')) : '**Needs revision** — no executable code was extracted.')"
+        },
+        {
+          "bindTo": "verdict_badge",
+          "expr": "requires.stage_run_result.stage_kind = 'plan' ? (requires.stage_run_result.plan_step_count > 0 ? 'usable' : 'needs revision') : (($exists(requires.stage_run_result.extracted_code) and $trim(requires.stage_run_result.extracted_code) != '') ? (requires.execution_result.status = 'success' ? (requires.execution_result.has_output ? 'strong candidate' : 'partial pass') : (requires.execution_result.status = 'error' ? 'needs revision' : 'awaiting execution')) : 'needs revision')"
+        },
+        {
+          "bindTo": "ground_truth_line",
+          "expr": "'**Ground Truth Label:** ' & requires.ground_truth_label"
+        },
+        {
+          "bindTo": "feedback",
+          "expr": "requires.stage_run_result.stage_kind = 'codegen' and requires.execution_result.status = 'error' ? requires.execution_result.direct_feedback : (requires.stage_run_result.stage_kind = 'plan' and requires.stage_run_result.plan_step_count = 0 ? 'The planner response needs to be made more structured so that Steps can be parsed reliably.' : 'Use this card as a gate: keep iterating until the current stage result is structurally usable.')"
+        },
+        {
+          "bindTo": "next_action",
+          "expr": "requires.stage_run_result.stage_kind = 'plan' ? (requires.stage_run_result.plan_step_count > 0 ? '**Action:** move to codegen or refine the plan wording for clarity.' : '**Action:** make the planner prompt demand a rigid JSON response with non-empty Steps.') : (($exists(requires.stage_run_result.extracted_code) and $trim(requires.stage_run_result.extracted_code) != '') ? (requires.execution_result.status = 'success' ? (requires.execution_result.has_output ? '**Action:** inspect whether the output is actually useful for the investigation, then iterate on specificity.' : '**Action:** tell the codegen prompt to emit code that logs concrete intermediate results.') : (requires.execution_result.status = 'error' ? '**Action:** feed the execution error back into the next codegen run.' : '**Action:** trigger code execution before judging the code quality.')) : '**Action:** revise the codegen prompt so it returns exactly one fenced python block.')"
+        }
+      ],
+      "provides": [
+        {
+          "bindTo": "validator_feedback",
+          "ref": "computed_values.feedback"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "badge",
+            "label": "Status",
+            "data": {
+              "bind": "computed_values.verdict_badge",
+              "colorMap": {
+                "usable": "green",
+                "strong candidate": "green",
+                "partial pass": "amber",
+                "awaiting execution": "amber",
+                "needs revision": "red"
+              }
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Validation Summary",
+            "data": {
+              "bind": "computed_values.summary"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Ground Truth",
+            "data": {
+              "bind": "computed_values.ground_truth_line"
+            }
+          },
+          {
+            "kind": "text",
+            "label": "Feedback To Reuse",
+            "data": {
+              "bind": "computed_values.feedback"
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Next Action",
+            "data": {
+              "bind": "computed_values.next_action"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 6,
+            "order": 6
+          },
+          "canvas": {
+            "x": 1200,
+            "y": 1060,
+            "w": 560,
+            "h": 320
+          }
+        },
+        "features": {
+          "refresh": true,
+          "chat": true
+        }
+      },
+      "card_data": {}
+    }
+  ]
+}

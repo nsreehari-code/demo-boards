@@ -736,7 +736,7 @@ async function main() {
   const formatTestId = (testId) => `${modePrefix}-${String(testId || '').trim().toUpperCase()}`;
   const printedTests = requestedTests
     ? Array.from(requestedTests).map((testId) => formatTestId(testId)).join(',')
-    : ['MB1', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F', 'TR'].map((testId) => formatTestId(testId)).join(',');
+    : ['MB1', 'TE', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F', 'TR'].map((testId) => formatTestId(testId)).join(',');
 
   console.log(`\n=== ${modeLabel} controlface MCP smoke test ===`);
   console.log(`target: ${API_BASE}`);
@@ -819,6 +819,10 @@ async function main() {
   const callControlplaneMcp = (tool, args) => httpJson('POST', `${API_BASE}/mcp-controlplane`, {
     tool,
     args: { board_id: BOARD_ID, ...args },
+  });
+  const callMcpExtras = (tool, args = {}) => httpJson('POST', `${BOARD_SERVER_URL}/mcp-extras`, {
+    tool,
+    args,
   });
   const callAction = (tool, cardId, payload = {}) => httpJson('POST', `${API_BASE}/mcp-actions`, {
     tool,
@@ -1246,6 +1250,31 @@ async function main() {
   }
 
   try {
+    if (isTestSelected(requestedTests, 'TE')) {
+      console.log(`\n=== ${formatTestId('TE')}: list + get sample templates via /mcp-extras ===`);
+
+      const listed = await callMcpExtras('explore.list-sample-templates');
+      assert(listed.status === 200, `TE explore.list-sample-templates returned HTTP ${listed.status}: ${jsonText(listed.data)}`);
+      const entries = Array.isArray(listed.data?.entries) ? listed.data.entries : [];
+      assert(entries.length > 0, `TE explore.list-sample-templates returned no entries: ${jsonText(listed.data)}`);
+
+      const firstEntry = entries[0] ?? null;
+      assert(firstEntry && typeof firstEntry === 'object', `TE first list entry missing: ${jsonText(listed.data)}`);
+      assert(typeof firstEntry.key === 'string' && firstEntry.key.trim(), `TE first list entry key missing: ${jsonText(firstEntry)}`);
+      assert(typeof firstEntry.label === 'string' && firstEntry.label.trim(), `TE first list entry label missing: ${jsonText(firstEntry)}`);
+      assert(!Object.prototype.hasOwnProperty.call(firstEntry, 'fileName'), `TE list entry leaked fileName: ${jsonText(firstEntry)}`);
+      console.log(`[${formatTestId('TE')}] list returned ${entries.length} template(s); first key=${firstEntry.key}`);
+
+      const fetched = await callMcpExtras('explore.get-sample-template', { key: firstEntry.key });
+      assert(fetched.status === 200, `TE explore.get-sample-template returned HTTP ${fetched.status}: ${jsonText(fetched.data)}`);
+      assert(fetched.data && typeof fetched.data === 'object', `TE get-sample-template returned no payload: ${jsonText(fetched.data)}`);
+      assert(fetched.data.key === firstEntry.key, `TE get-sample-template key mismatch: ${jsonText(fetched.data)}`);
+      assert(typeof fetched.data.label === 'string' && fetched.data.label.trim(), `TE get-sample-template label missing: ${jsonText(fetched.data)}`);
+      assert(!Object.prototype.hasOwnProperty.call(fetched.data, 'fileName'), `TE get-sample-template leaked fileName: ${jsonText(fetched.data)}`);
+      assert(Array.isArray(fetched.data?.payload?.cards), `TE get-sample-template payload cards missing: ${jsonText(fetched.data)}`);
+      console.log(`[${formatTestId('TE')}] get returned template key=${fetched.data.key} cards=${fetched.data.payload.cards.length}`);
+    }
+
     if (isTestSelected(requestedTests, 'T0')) {
       console.log(`\n=== ${formatTestId('T0')}: seed ${PORTFOLIO_CARD_ID} and verify persistence + completed status ===`);
 

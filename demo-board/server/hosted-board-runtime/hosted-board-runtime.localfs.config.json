@@ -91,6 +91,10 @@
     "kind": "fs-path",
     "value": "{{BOARD_ROOT}}/workspaces/boards-index"
   },
+  "sampleTemplateCatalog": {
+    "dir": "{{BOARD_ROOT}}/server/hosted-board-runtime/sample-card-templates",
+    "indexFile": "{{BOARD_ROOT}}/server/hosted-board-runtime/sample-card-templates/_index.json"
+  },
   "uiTemplates": {
     "default": {
       "filters": {

@@ -1,0 +1,253 @@
+{
+  "boardLabel": "WorkIQ / M365",
+  "boardSubtitle": "WorkIQ priorities, collaboration, and identity starter board",
+  "cards": [
+    {
+      "id": "card-my-identity",
+      "meta": {
+        "title": "My Identity",
+        "tags": [
+          "m365",
+          "workiq"
+        ],
+        "desc": "Displays your M365 display name via WorkIQ (Microsoft 365 Copilot)."
+      },
+      "source_defs": [
+        {
+          "bindTo": "identity",
+          "outputFile": "card-my-identity.txt",
+          "mcp": {
+            "server": "workiq",
+            "tool": "workiq.ask",
+            "input": {
+              "query": "what is my full display name. No Fluff. No Commentary. No Descriptions. Just Answer the Question"
+            }
+          }
+        },
+        {
+          "bindTo": "manager",
+          "outputFile": "card-my-identity-manager.txt",
+          "mcp": {
+            "server": "workiq",
+            "tool": "workiq.ask",
+            "input": {
+              "query": "who is my manager. No Fluff. No Commentary. No Descriptions. Just Answer with the name"
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "identity",
+          "expr": "fetched_sources.identity"
+        },
+        {
+          "bindTo": "managerLine",
+          "expr": "'**Manager:** ' & fetched_sources.manager"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "data": {
+              "bind": "computed_values.identity"
+            }
+          },
+          {
+            "kind": "markdown",
+            "data": {
+              "bind": "computed_values.managerLine"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 4,
+            "order": 10
+          },
+          "canvas": {
+            "x": 50,
+            "y": 450,
+            "w": 420,
+            "h": 260
+          }
+        },
+        "features": {
+          "refresh": true
+        }
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-workiq-priorities",
+      "meta": {
+        "title": "M365 Priorities",
+        "tags": [
+          "workiq",
+          "m365"
+        ],
+        "desc": "WorkIQ brief of the highest-priority signals across email, meetings, chats, and tasks."
+      },
+      "requires": [],
+      "source_defs": [
+        {
+          "bindTo": "brief",
+          "outputFile": "card-workiq-priorities.md",
+          "projections": {
+            "period": "card_data.period"
+          },
+          "mcp": {
+            "server": "workiq",
+            "tool": "workiq.ask",
+            "input": {
+              "query": "Summarize the highest-priority things I should pay attention to in {{period}} across my email, meetings, chats, and tasks. Return concise markdown with at most 5 bullets and one short watch-out line. No heading."
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "briefMarkdown",
+          "expr": "fetched_sources.brief ? fetched_sources.brief : '_Refresh to generate a WorkIQ brief._'"
+        }
+      ],
+      "provides": [],
+      "view": {
+        "elements": [
+          {
+            "kind": "form",
+            "label": "Time Horizon",
+            "data": {
+              "writeTo": "card_data",
+              "saveLabel": "Apply",
+              "discardLabel": "Reset",
+              "fields": {
+                "type": "object",
+                "properties": {
+                  "period": {
+                    "type": "string",
+                    "title": "Period"
+                  }
+                },
+                "required": [
+                  "period"
+                ]
+              }
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Priority Brief",
+            "data": {
+              "bind": "computed_values.briefMarkdown"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 6,
+            "order": 21
+          },
+          "canvas": {
+            "x": 50,
+            "y": 900,
+            "w": 520,
+            "h": 380
+          }
+        },
+        "features": {
+          "refresh": true
+        }
+      },
+      "card_data": {
+        "period": "today"
+      }
+    },
+    {
+      "id": "card-workiq-collaboration-radar",
+      "meta": {
+        "title": "Collaboration Radar",
+        "tags": [
+          "workiq",
+          "m365"
+        ],
+        "desc": "WorkIQ view of the people and threads that mattered most recently."
+      },
+      "requires": [],
+      "source_defs": [
+        {
+          "bindTo": "radar",
+          "outputFile": "card-workiq-collaboration-radar.md",
+          "projections": {
+            "period": "card_data.period"
+          },
+          "mcp": {
+            "server": "workiq",
+            "tool": "workiq.ask",
+            "input": {
+              "query": "Who are the people I collaborated with the most in {{period}} across email, meetings, and chats? Return a concise markdown table with columns Person, Why they matter, Suggested follow-up. No heading."
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "radarMarkdown",
+          "expr": "fetched_sources.radar ? fetched_sources.radar : '_Refresh to generate a WorkIQ collaboration radar._'"
+        }
+      ],
+      "provides": [],
+      "view": {
+        "elements": [
+          {
+            "kind": "form",
+            "label": "Lookback Window",
+            "data": {
+              "writeTo": "card_data",
+              "saveLabel": "Apply",
+              "discardLabel": "Reset",
+              "fields": {
+                "type": "object",
+                "properties": {
+                  "period": {
+                    "type": "string",
+                    "title": "Period"
+                  }
+                },
+                "required": [
+                  "period"
+                ]
+              }
+            }
+          },
+          {
+            "kind": "markdown",
+            "label": "Top Collaborators",
+            "data": {
+              "bind": "computed_values.radarMarkdown"
+            }
+          }
+        ],
+        "layout": {
+          "board": {
+            "col": 6,
+            "order": 22
+          },
+          "canvas": {
+            "x": 620,
+            "y": 900,
+            "w": 520,
+            "h": 420
+          }
+        },
+        "features": {
+          "refresh": true
+        }
+      },
+      "card_data": {
+        "period": "the last 7 days"
+      }
+    }
+  ]
+}
