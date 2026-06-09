@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { deriveBoardRootFromConfigDir } from '../../shared/board-root.js';
 
 const REF_PREFIX = 'b64:';
 const BOARD_REF_FIELDS = Object.freeze([
@@ -63,6 +64,10 @@ function replaceTemplateTokens(value, tokens) {
   return String(value).replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key) =>
     Object.prototype.hasOwnProperty.call(tokens, key) ? String(tokens[key]) : match
   );
+}
+
+function deriveBoardRoot(configDir) {
+  return deriveBoardRootFromConfigDir(configDir);
 }
 
 function resolveBoardRefs(boardId, refsConfig, tokens) {
@@ -154,10 +159,15 @@ function parseCliConfigPath(defaultConfigPath, cliArgs = process.argv.slice(2)) 
     : path.resolve(process.cwd(), configuredPath);
 }
 
-export function buildBoardConfig(boardId, source, { configDir, refsTemplates, aiWorkspaceTemplates, uiTemplates = {} }) {
+export function buildBoardConfig(boardId, source, { configDir, boardRoot = deriveBoardRoot(configDir), refsTemplates, aiWorkspaceTemplates, uiTemplates = {} }) {
   const normalizedBoardId = requireNonEmptyString(boardId, 'board id');
   const record = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
-  const tokens = { boardId: normalizedBoardId, configDir };
+  const tokens = {
+    boardId: normalizedBoardId,
+    configDir,
+    boardRoot,
+    BOARD_ROOT: boardRoot,
+  };
 
   const refsTemplateName = typeof record.refsTemplate === 'string' ? record.refsTemplate.trim() : '';
   let refsSource;
@@ -246,7 +256,7 @@ function collectSampleBoards(config) {
   return out;
 }
 
-function resolveBoardsIndexRef(config) {
+function resolveBoardsIndexRef(config, tokens = {}) {
   const source = config?.['boards-index'];
   if (!source) {
     throw new Error('Config requires a boards-index ref ({kind, value})');
@@ -255,7 +265,10 @@ function resolveBoardsIndexRef(config) {
   if (!parsed) {
     throw new Error('Config boards-index must be a {kind, value} ref');
   }
-  return parsed;
+  return {
+    kind: parsed.kind,
+    value: replaceTemplateTokens(parsed.value, tokens),
+  };
 }
 
 export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv.slice(2), processName = '') {
@@ -263,6 +276,12 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
   const rawConfig = readJsonFile(configPath);
   const config = resolveProcessConfig(rawConfig, processName);
   const configDir = path.dirname(configPath);
+  const boardRoot = deriveBoardRoot(configDir);
+  const hostTokens = {
+    configDir,
+    boardRoot,
+    BOARD_ROOT: boardRoot,
+  };
   const refsTemplates = config.refsTemplates && typeof config.refsTemplates === 'object' && !Array.isArray(config.refsTemplates)
     ? config.refsTemplates
     : {};
@@ -273,11 +292,12 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
     ? config.uiTemplates
     : {};
   const sampleBoards = collectSampleBoards(config);
-  const boardsIndexRef = resolveBoardsIndexRef(config);
+  const boardsIndexRef = resolveBoardsIndexRef(config, hostTokens);
 
   return {
     configPath,
     configDir,
+    boardRoot,
     storageAdapter: typeof config.storageAdapter === 'string' && config.storageAdapter.trim()
       ? config.storageAdapter.trim().toLowerCase()
       : 'firebase',

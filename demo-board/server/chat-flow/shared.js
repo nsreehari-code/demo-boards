@@ -1,8 +1,7 @@
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { deriveBoardRootFromModuleUrl } from '../shared/board-root.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BOARD_ROOT = path.resolve(__dirname, '..', '..');
+const BOARD_ROOT = deriveBoardRootFromModuleUrl(import.meta.url, '..');
 
 function sanitizePathToken(value, fallback = 'unknown') {
   const normalized = typeof value === 'string' ? value.trim() : '';

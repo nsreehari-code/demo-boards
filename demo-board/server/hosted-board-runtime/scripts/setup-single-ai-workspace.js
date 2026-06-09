@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deriveBoardRootFromModuleUrl } from '../../shared/board-root.js';
 import { loadFirebaseHostConfig } from '../firebase-adapter/load-config.js';
 import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
@@ -12,7 +13,7 @@ const TAG = 'setup-single-ai-workspace';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const runtimeRoot = path.resolve(__dirname, '..');
-const BOARD_ROOT = path.resolve(__dirname, '../../..');
+const BOARD_ROOT = deriveBoardRootFromModuleUrl(import.meta.url, '../..');
 const defaultConfigPath = path.join(runtimeRoot, 'hosted-board-runtime.localfs.config.json');
 
 const rawArgs = process.argv.slice(2);
@@ -24,6 +25,9 @@ if (!boardIdArg) {
 const cliArgs = rawArgs.filter((arg) => arg !== boardIdArg);
 
 const hostConfig = loadFirebaseHostConfig(defaultConfigPath, cliArgs, TAG);
+const configuredBoardRoot = typeof hostConfig.boardRoot === 'string' && hostConfig.boardRoot.trim()
+  ? path.normalize(hostConfig.boardRoot)
+  : BOARD_ROOT;
 const adapterServices = hostConfig.storageAdapter === 'localfs'
   ? await initializeLocalFsServices(hostConfig.localfs)
   : await initializeFirebaseServices(hostConfig.firebase);
@@ -63,13 +67,14 @@ if (!path.isAbsolute(scratchStoreRaw)) {
 }
 const scratchDir = path.normalize(scratchStoreRaw);
 
-const watchpartyDir = path.join(BOARD_ROOT, 'logs', 'watch-party', boardIdArg);
+const watchpartyDir = path.join(configuredBoardRoot, 'logs', 'watch-party', boardIdArg);
 
 const mcpServerUrl = hostConfig.mcpServerUrl;
 
 function resolveDir(rel) {
   if (typeof rel !== 'string' || !rel.trim()) return null;
-  return path.isAbsolute(rel) ? path.normalize(rel) : path.resolve(BOARD_ROOT, rel);
+  const resolved = substituteTemplateTokens(rel);
+  return path.isAbsolute(resolved) ? path.normalize(resolved) : path.resolve(configuredBoardRoot, resolved);
 }
 
 function listFilesShallow(dir) {
@@ -116,8 +121,12 @@ function copyRecursive(sourceDirs, targetDir) {
   return copied;
 }
 
-function substituteBoardId(value) {
-  return typeof value === 'string' ? value.replace(/\{\{\s*boardId\s*\}\}/g, boardIdArg) : value;
+function substituteTemplateTokens(value) {
+  if (typeof value !== 'string') return value;
+  return value
+    .replace(/\{\{\s*boardId\s*\}\}/g, boardIdArg)
+    .replace(/\{\{\s*BOARD_ROOT\s*\}\}/g, configuredBoardRoot)
+    .replace(/\{\{\s*boardRoot\s*\}\}/g, configuredBoardRoot);
 }
 
 function setupCopilot() {
@@ -139,12 +148,12 @@ function setupCopilot() {
     process.exit(1);
   }
   const entries = rawEntries.map((entry) => ({
-    'copilot-root': substituteBoardId(entry['copilot-root']),
-    instructionsDirs: (entry.instructionsDirs || []).map(substituteBoardId),
-    agentsDirs: (entry.agentsDirs || []).map(substituteBoardId),
-    agentsHooks: (entry.agentsHooks || []).map(substituteBoardId),
-    agentsSkills: (entry.agentsSkills || []).map(substituteBoardId),
-    copyScripts: (entry.copyScripts || []).map(substituteBoardId),
+    'copilot-root': substituteTemplateTokens(entry['copilot-root']),
+    instructionsDirs: (entry.instructionsDirs || []).map(substituteTemplateTokens),
+    agentsDirs: (entry.agentsDirs || []).map(substituteTemplateTokens),
+    agentsHooks: (entry.agentsHooks || []).map(substituteTemplateTokens),
+    agentsSkills: (entry.agentsSkills || []).map(substituteTemplateTokens),
+    copyScripts: (entry.copyScripts || []).map(substituteTemplateTokens),
   }));
 
   for (const entry of entries) {

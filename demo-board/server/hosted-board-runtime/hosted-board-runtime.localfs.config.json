@@ -21,51 +21,51 @@
     "localfs-default": {
       "baseRef": {
         "kind": "fs-path",
-        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}"
+        "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}"
       },
       "boardRuntimeStoreRef": {
         "kind": "fs-path",
-        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/runtime-board"
+        "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}/runtime-board"
       },
       "cardStoreRef": {
         "kind": "fs-path",
-        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/cards-store"
+        "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}/cards-store"
       },
       "outputsStoreRef": {
         "kind": "fs-path",
-        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/runtime-outputs"
+        "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}/runtime-outputs"
       },
       "queueStoreRef": {
         "kind": "fs-path",
-        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/queue-store"
+        "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}/queue-store"
       },
       "scratchStoreRef": {
         "kind": "fs-path",
-        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/scratch"
+        "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}/scratch"
       },
       "archiveStoreRef": {
         "kind": "fs-path",
-        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/archive"
+        "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}/archive"
       },
       "chatStoreRef": {
         "kind": "fs-path",
-        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/cards-chat"
+        "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}/cards-chat"
       },
       "artifactsStoreRef": {
         "kind": "fs-path",
-        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/cards-files"
+        "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}/cards-files"
       },
       "fetchedSourcesStoreRef": {
         "kind": "fs-path",
-        "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/fetched-sources"
+        "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}/fetched-sources"
       }
     }
   },
   "aiWorkspaceTemplates": {
     "default": {
       "paths": {
-        "aiWorkspaceRoot": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/chat-workspaces",
-        "scratchStore": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/{{boardId}}/tmp"
+        "aiWorkspaceRoot": "{{BOARD_ROOT}}/workspaces/{{boardId}}/chat-workspaces",
+        "scratchStore": "{{BOARD_ROOT}}/workspaces/{{boardId}}/tmp"
       },
       "ai-workdirs-setup": [
         {
@@ -89,7 +89,7 @@
   },
   "boards-index": {
     "kind": "fs-path",
-    "value": "C:/Users/sreenaga/ADO/boards/demo-boards/demo-board/workspaces/boards-index"
+    "value": "{{BOARD_ROOT}}/workspaces/boards-index"
   },
   "uiTemplates": {
     "default": {

@@ -1,18 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import {
   AGENT_OUTPUT_FILE_STEM,
   buildContext,
   deriveLogIdFromCardId,
   resolveBoardWatchpartyCardDir,
 } from '../../../chat-flow/shared.js';
+import { deriveBoardRootFromModuleUrl } from '../../../shared/board-root.js';
 import { createLogger, HOSTED_SERVER_LOG_PATH } from '../logging.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const BOARD_ROOT = path.resolve(__dirname, '../../../..');
+const BOARD_ROOT = deriveBoardRootFromModuleUrl(import.meta.url, '../../..');
 const CHAT_FLOW_ROOT = path.resolve(BOARD_ROOT, 'server', 'chat-flow');
 const ASSISTANT_REGISTRY_PATH = path.resolve(CHAT_FLOW_ROOT, 'assistant_registry.json');
 const ASSISTANT_REGISTRY = JSON.parse(fs.readFileSync(ASSISTANT_REGISTRY_PATH, 'utf8'));
