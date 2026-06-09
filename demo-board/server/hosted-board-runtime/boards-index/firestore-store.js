@@ -1,4 +1,6 @@
-export function createFirestoreBoardsStore({ ref, adapterServices }) {
+export function createFirestoreBoardsStore({ registry, adapterServices }) {
+  const ref = registry?.boardsIndexRef;
+  const deprecatedContainerRef = registry?.deprecatedContainerRef;
   const firestore = adapterServices?.firestore;
   if (!firestore) {
     throw new Error('firestore boards-index store requires adapterServices.firestore');
@@ -36,5 +38,38 @@ export function createFirestoreBoardsStore({ ref, adapterServices }) {
     await collection.doc(id).set(record);
   }
 
-  return { kind: 'firestore', list, get, has, put, set };
+  function formatArchiveStamp(date = new Date()) {
+    const pad2 = (value) => String(value).padStart(2, '0');
+    return `${pad2(date.getMonth() + 1)}${pad2(date.getDate())}-${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`;
+  }
+
+  async function deprecate(id) {
+    const docRef = collection.doc(id);
+    const existing = await docRef.get();
+    if (!existing.exists) {
+      return null;
+    }
+    const record = existing.data() ?? null;
+    if (!deprecatedContainerRef) {
+      await docRef.delete();
+      return {
+        archiveId: '',
+        archiveRecordPath: '',
+        archiveWorkspaceDir: '',
+      };
+    }
+    if (deprecatedContainerRef.kind !== 'firestore') {
+      throw new Error(`firestore boards-index deprecatedContainer must be a firestore ref or null (got '${deprecatedContainerRef.kind}')`);
+    }
+    const archiveId = `${id}-${formatArchiveStamp()}`;
+    await firestore.collection(deprecatedContainerRef.value).doc(archiveId).set(record);
+    await docRef.delete();
+    return {
+      archiveId,
+      archiveRecordPath: `${deprecatedContainerRef.value}/${archiveId}`,
+      archiveWorkspaceDir: '',
+    };
+  }
+
+  return { kind: 'firestore', list, get, has, put, set, deprecate };
 }

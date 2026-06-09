@@ -111,14 +111,23 @@
       ]
     }
   },
-  "boards-index": {
+  "runtimeBoardsRegistry": {
     "localfs": {
-      "kind": "fs-path",
-      "value": "{{BOARD_ROOT}}/workspaces/boards-index"
+      "boards-index": {
+        "kind": "fs-path",
+        "value": "{{BOARD_ROOT}}/workspaces/_boards-index"
+      },
+      "deprecatedContainer": {
+        "kind": "fs-path",
+        "value": "{{BOARD_ROOT}}/workspaces/_deprecated"
+      }
     },
     "firebase": {
-      "kind": "firestore",
-      "value": "boards-index"
+      "boards-index": {
+        "kind": "firestore",
+        "value": "boards-index"
+      },
+      "deprecatedContainer": null
     }
   },
   "sampleTemplateCatalog": {

@@ -276,28 +276,37 @@ function collectSampleBoards(config) {
   return out;
 }
 
-function resolveBoardsIndexRef(config, tokens = {}, storageAdapter = 'firebase') {
-  const source = config?.['boards-index'];
-  if (!source) {
-    throw new Error('Config requires a boards-index ref ({kind, value})');
+function resolveRuntimeBoardsRegistry(config, tokens = {}, storageAdapter = 'firebase') {
+  const source = config?.runtimeBoardsRegistry;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    throw new Error(`Config requires runtimeBoardsRegistry with a '${storageAdapter}' or 'default' entry`);
   }
-  const scopedSource = (() => {
-    const direct = tryParseKindValueRef(source);
-    if (direct) {
-      return direct;
-    }
-    if (!source || typeof source !== 'object' || Array.isArray(source)) {
-      return null;
-    }
-    return tryParseKindValueRef(source[storageAdapter]) || tryParseKindValueRef(source.default);
-  })();
-  const parsed = scopedSource;
-  if (!parsed) {
-    throw new Error(`Config boards-index must be a {kind, value} ref or a map containing '${storageAdapter}' or 'default'`);
+  const scopedSource = source[storageAdapter] || source.default;
+  if (!scopedSource || typeof scopedSource !== 'object' || Array.isArray(scopedSource)) {
+    throw new Error(`Config runtimeBoardsRegistry must contain a '${storageAdapter}' or 'default' object entry`);
   }
+  const boardsIndexRef = tryParseKindValueRef(scopedSource['boards-index']);
+  if (!boardsIndexRef) {
+    throw new Error(`Config runtimeBoardsRegistry.${storageAdapter}.boards-index must be a {kind, value} ref`);
+  }
+  const deprecatedContainerSource = Object.prototype.hasOwnProperty.call(scopedSource, 'deprecatedContainer')
+    ? scopedSource.deprecatedContainer
+    : null;
+  if (deprecatedContainerSource !== null && deprecatedContainerSource !== undefined && !tryParseKindValueRef(deprecatedContainerSource)) {
+    throw new Error(`Config runtimeBoardsRegistry.${storageAdapter}.deprecatedContainer must be null or a {kind, value} ref`);
+  }
+  const deprecatedContainerRef = tryParseKindValueRef(deprecatedContainerSource);
   return {
-    kind: parsed.kind,
-    value: replaceTemplateTokens(parsed.value, tokens),
+    boardsIndexRef: {
+      kind: boardsIndexRef.kind,
+      value: replaceTemplateTokens(boardsIndexRef.value, tokens),
+    },
+    deprecatedContainerRef: deprecatedContainerRef
+      ? {
+          kind: deprecatedContainerRef.kind,
+          value: replaceTemplateTokens(deprecatedContainerRef.value, tokens),
+        }
+      : null,
   };
 }
 
@@ -349,7 +358,7 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
     ? config.uiTemplates
     : {};
   const sampleBoards = collectSampleBoards(config);
-  const boardsIndexRef = resolveBoardsIndexRef(config, hostTokens, storageAdapter);
+  const runtimeBoardsRegistry = resolveRuntimeBoardsRegistry(config, hostTokens, storageAdapter);
   const sampleTemplateCatalog = resolveSampleTemplateCatalogConfig(config, configDir, hostTokens);
 
   return {
@@ -381,7 +390,9 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
       ? config.firebase
       : {},
     sampleBoards,
-    boardsIndexRef,
+    runtimeBoardsRegistry,
+    boardsIndexRef: runtimeBoardsRegistry.boardsIndexRef,
+    deprecatedContainerRef: runtimeBoardsRegistry.deprecatedContainerRef,
     sampleTemplateCatalog,
   };
 }

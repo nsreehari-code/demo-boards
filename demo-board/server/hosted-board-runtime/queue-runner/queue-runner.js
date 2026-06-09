@@ -426,6 +426,8 @@ async function main() {
     }
   }
 
+  ensureKeepAliveTimer();
+
   function startWatchingBoard(boardConfig) {
     const boardId = boardConfig.id;
     const logger = processLogger.child(`${boardId}:queue`);

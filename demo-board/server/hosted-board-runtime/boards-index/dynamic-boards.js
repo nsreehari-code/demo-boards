@@ -2,7 +2,7 @@ import { buildBoardConfig } from '../firebase-adapter/load-config.js';
 import { createBoardsIndexStore } from './boards-index-store.js';
 
 export function createDynamicBoards({ hostConfig, adapterServices }) {
-  const store = createBoardsIndexStore({ ref: hostConfig.boardsIndexRef, adapterServices });
+  const store = createBoardsIndexStore({ registry: hostConfig.runtimeBoardsRegistry, adapterServices });
   const ctx = {
     configDir: hostConfig.configDir,
     refsTemplates: hostConfig.refsTemplates,
@@ -78,5 +78,19 @@ export function createDynamicBoards({ hostConfig, adapterServices }) {
     return hydrate(boardId, nextRecord);
   }
 
-  return { ensureSeeded, list, get, add, saveMeta, saveRecord, store };
+  async function deprecate(boardId) {
+    const record = await store.get(boardId);
+    if (!record) return null;
+    if (typeof store.deprecate !== 'function') {
+      throw new Error(`boards-index kind '${store.kind}' does not support deprecate`);
+    }
+    const board = hydrate(boardId, record);
+    const workspaceDir = board?.refs?.baseRef?.kind === 'fs-path' && typeof board.refs.baseRef.value === 'string'
+      ? board.refs.baseRef.value
+      : '';
+    const archived = await store.deprecate(boardId, { workspaceDir });
+    return archived ? { board, ...archived } : null;
+  }
+
+  return { ensureSeeded, list, get, add, saveMeta, saveRecord, deprecate, store };
 }

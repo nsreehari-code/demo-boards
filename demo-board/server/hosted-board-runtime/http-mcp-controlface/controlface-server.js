@@ -1011,6 +1011,36 @@ async function handleManageBoardsRoute({
     return;
   }
 
+  if (subcommand === 'deprecate-board') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    let archived;
+    try {
+      archived = await dynamicBoards.deprecate(id);
+    } catch (error) {
+      sendJson(res, 400, { status: 'error', error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    if (!archived) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    boardRuntimes.delete(id);
+    sendJson(res, 200, {
+      status: 'success',
+      data: {
+        board: summarizeBoardForList(archived.board),
+        archiveId: archived.archiveId,
+        archiveRecordPath: archived.archiveRecordPath,
+        archiveWorkspaceDir: archived.archiveWorkspaceDir,
+      },
+    });
+    return;
+  }
+
   if (subcommand === 'export-board') {
     const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
     if (!id) {
