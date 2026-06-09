@@ -618,13 +618,37 @@ function installResponseErrorCapture(res, requestDetailsRef) {
 
 function createNamedPipeNotificationTransport() {
   const activeClosers = new Set();
+  const SERVER_CLOSE_TIMEOUT_MS = 2000;
 
-  async function closeServer(server, pipePath) {
-    await new Promise((resolve) => {
+  async function closeServer(server, pipePath, sockets) {
+    // Destroy any live client connections (e.g. the queue-runner's persistent
+    // pipe client) first; otherwise server.close()'s callback never fires on a
+    // named pipe, which would hang the caller (e.g. deprecate-board).
+    for (const socket of sockets) {
       try {
-        server.close(() => resolve());
+        socket.destroy();
       } catch {
+        // Best-effort client teardown.
+      }
+    }
+    sockets.clear();
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
         resolve();
+      };
+      const timer = setTimeout(finish, SERVER_CLOSE_TIMEOUT_MS);
+      if (typeof timer.unref === 'function') timer.unref();
+      try {
+        server.close(() => {
+          clearTimeout(timer);
+          finish();
+        });
+      } catch {
+        clearTimeout(timer);
+        finish();
       }
     });
     if (process.platform !== 'win32') {
@@ -648,7 +672,12 @@ function createNamedPipeNotificationTransport() {
           // Best-effort stale socket cleanup.
         }
       }
+      const sockets = new Set();
       const server = net.createServer((socket) => {
+        sockets.add(socket);
+        socket.once('close', () => {
+          sockets.delete(socket);
+        });
         let buffer = '';
         socket.on('data', (chunk) => {
           buffer += chunk.toString('utf8');
@@ -676,7 +705,7 @@ function createNamedPipeNotificationTransport() {
         if (closed) return;
         closed = true;
         activeClosers.delete(close);
-        await closeServer(server, pipePath);
+        await closeServer(server, pipePath, sockets);
       };
       activeClosers.add(close);
       return () => {
@@ -1153,36 +1182,23 @@ async function handleManageBoardsRoute({
       sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
       return;
     }
+    // Dispose the board runtime first so its named-pipe notification servers and
+    // any file handles are released before we try to archive the board's
+    // workspace directory (otherwise a Windows rename can fail with EPERM).
     const runtimeEntry = boardRuntimes.get(id);
-    let runtimeClosed = false;
+    if (runtimeEntry) {
+      await disposeBoardRuntimeEntry(runtimeEntry, processLogger, id);
+    }
     let archived;
     try {
       archived = await dynamicBoards.deprecate(id);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const canRetryAfterClose = Boolean(runtimeEntry)
-        && !runtimeClosed
-        && /\bEPERM\b/i.test(message);
-      if (canRetryAfterClose) {
-        await disposeBoardRuntimeEntry(runtimeEntry, processLogger, id);
-        runtimeClosed = true;
-        try {
-          archived = await dynamicBoards.deprecate(id);
-        } catch (retryError) {
-          sendJson(res, 400, { status: 'error', error: retryError instanceof Error ? retryError.message : String(retryError) });
-          return;
-        }
-      } else {
-        sendJson(res, 400, { status: 'error', error: message });
-        return;
-      }
+      sendJson(res, 400, { status: 'error', error: error instanceof Error ? error.message : String(error) });
+      return;
     }
     if (!archived) {
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
-    }
-    if (runtimeEntry && !runtimeClosed) {
-      await disposeBoardRuntimeEntry(runtimeEntry, processLogger, id);
     }
     boardRuntimes.delete(id);
     sendJson(res, 200, {

@@ -79,10 +79,41 @@ export function createFsPathBoardsStore({ registry }) {
     const workspaceDir = typeof options.workspaceDir === 'string' && options.workspaceDir.trim()
       ? path.normalize(options.workspaceDir)
       : '';
+
+    // Best-effort move of the board workspace directory. On Windows a rename can
+    // fail with EPERM/EBUSY while another process (e.g. the queue-runner) still
+    // holds a handle inside the directory. Retry briefly, and if it still cannot
+    // be moved, leave it in place rather than throwing — the record move below is
+    // the authoritative "deprecated" action, so the board must not reappear.
+    function tryMoveWorkspace(targetDir) {
+      if (!workspaceDir || !fs.existsSync(workspaceDir)) return '';
+      const maxAttempts = 10;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          fs.renameSync(workspaceDir, targetDir);
+          return targetDir;
+        } catch (error) {
+          const code = error && typeof error === 'object' ? error.code : '';
+          const transient = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES' || code === 'ENOTEMPTY';
+          if (!transient || attempt === maxAttempts) {
+            return '';
+          }
+          // Brief synchronous backoff to let the OS release the handle.
+          const waitUntil = Date.now() + 100 * attempt;
+          while (Date.now() < waitUntil) { /* spin-wait */ }
+        }
+      }
+      return '';
+    }
+
     if (!deprecatedDir) {
       fs.rmSync(sourceRecordPath, { force: true });
       if (workspaceDir && fs.existsSync(workspaceDir)) {
-        fs.rmSync(workspaceDir, { recursive: true, force: true });
+        try {
+          fs.rmSync(workspaceDir, { recursive: true, force: true });
+        } catch {
+          // Best-effort workspace removal.
+        }
       }
       return {
         archiveId: '',
@@ -94,11 +125,7 @@ export function createFsPathBoardsStore({ registry }) {
     const { archiveBase, archiveRecordPath, archiveWorkspaceDir } = reserveArchiveBase(id);
     fs.renameSync(sourceRecordPath, archiveRecordPath);
 
-    let movedWorkspaceDir = '';
-    if (workspaceDir && fs.existsSync(workspaceDir)) {
-      fs.renameSync(workspaceDir, archiveWorkspaceDir);
-      movedWorkspaceDir = archiveWorkspaceDir;
-    }
+    const movedWorkspaceDir = tryMoveWorkspace(archiveWorkspaceDir);
 
     return {
       archiveId: archiveBase,

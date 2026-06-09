@@ -2349,6 +2349,19 @@ async function main() {
         console.error(`[cleanup] remove-card errored for ${cardId}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    try {
+      const deprecateResult = await httpJson('POST', manageBoardsUrl, {
+        subcommand: 'deprecate-board',
+        args: { boardId: BOARD_ID },
+      });
+      if (deprecateResult.status === 200 && deprecateResult.data?.status === 'success') {
+        console.log(`[cleanup] deprecated board ${BOARD_ID} -> ${jsonText(deprecateResult.data?.data || {})}`);
+      } else {
+        console.error(`[cleanup] deprecate-board failed for ${BOARD_ID}: ${jsonText(deprecateResult.data)}`);
+      }
+    } catch (error) {
+      console.error(`[cleanup] deprecate-board errored for ${BOARD_ID}: ${error instanceof Error ? error.message : String(error)}`);
+    }
     await cleanupHostedRuntimeContext();
   }
 }
