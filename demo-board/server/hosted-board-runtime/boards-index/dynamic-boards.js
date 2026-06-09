@@ -14,17 +14,6 @@ export function createDynamicBoards({ hostConfig, adapterServices }) {
     return buildBoardConfig(id, record, ctx);
   }
 
-  async function ensureSeeded() {
-    const existing = await store.list();
-    if (existing.length > 0) return { seeded: 0, total: existing.length };
-    let seeded = 0;
-    for (const [id, record] of Object.entries(hostConfig.sampleBoards || {})) {
-      await store.put(id, record);
-      seeded += 1;
-    }
-    return { seeded, total: seeded };
-  }
-
   async function list() {
     const entries = await store.list();
     return entries.map(({ id, record }) => hydrate(id, record));
@@ -92,5 +81,5 @@ export function createDynamicBoards({ hostConfig, adapterServices }) {
     return archived ? { board, ...archived } : null;
   }
 
-  return { ensureSeeded, list, get, add, saveMeta, saveRecord, deprecate, store };
+  return { list, get, add, saveMeta, saveRecord, deprecate, store };
 }

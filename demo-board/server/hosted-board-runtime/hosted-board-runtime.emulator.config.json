@@ -37,7 +37,7 @@
       "appName": "demo-board-local-queue-runner"
     }
   },
-  "sample-boards": {
+  "bootstrap-sample-boards": {
     "live": {
       "label": "Live",
       "refsTemplate": "firestore-default",

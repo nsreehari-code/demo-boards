@@ -17,7 +17,7 @@
     "taskExecutorAgentId": "asst_IMDJiVnL9fS0QbttDXKxN5lF",
     "chatExposedMcpToolPrefixes": ["liveboards.", "lore."]
   },
-  "sample-boards": {
+  "bootstrap-sample-boards": {
     "live": {
       "label": "Live",
       "ai": "copilot",

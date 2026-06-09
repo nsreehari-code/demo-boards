@@ -259,17 +259,17 @@ export function buildBoardConfig(boardId, source, { configDir, boardRoot = deriv
   };
 }
 
-function collectSampleBoards(config) {
-  const source = config?.['sample-boards'];
+function collectBootstrapSampleBoards(config) {
+  const source = config?.['bootstrap-sample-boards'];
   if (!source) return {};
   if (typeof source !== 'object' || Array.isArray(source)) {
-    throw new Error('Config sample-boards must be an object');
+    throw new Error('Config bootstrap-sample-boards must be an object');
   }
   const out = {};
   for (const [boardId, record] of Object.entries(source)) {
-    const id = requireNonEmptyString(boardId, 'sample-board id');
+    const id = requireNonEmptyString(boardId, 'bootstrap-sample-board id');
     if (!record || typeof record !== 'object' || Array.isArray(record)) {
-      throw new Error(`sample-boards.${id} must be an object`);
+      throw new Error(`bootstrap-sample-boards.${id} must be an object`);
     }
     out[id] = record;
   }
@@ -357,7 +357,7 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
   const uiTemplates = config.uiTemplates && typeof config.uiTemplates === 'object' && !Array.isArray(config.uiTemplates)
     ? config.uiTemplates
     : {};
-  const sampleBoards = collectSampleBoards(config);
+  const bootstrapSampleBoards = collectBootstrapSampleBoards(config);
   const runtimeBoardsRegistry = resolveRuntimeBoardsRegistry(config, hostTokens, storageAdapter);
   const sampleTemplateCatalog = resolveSampleTemplateCatalogConfig(config, configDir, hostTokens);
 
@@ -389,7 +389,7 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
     firebase: config.firebase && typeof config.firebase === 'object' && !Array.isArray(config.firebase)
       ? config.firebase
       : {},
-    sampleBoards,
+    bootstrapSampleBoards,
     runtimeBoardsRegistry,
     boardsIndexRef: runtimeBoardsRegistry.boardsIndexRef,
     deprecatedContainerRef: runtimeBoardsRegistry.deprecatedContainerRef,

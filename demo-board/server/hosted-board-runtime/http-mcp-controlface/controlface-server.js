@@ -739,6 +739,38 @@ async function ensureBoardAiWorkspaceReady(boardConfig, hostConfig) {
   await runSetupSingleAiWorkspaceScript(SETUP_SCRIPT_PATH, boardConfig.id, hostConfig.configPath);
 }
 
+async function bootstrapConfiguredBoards({ dynamicBoards, hostConfig, adapterServices, boardRuntimes, processLogger }) {
+  const entries = Object.entries(hostConfig.bootstrapSampleBoards || {});
+  if (entries.length === 0) {
+    return { added: 0, refreshed: 0 };
+  }
+
+  let added = 0;
+  let refreshed = 0;
+
+  for (const [boardId, record] of entries) {
+    const existingBoard = await dynamicBoards.get(boardId);
+    if (existingBoard) {
+      await ensureBoardAiWorkspaceReady(existingBoard, hostConfig);
+      const boardEntry = boardRuntimes.get(boardId) || await buildSingleBoardRuntime(hostConfig, adapterServices, existingBoard, processLogger);
+      boardRuntimes.set(boardId, boardEntry);
+      await upsertAdminTemplateCards({ boardEntry, hostConfig, board: existingBoard });
+      refreshed += 1;
+      continue;
+    }
+
+    const board = await dynamicBoards.add(boardId, record);
+    await ensureBoardAiWorkspaceReady(board, hostConfig);
+    const boardEntry = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
+    boardRuntimes.set(boardId, boardEntry);
+    await upsertAdminTemplateCards({ boardEntry, hostConfig, board });
+    added += 1;
+  }
+
+  processLogger.info(`Bootstrap sample boards: added=${added} refreshed=${refreshed}`);
+  return { added, refreshed };
+}
+
 function summarizeBoardForList(board) {
   return {
     id: board.id,
@@ -1406,7 +1438,14 @@ async function main() {
 
   server.listen(hostConfig.port, hostConfig.host, () => {
     processLogger.info(`Listening on http://${hostConfig.host}:${hostConfig.port}`);
-    processLogger.info(`Boards: ${Array.from(boardRuntimes.keys()).join(', ')}`);
+    void bootstrapConfiguredBoards({ dynamicBoards, hostConfig, adapterServices, boardRuntimes, processLogger })
+      .then(() => {
+        processLogger.info(`Boards: ${Array.from(boardRuntimes.keys()).join(', ')}`);
+      })
+      .catch((error) => {
+        processLogger.error(`Bootstrap failed: ${error instanceof Error ? error.message : String(error)}`);
+        server.close(() => process.exit(1));
+      });
   });
 }
 
