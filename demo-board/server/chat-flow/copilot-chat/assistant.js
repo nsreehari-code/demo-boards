@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
+import { runCopilot as spawnCopilot } from '../../lib/copilot-cli.js';
 import {
   AGENT_OUTPUT_FILE_STEM,
   getEnhancedChatMessages,
@@ -8,8 +8,6 @@ import {
   requireRequiredStrings,
   resolveBoardLogPath,
 } from '../shared.js';
-
-const COPILOT_MODEL = 'gpt-5.4';
 
 function normalizeWorkspaceStem(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -238,64 +236,34 @@ export async function invokeAssistant(context, config = {}) {
 
   function runCopilot(prompt, workingDir, options = {}) {
     const { continueSession = false } = options;
+    const outStream = fs.createWriteStream(agentOutputFile, { flags: 'w' });
+    outStream.write('Reasoning...\n');
 
-    return new Promise((resolve, reject) => {
-      const copilotArgs = [
-        '-C', workingDir,
-        ...(continueSession ? ['--continue'] : []),
-        '-s',
-        '--no-ask-user',
-        '--allow-all-tools',
-        '--model', COPILOT_MODEL,
-      ];
-      const execCommand = process.platform === 'win32' ? 'cmd.exe' : 'copilot';
-      const execArgs = process.platform === 'win32'
-        ? ['/d', '/c', 'copilot', ...copilotArgs]
-        : copilotArgs;
-      const outStream = fs.createWriteStream(agentOutputFile, { flags: 'w' });
-      outStream.write("Reasoning...\n");
-      let settled = false;
-      let timeoutId = null;
-      let stderrBuf = '';
-
-      const finish = (handler) => {
-        if (settled) return;
-        settled = true;
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
-        outStream.end(() => handler());
-      };
-
-      const child = spawn(execCommand, execArgs, {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-        env: process.env,
-      });
-
-      child.stdout.on('data', (chunk) => { outStream.write(chunk); });
-      child.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
-      child.on('error', (err) => {
-        finish(() => {
-          const errorText = stderrBuf.trim();
-          appendDebug('runCopilot:error', { message: err?.message ?? String(err), stderr: errorText || undefined });
-          reject(errorText ? new Error(errorText) : err);
-        });
-      });
-      child.on('close', (code) => {
-        finish(() => {
+    return spawnCopilot({
+      prompt,
+      workingDir,
+      continueSession,
+      timeoutMs: chatCopilotTimeoutMs,
+      onData: (chunk) => outStream.write(chunk),
+    }).then(
+      ({ code, stderr }) => new Promise((resolve, reject) => {
+        outStream.end(() => {
           if (code === 0) {
             resolve();
             return;
           }
-          reject(new Error(stderrBuf.trim() || `copilot exited with code ${code ?? 'unknown'}`));
+          const errorText = (stderr || '').trim();
+          appendDebug('runCopilot:error', { code, stderr: errorText || undefined });
+          reject(new Error(errorText || `copilot exited with code ${code ?? 'unknown'}`));
         });
-      });
-
-      timeoutId = setTimeout(() => { child.kill(); }, chatCopilotTimeoutMs);
-      child.stdin.end(prompt);
-    });
+      }),
+      (err) => new Promise((_resolve, reject) => {
+        outStream.end(() => {
+          appendDebug('runCopilot:error', { message: err?.message ?? String(err) });
+          reject(err);
+        });
+      }),
+    );
   }
 
   async function runCopilotWithValidationRetries(prompt, workingDir, cardIdValue) {
