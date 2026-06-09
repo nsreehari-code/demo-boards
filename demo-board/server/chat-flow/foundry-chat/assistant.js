@@ -1,13 +1,13 @@
 /**
  * foundry-chat/assistant.js — Foundry-backed chat assistant.
  *
- * Exports `invokeAssistant(extra)`. Loads the shared instructions/skills
- * from chat-flow/ and delegates to invoke.py for the Foundry agent tool-loop.
+ * Exports `invokeAssistant(extra)`. Loads the shared instructions/skills from
+ * chat-flow/ and runs the Foundry agent MCP tool-loop in-process via the shared
+ * Node Foundry client (../../lib/foundry-agents.js) — no Python subprocess.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   AGENT_OUTPUT_FILE_STEM,
@@ -17,36 +17,75 @@ import {
   getCardPrivate,
   setCardPrivate,
 } from '../shared.js';
+import {
+  createFoundryClient,
+  functionTool,
+  sanitizeFunctionName,
+  resolveThreadId,
+  runAgentToolLoop,
+  getLastAssistantText,
+} from '../../lib/foundry-agents.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CHAT_FLOW_DIR = path.resolve(HERE, '..');
 const INSTRUCTIONS_DIR = path.join(CHAT_FLOW_DIR, 'instructions');
 const SKILLS_DIR = path.join(CHAT_FLOW_DIR, 'skills');
-const INVOKE_PY = path.join(HERE, 'invoke.py');
 
-function resolvePythonExecutable() {
-  const explicit = typeof process.env.PYTHON_EXECUTABLE === 'string'
-    ? process.env.PYTHON_EXECUTABLE.trim()
-    : '';
-  if (explicit) {
-    return explicit;
+const EXPOSED_TOOL_PREFIXES_DEFAULT = ['liveboards.', 'lore.'];
+const STAGE_TOOL_NAME = 'liveboards.stage-ai-response-and-any-attachments';
+
+async function importMcpClient() {
+  const clientModule = await import('@modelcontextprotocol/sdk/client/index.js');
+  let streamableModule;
+  try {
+    streamableModule = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  } catch {
+    streamableModule = await import('@modelcontextprotocol/sdk/client/streamable-http.js');
   }
+  return {
+    Client: clientModule.Client,
+    StreamableHTTPClientTransport: streamableModule.StreamableHTTPClientTransport,
+  };
+}
 
-  const virtualEnv = typeof process.env.VIRTUAL_ENV === 'string'
-    ? process.env.VIRTUAL_ENV.trim()
-    : '';
-  if (virtualEnv) {
-    const candidates = process.platform === 'win32'
-      ? [path.join(virtualEnv, 'Scripts', 'python.exe')]
-      : [path.join(virtualEnv, 'bin', 'python3'), path.join(virtualEnv, 'bin', 'python')];
-    for (const candidate of candidates) {
-      if (candidate && fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
+function normalizeMcpToolResult(result) {
+  const structured = result?.structuredContent;
+  if (structured !== undefined && structured !== null) {
+    return JSON.stringify(structured);
   }
+  const content = Array.isArray(result?.content) ? result.content : [];
+  const chunks = [];
+  for (const entry of content) {
+    if (typeof entry?.text === 'string') chunks.push(entry.text);
+  }
+  if (chunks.length) return chunks.join('');
+  if (result?.isError) return JSON.stringify({ error: 'tool returned isError with no text' });
+  return '';
+}
 
-  return process.platform === 'win32' ? 'python' : 'python3';
+function mergeLiveboardsRuntimeHandles(toolName, fnArgs, { boardId, cardId, logId, turnId }) {
+  const args = fnArgs && typeof fnArgs === 'object' ? { ...fnArgs } : {};
+  if (!toolName.startsWith('liveboards.')) return args;
+  const legacyToSupported = {
+    boardId: 'board_id',
+    cardId: 'card_id',
+    logId: 'log_id',
+    turnId: 'turn_id',
+    'turn-id': 'turn_id',
+    'tail-turns': 'tail_turns',
+    'all-turns': 'all_turns',
+    'tail-turns-before-id': 'tail_turns_before_id',
+  };
+  for (const [legacy, supported] of Object.entries(legacyToSupported)) {
+    if (legacy in args && !(supported in args)) args[supported] = args[legacy];
+  }
+  if (boardId) args.board_id = boardId;
+  if (logId) args.log_id = logId;
+  if (toolName === STAGE_TOOL_NAME) {
+    if (cardId) args.card_id = cardId;
+    if (turnId) args.turn_id = turnId;
+  }
+  return args;
 }
 
 function readDirFilesRecursive(dir, predicate) {
@@ -279,87 +318,113 @@ export async function invokeAssistant(context, config = {}) {
     systemInstructionsLength: systemInstructions.length,
   });
 
-  const invokeRequest = {
-    endpoint: foundryEndpoint,
-    agent_id: foundryChatAgentId,
-    system_instructions: systemInstructions,
-    user_prompt: userPrompt,
-    card_id: cardId,
-    board_id: boardId,
-    log_id: logId,
-    turn_id: turnId,
-    mcp_server_url: normalizedMcpServerUrl,
-    exposed_mcp_tool_prefixes: foundryChatExposedMcpToolPrefixes
-      .filter((entry) => typeof entry === 'string' && entry.trim())
-      .map((entry) => entry.trim()),
-    existing_thread_id: existingThreadId,
-    output_file: outputFile,
-    timeout_seconds: Math.floor(chatTimeoutMs / 1000),
-  };
+  const exposedPrefixes = (Array.isArray(foundryChatExposedMcpToolPrefixes) && foundryChatExposedMcpToolPrefixes.length
+    ? foundryChatExposedMcpToolPrefixes
+    : EXPOSED_TOOL_PREFIXES_DEFAULT)
+    .filter((entry) => typeof entry === 'string' && entry.trim())
+    .map((entry) => entry.trim());
 
-  const python = resolvePythonExecutable();
-  appendDebug('foundry-assistant:pythonResolved', { python });
+  function appendOutput(line) {
+    try { fs.appendFileSync(outputFile, `${line}\n`, 'utf-8'); } catch {}
+  }
 
-  await new Promise((resolve, reject) => {
-    const child = spawn(python, [INVOKE_PY], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      env: process.env,
+  const { Client, StreamableHTTPClientTransport } = await importMcpClient();
+  const mcpClient = new Client({ name: 'foundry-chat', version: '1.0.0' }, { capabilities: {} });
+  const transport = new StreamableHTTPClientTransport(new URL(normalizedMcpServerUrl));
+
+  let resolvedThreadId = existingThreadId;
+  try {
+    appendOutput(`Connecting to MCP server at ${normalizedMcpServerUrl}. Exposed prefixes: ${exposedPrefixes.join(', ')}.`);
+    await mcpClient.connect(transport);
+
+    const toolsResult = await mcpClient.listTools();
+    const toolsMeta = (toolsResult?.tools || []).filter(
+      (t) => exposedPrefixes.length === 0 || exposedPrefixes.some((p) => t.name.startsWith(p)),
+    );
+    appendOutput(`Discovered ${toolsMeta.length} tools from MCP.`);
+    appendDebug('foundry-assistant:toolsDiscovered', { count: toolsMeta.length });
+
+    const nameMap = new Map();
+    const tools = toolsMeta.map((t) => {
+      const safe = sanitizeFunctionName(t.name);
+      nameMap.set(safe, t.name);
+      return functionTool(
+        safe,
+        t.description || `MCP tool ${t.name}`,
+        t.inputSchema && typeof t.inputSchema === 'object' ? t.inputSchema : { type: 'object', properties: {} },
+      );
     });
-    let stderrBuf = '';
-    let stdoutBuf = '';
-    child.stdout.on('data', (chunk) => {
-      try { fs.appendFileSync(outputFile, chunk); } catch {}
-      stdoutBuf += chunk.toString();
+
+    const client = createFoundryClient(foundryEndpoint);
+    resolvedThreadId = await resolveThreadId(client, existingThreadId);
+    appendOutput(`Resolved thread for card ${cardId}. thread-resolved: thread_id=${resolvedThreadId}; card_id=${cardId}`);
+    appendDebug('foundry-assistant:threadResolved', { thread_id: resolvedThreadId });
+
+    let finalReplyStaged = false;
+
+    const loop = await runAgentToolLoop({
+      client,
+      agentId: foundryChatAgentId,
+      threadId: resolvedThreadId,
+      userPrompt,
+      systemInstructions,
+      tools,
+      timeoutMs: chatTimeoutMs,
+      onProgress: (record) => {
+        if (record.stage === 'run-started') appendOutput(`Started Foundry run ${record.run_id}.`);
+        else if (record.stage === 'run-completed') appendOutput(`Completed Foundry run ${record.run_id}.`);
+      },
+      onToolCall: async (fnName, rawArgs) => {
+        const realName = nameMap.get(fnName) || fnName;
+        const mergedArgs = mergeLiveboardsRuntimeHandles(realName, rawArgs, { boardId, cardId, logId, turnId });
+        appendOutput(`Invoking '${realName}' with ${JSON.stringify(mergedArgs).slice(0, 260)}.`);
+        let resultText;
+        try {
+          const result = await mcpClient.callTool({ name: realName, arguments: mergedArgs });
+          resultText = normalizeMcpToolResult(result);
+        } catch (e) {
+          resultText = JSON.stringify({ error: `${realName} failed: ${e?.message || e}` });
+        }
+        if (realName === STAGE_TOOL_NAME) {
+          try {
+            const parsed = JSON.parse(resultText);
+            if (parsed && typeof parsed === 'object' && parsed.status === 'success') finalReplyStaged = true;
+          } catch {}
+        }
+        return resultText;
+      },
+      shouldStop: (fnName) => {
+        const realName = nameMap.get(fnName) || fnName;
+        return realName === STAGE_TOOL_NAME && finalReplyStaged;
+      },
     });
-    child.stderr.on('data', (chunk) => {
-      stderrBuf += chunk.toString();
-    });
-    const timeoutId = setTimeout(() => {
-      child.kill();
-      persistInvokeFailureLog('timeout', {
-        message: `foundry-chat invoke.py timed out after ${chatTimeoutMs}ms`,
-        stderr: stderrBuf,
-        stdout: stdoutBuf,
-      });
-      reject(new Error(`foundry-chat invoke.py timed out after ${chatTimeoutMs}ms`));
-    }, chatTimeoutMs);
-    child.on('error', (err) => {
-      clearTimeout(timeoutId);
-      persistInvokeFailureLog('spawn-error', {
-        message: err?.stack || err?.message || String(err),
-        stderr: stderrBuf,
-        stdout: stdoutBuf,
-      });
-      reject(err);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timeoutId);
-      if (code !== 0) {
-        persistInvokeFailureLog('nonzero-exit', {
-          message: `invoke.py exited with code ${code}`,
-          stderr: stderrBuf,
-          stdout: stdoutBuf,
+
+    if (finalReplyStaged) {
+      appendOutput(`Staged final reply for card ${cardId}. Run ${loop.runId} on thread ${resolvedThreadId} will stop after this stage.`);
+    } else {
+      // Agent finished without staging — surface the last assistant message ourselves.
+      const text = await getLastAssistantText(client, resolvedThreadId);
+      if (text.trim()) {
+        await mcpClient.callTool({
+          name: STAGE_TOOL_NAME,
+          arguments: { board_id: boardId, card_id: cardId, turn_id: turnId, text: text.trim(), files: [], log_id: logId },
         });
-        appendDebug('foundry-assistant:invokeFailed', {
-          code,
-          stderr: stderrBuf,
-          stdoutTail: stdoutBuf.slice(-2000),
-        });
-        reject(new Error(stderrBuf.trim() || `invoke.py exited with code ${code}`));
-        return;
+        finalReplyStaged = true;
+      } else {
+        throw new Error('run completed but no assistant text was produced');
       }
-      const match = /\bthread-resolved:\s+thread_id=([^;\s]+)/i.exec(stdoutBuf);
-      const resolvedThreadId = match ? match[1].trim() : '';
-      if (resolvedThreadId && resolvedThreadId !== existingThreadId) {
-        setCardPrivate(context, 'foundry', { thread_id: resolvedThreadId })
-          .then(resolve, resolve);
-        return;
-      }
-      resolve();
-    });
-    child.stdin.end(JSON.stringify(invokeRequest));
-  });
+    }
+  } catch (err) {
+    persistInvokeFailureLog('invoke-error', { message: err?.stack || err?.message || String(err) });
+    appendDebug('foundry-assistant:invokeFailed', { message: err?.message || String(err) });
+    throw err;
+  } finally {
+    try { await mcpClient.close(); } catch {}
+  }
+
+  if (resolvedThreadId && resolvedThreadId !== existingThreadId) {
+    try { await setCardPrivate(context, 'foundry', { thread_id: resolvedThreadId }); } catch {}
+  }
 
   appendDebug('foundry-assistant:success', { turnId });
   return { assistantHandled: true };
