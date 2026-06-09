@@ -22,6 +22,7 @@
       "label": "Live",
       "ai": "copilot",
       "aiWorkspaceTemplate": "default",
+      "cardsTemplate": "portfolio-management",
       "refsTemplate": "localfs-default",
       "uiTemplate": "default"
     }

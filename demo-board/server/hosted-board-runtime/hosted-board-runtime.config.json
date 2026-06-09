@@ -28,11 +28,11 @@
     }
   },
   "bootstrap-sample-boards": {
-  "bootstrap-sample-boards": {
     "live": {
       "label": "Live",
       "ai": "copilot",
       "aiWorkspaceTemplate": "default",
+      "cardsTemplate": "portfolio-management",
       "refsTemplate": "firestore-default",
       "uiTemplate": "default"
     }
