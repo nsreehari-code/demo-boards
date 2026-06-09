@@ -810,6 +810,7 @@ async function bootstrapConfiguredBoards({ dynamicBoards, hostConfig, adapterSer
       const boardEntry = boardRuntimes.get(boardId) || await buildSingleBoardRuntime(hostConfig, adapterServices, existingBoard, processLogger);
       await upsertBoardRuntimeEntry(boardRuntimes, boardId, boardEntry, processLogger);
       await upsertAdminTemplateCards({ boardEntry, hostConfig, board: existingBoard });
+      await applyBootstrapCardsTemplate({ boardEntry, hostConfig, dynamicBoards, boardId, record });
       refreshed += 1;
       continue;
     }
@@ -819,11 +820,16 @@ async function bootstrapConfiguredBoards({ dynamicBoards, hostConfig, adapterSer
     const boardEntry = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
     await upsertBoardRuntimeEntry(boardRuntimes, boardId, boardEntry, processLogger);
     await upsertAdminTemplateCards({ boardEntry, hostConfig, board });
+    await applyBootstrapCardsTemplate({ boardEntry, hostConfig, dynamicBoards, boardId, record });
     added += 1;
   }
 
   processLogger.info(`Bootstrap sample boards: added=${added} refreshed=${refreshed}`);
   return { added, refreshed };
+}
+
+function resolveBootstrapCardsTemplateKey(record) {
+  return typeof record?.cardsTemplate === 'string' ? record.cardsTemplate.trim() : '';
 }
 
 function summarizeBoardForList(board) {
@@ -1003,6 +1009,29 @@ async function applyBoardImport({ boardEntry, hostConfig, dynamicBoards, boardId
       invalidCards: [],
     },
   };
+}
+
+async function applyBootstrapCardsTemplate({ boardEntry, hostConfig, dynamicBoards, boardId, record }) {
+  const templateKey = resolveBootstrapCardsTemplateKey(record);
+  if (!templateKey) {
+    return;
+  }
+
+  const template = getSampleTemplateEnvelope(hostConfig, templateKey);
+  const envelope = parseBoardPayloadEnvelope(template?.payload);
+  if (!Array.isArray(envelope?.cards)) {
+    throw new Error(`Bootstrap sample template '${templateKey}' must be a JSON array of cards or an object with a cards array`);
+  }
+
+  await applyBoardImport({
+    boardEntry,
+    hostConfig,
+    dynamicBoards,
+    boardId,
+    envelope,
+    mode: 'ingest',
+    applyBoardMetadata: false,
+  });
 }
 
 async function buildBoardExport(boardEntry, board, hostConfig) {
