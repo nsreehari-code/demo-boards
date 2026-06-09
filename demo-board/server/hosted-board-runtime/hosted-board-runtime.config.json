@@ -28,6 +28,7 @@
     }
   },
   "bootstrap-sample-boards": {
+  "bootstrap-sample-boards": {
     "live": {
       "label": "Live",
       "ai": "copilot",

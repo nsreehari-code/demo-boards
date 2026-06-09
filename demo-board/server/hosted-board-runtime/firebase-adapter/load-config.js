@@ -9,8 +9,6 @@ const BOARD_REF_FIELDS = Object.freeze([
   'cardStoreRef',
   'outputsStoreRef',
   'queueStoreRef',
-  'scratchStoreRef',
-  'archiveStoreRef',
   'chatStoreRef',
   'artifactsStoreRef',
   'fetchedSourcesStoreRef',

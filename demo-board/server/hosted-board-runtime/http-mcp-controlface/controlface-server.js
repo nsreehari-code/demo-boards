@@ -617,6 +617,25 @@ function installResponseErrorCapture(res, requestDetailsRef) {
 }
 
 function createNamedPipeNotificationTransport() {
+  const activeClosers = new Set();
+
+  async function closeServer(server, pipePath) {
+    await new Promise((resolve) => {
+      try {
+        server.close(() => resolve());
+      } catch {
+        resolve();
+      }
+    });
+    if (process.platform !== 'win32') {
+      try {
+        fs.rmSync(pipePath, { force: true });
+      } catch {
+        // Best-effort socket cleanup.
+      }
+    }
+  }
+
   return {
     async subscribe(ref, onEvent) {
       if (ref?.kind !== 'named-pipe') return () => {};
@@ -652,18 +671,45 @@ function createNamedPipeNotificationTransport() {
         server.once('error', reject);
         server.listen(pipePath, () => resolve());
       });
+      let closed = false;
+      const close = async () => {
+        if (closed) return;
+        closed = true;
+        activeClosers.delete(close);
+        await closeServer(server, pipePath);
+      };
+      activeClosers.add(close);
       return () => {
-        server.close();
-        if (process.platform !== 'win32') {
-          try {
-            fs.rmSync(pipePath, { force: true });
-          } catch {
-            // Best-effort socket cleanup.
-          }
-        }
+        void close();
       };
     },
+    async closeAll() {
+      const closers = Array.from(activeClosers);
+      await Promise.allSettled(closers.map((close) => close()));
+    },
   };
+}
+
+async function disposeBoardRuntimeEntry(boardRuntimeEntry, processLogger, boardId = '') {
+  if (!boardRuntimeEntry || typeof boardRuntimeEntry !== 'object') {
+    return;
+  }
+  if (typeof boardRuntimeEntry.close !== 'function') {
+    return;
+  }
+  try {
+    await boardRuntimeEntry.close();
+  } catch (error) {
+    processLogger?.warn?.(`[controlface] Failed to close board runtime '${boardId}': ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function upsertBoardRuntimeEntry(boardRuntimes, boardId, nextEntry, processLogger) {
+  const previous = boardRuntimes.get(boardId);
+  if (previous) {
+    await disposeBoardRuntimeEntry(previous, processLogger, boardId);
+  }
+  boardRuntimes.set(boardId, nextEntry);
 }
 
 async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig, processLogger) {
@@ -696,6 +742,7 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
       resolveConfigRelativePath,
     },
   );
+  const notificationTransport = createNamedPipeNotificationTransport();
   const runtime = createSingleBoardServerRuntime({
     apiBasePath: `${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}`,
     boardId,
@@ -716,9 +763,17 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
     },
     executionExtra: boardRuntimeNeeds.taskExecutorExtra,
     logger: processLogger.child(`${boardId}:controlface`),
-    notificationTransport: createNamedPipeNotificationTransport(),
+    notificationTransport,
   });
-  return { runtime, boardRuntimeNeeds };
+  return {
+    runtime,
+    boardRuntimeNeeds,
+    async close() {
+      if (typeof notificationTransport.closeAll === 'function') {
+        await notificationTransport.closeAll();
+      }
+    },
+  };
 }
 
 async function buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards) {
@@ -753,7 +808,7 @@ async function bootstrapConfiguredBoards({ dynamicBoards, hostConfig, adapterSer
     if (existingBoard) {
       await ensureBoardAiWorkspaceReady(existingBoard, hostConfig);
       const boardEntry = boardRuntimes.get(boardId) || await buildSingleBoardRuntime(hostConfig, adapterServices, existingBoard, processLogger);
-      boardRuntimes.set(boardId, boardEntry);
+      await upsertBoardRuntimeEntry(boardRuntimes, boardId, boardEntry, processLogger);
       await upsertAdminTemplateCards({ boardEntry, hostConfig, board: existingBoard });
       refreshed += 1;
       continue;
@@ -762,7 +817,7 @@ async function bootstrapConfiguredBoards({ dynamicBoards, hostConfig, adapterSer
     const board = await dynamicBoards.add(boardId, record);
     await ensureBoardAiWorkspaceReady(board, hostConfig);
     const boardEntry = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
-    boardRuntimes.set(boardId, boardEntry);
+    await upsertBoardRuntimeEntry(boardRuntimes, boardId, boardEntry, processLogger);
     await upsertAdminTemplateCards({ boardEntry, hostConfig, board });
     added += 1;
   }
@@ -1020,7 +1075,7 @@ async function handleManageBoardsRoute({
     }
     await ensureBoardAiWorkspaceReady(board, hostConfig);
     const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
-    boardRuntimes.set(id, runtimePair);
+    await upsertBoardRuntimeEntry(boardRuntimes, id, runtimePair, processLogger);
     await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;
@@ -1064,7 +1119,7 @@ async function handleManageBoardsRoute({
     }
     await ensureBoardAiWorkspaceReady(board, hostConfig);
     const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
-    boardRuntimes.set(id, runtimePair);
+    await upsertBoardRuntimeEntry(boardRuntimes, id, runtimePair, processLogger);
     await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;
@@ -1098,16 +1153,36 @@ async function handleManageBoardsRoute({
       sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
       return;
     }
+    const runtimeEntry = boardRuntimes.get(id);
+    let runtimeClosed = false;
     let archived;
     try {
       archived = await dynamicBoards.deprecate(id);
     } catch (error) {
-      sendJson(res, 400, { status: 'error', error: error instanceof Error ? error.message : String(error) });
-      return;
+      const message = error instanceof Error ? error.message : String(error);
+      const canRetryAfterClose = Boolean(runtimeEntry)
+        && !runtimeClosed
+        && /\bEPERM\b/i.test(message);
+      if (canRetryAfterClose) {
+        await disposeBoardRuntimeEntry(runtimeEntry, processLogger, id);
+        runtimeClosed = true;
+        try {
+          archived = await dynamicBoards.deprecate(id);
+        } catch (retryError) {
+          sendJson(res, 400, { status: 'error', error: retryError instanceof Error ? retryError.message : String(retryError) });
+          return;
+        }
+      } else {
+        sendJson(res, 400, { status: 'error', error: message });
+        return;
+      }
     }
     if (!archived) {
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
+    }
+    if (runtimeEntry && !runtimeClosed) {
+      await disposeBoardRuntimeEntry(runtimeEntry, processLogger, id);
     }
     boardRuntimes.delete(id);
     sendJson(res, 200, {

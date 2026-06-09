@@ -44,8 +44,6 @@ function ensureBoardDirs(refs) {
   ensureFsPathDir(refs.baseRef);
   ensureFsPathDir(refs.cardStoreRef);
   ensureFsPathDir(refs.outputsStoreRef);
-  ensureFsPathDir(refs.scratchStoreRef);
-  ensureFsPathDir(refs.archiveStoreRef);
   ensureFsPathDir(refs.chatStoreRef);
   ensureFsPathDir(refs.artifactsStoreRef);
 }
@@ -84,8 +82,6 @@ export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, ru
     cardStoreRef: normalizeSerializedRef(refs.cardStoreRef),
     outputsStoreRef: normalizeSerializedRef(refs.outputsStoreRef),
     queueStoreRef: normalizeSerializedRef(refs.queueStoreRef),
-    scratchStoreRef: normalizeSerializedRef(refs.scratchStoreRef),
-    archiveStoreRef: normalizeSerializedRef(refs.archiveStoreRef),
     chatStoreRef: normalizeSerializedRef(refs.chatStoreRef),
     artifactsStoreRef: normalizeSerializedRef(refs.artifactsStoreRef),
     fetchedSourcesStoreRef: normalizeSerializedRef(refs.fetchedSourcesStoreRef),
