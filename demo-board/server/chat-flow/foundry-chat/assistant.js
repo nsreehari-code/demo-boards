@@ -14,8 +14,8 @@ import {
   getEnhancedChatMessages,
   requireRequiredStrings,
   resolveBoardLogPath,
-  getCardPrivate,
-  setCardPrivate,
+  getCardPrivateChatSection,
+  setCardPrivateChatSection,
 } from '../shared.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -262,7 +262,7 @@ export async function invokeAssistant(context, config = {}) {
   const outputFile = path.join(watchPartyDir, AGENT_OUTPUT_FILE_STEM);
   fs.writeFileSync(outputFile, 'Reasoning...\n', 'utf-8');
 
-  const existingFoundryPrivate = await getCardPrivate(context, 'foundry');
+  const existingFoundryPrivate = await getCardPrivateChatSection(context, 'foundry');
   const existingThreadId = String(existingFoundryPrivate?.thread_id || '').trim();
   const normalizedMcpServerUrl = streamableMcpServerUrl.trim() || mcpServerUrl;
 
@@ -352,7 +352,7 @@ export async function invokeAssistant(context, config = {}) {
       const match = /\bthread-resolved:\s+thread_id=([^;\s]+)/i.exec(stdoutBuf);
       const resolvedThreadId = match ? match[1].trim() : '';
       if (resolvedThreadId && resolvedThreadId !== existingThreadId) {
-        setCardPrivate(context, 'foundry', { thread_id: resolvedThreadId })
+        setCardPrivateChatSection(context, 'foundry', { thread_id: resolvedThreadId })
           .then(resolve, resolve);
         return;
       }

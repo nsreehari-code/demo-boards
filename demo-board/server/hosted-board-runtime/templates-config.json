@@ -148,6 +148,9 @@
             "gandalf": true,
             "desc": "Board intake card for reviewing and managing incoming evidence."
           },
+          "__private": {
+            "chat": {"copilot": {"ws": "gandalf"} }
+          },
           "view": {
             "elements": [
               {

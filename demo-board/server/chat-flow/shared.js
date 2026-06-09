@@ -311,15 +311,19 @@ function validateAssistantKey(assistantKey) {
   }
 }
 
-export async function getCardPrivate(context, assistantKey) {
+function toCardPrivateKey(assistantKey) {
   validateAssistantKey(assistantKey);
+  return `chat.${assistantKey}`;
+}
+
+export async function getCardPrivateChatSection(context, assistantKey) {
   const { serverUrl, boardId, cardId } = context ?? {};
   if (!boardId || !cardId) return {};
   try {
     const payload = await fetchServerTool(serverUrl, 'getstate.card-private', {
       board_id: boardId,
       card_id: cardId,
-      key: assistantKey,
+      key: toCardPrivateKey(assistantKey),
     }, { controlplane: true });
     if (payload?.status !== 'success' || payload?.data?.exists !== true) {
       return {};
@@ -331,8 +335,7 @@ export async function getCardPrivate(context, assistantKey) {
   }
 }
 
-export async function setCardPrivate(context, assistantKey, value, { merge = true } = {}) {
-  validateAssistantKey(assistantKey);
+export async function setCardPrivateChatSection(context, assistantKey, value, { merge = true } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('setCardPrivate value must be a plain object');
   }
@@ -340,14 +343,14 @@ export async function setCardPrivate(context, assistantKey, value, { merge = tru
   if (!boardId || !cardId) return false;
   let nextValue = value;
   if (merge) {
-    const existing = await getCardPrivate(context, assistantKey);
+    const existing = await getCardPrivateChatSection(context, assistantKey);
     nextValue = { ...existing, ...value };
   }
   try {
     const payload = await fetchServerTool(serverUrl, 'setstate.card-private', {
       board_id: boardId,
       card_id: cardId,
-      key: assistantKey,
+      key: toCardPrivateKey(assistantKey),
       value: nextValue,
     }, { controlplane: true });
     return payload?.status === 'success';

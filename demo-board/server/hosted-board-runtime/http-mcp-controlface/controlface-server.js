@@ -767,6 +767,53 @@ function listAdminTemplateCards(board) {
   return Array.isArray(cards) ? cards.filter((card) => card && typeof card === 'object' && !Array.isArray(card)) : [];
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function collectTemplatePrivateChatEntries(templatePrivateChat, parentKey = 'chat') {
+  if (!isPlainObject(templatePrivateChat)) {
+    return [];
+  }
+
+  return Object.entries(templatePrivateChat).flatMap(([key, value]) => {
+    const normalizedKey = typeof key === 'string' ? key.trim() : '';
+    if (!normalizedKey) {
+      return [];
+    }
+
+    const dottedKey = `${parentKey}.${normalizedKey}`;
+    if (!isPlainObject(value)) {
+      return [{ key: dottedKey, value }];
+    }
+
+    const nestedEntries = collectTemplatePrivateChatEntries(value, dottedKey);
+    return nestedEntries.length > 0
+      ? [{ key: dottedKey, value }, ...nestedEntries]
+      : [{ key: dottedKey, value }];
+  });
+}
+
+async function applyTemplatePrivateState({ boardEntry, hostConfig, boardId, cardId, card }) {
+  const templatePrivateChat = card?.__private?.chat;
+  const entries = collectTemplatePrivateChatEntries(templatePrivateChat);
+  for (const entry of entries) {
+    if (entry.key === 'chat.visible_controlplane_only') {
+      continue;
+    }
+
+    await invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, 'mcp-controlplane', {
+      tool: 'setstate.card-private',
+      args: {
+        board_id: boardId,
+        card_id: cardId,
+        key: entry.key,
+        value: entry.value,
+      },
+    });
+  }
+}
+
 async function upsertAdminTemplateCards({ boardEntry, hostConfig, board }) {
   const boardId = typeof board?.id === 'string' ? board.id.trim() : '';
   if (!boardId) {
@@ -788,6 +835,8 @@ async function upsertAdminTemplateCards({ boardEntry, hostConfig, board }) {
         candidate_card_content: card,
       },
     });
+
+    await applyTemplatePrivateState({ boardEntry, hostConfig, boardId, cardId, card });
   }
 }
 

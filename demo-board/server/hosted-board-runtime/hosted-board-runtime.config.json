@@ -31,12 +31,6 @@
     "live": {
       "label": "Live",
       "ai": "copilot",
-      "chat": {
-        "assistant": "foundry",
-        "copilot": {
-          "custom-workspace-stems": ["gandalf"]
-        }
-      },
       "aiWorkspaceTemplate": "default",
       "refsTemplate": "firestore-default",
       "uiTemplate": "default"

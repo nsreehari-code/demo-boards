@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import {
   AGENT_OUTPUT_FILE_STEM,
   getEnhancedChatMessages,
-  getCardPrivate,
+  getCardPrivateChatSection,
   requireRequiredStrings,
   resolveBoardLogPath,
 } from '../shared.js';
@@ -232,7 +232,7 @@ export async function invokeAssistant(context, config = {}) {
   }
 
   async function resolveWorkspaceStem() {
-    const copilotPrivate = await getCardPrivate(context, 'copilot');
+    const copilotPrivate = await getCardPrivateChatSection(context, 'copilot');
     return normalizeWorkspaceStem(copilotPrivate?.ws) || 'default';
   }
 

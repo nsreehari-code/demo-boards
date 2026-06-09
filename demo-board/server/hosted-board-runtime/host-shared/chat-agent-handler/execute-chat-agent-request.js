@@ -98,12 +98,6 @@ export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) 
   const foundryAgents = hostRuntime?.foundryAgents && typeof hostRuntime.foundryAgents === 'object'
     ? hostRuntime.foundryAgents
     : {};
-  const boardChat = boardConfig?.chat && typeof boardConfig.chat === 'object' && !Array.isArray(boardConfig.chat)
-    ? boardConfig.chat
-    : {};
-  const boardChatCopilot = boardChat?.copilot && typeof boardChat.copilot === 'object' && !Array.isArray(boardChat.copilot)
-    ? boardChat.copilot
-    : {};
 
   const aiWorkspaceRoot = typeof boardConfig?.aiWorkspaceRoot === 'string' && boardConfig.aiWorkspaceRoot.trim()
     ? path.normalize(boardConfig.aiWorkspaceRoot.trim())
@@ -120,10 +114,7 @@ export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) 
       debugAssistantFile: typeof hostRuntime?.debugAssistantFile === 'string' ? hostRuntime.debugAssistantFile.trim() : '',
       aiWorkspaceRoot,
       chatCopilotTimeoutMs: normalizePositiveInt(hostRuntime?.chatCopilotTimeoutMs, 300000) ?? 300000,
-      chatAssistant: normalizeChatAssistant(boardChat?.assistant || boardConfig?.ai),
-      copilotCustomWorkspaceStems: Array.isArray(boardChatCopilot['custom-workspace-stems'])
-        ? boardChatCopilot['custom-workspace-stems'].filter((entry) => typeof entry === 'string' && entry.trim())
-        : [],
+        chatAssistant: normalizeChatAssistant(boardConfig?.ai),
       foundryEndpoint: typeof foundryAgents.endpoint === 'string' ? foundryAgents.endpoint.trim() : '',
       foundryChatAgentId: typeof foundryAgents.chatAgentId === 'string' ? foundryAgents.chatAgentId.trim() : '',
       foundryTaskExecutorAgentId: typeof foundryAgents.taskExecutorAgentId === 'string' ? foundryAgents.taskExecutorAgentId.trim() : '',
