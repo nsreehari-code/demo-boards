@@ -3,6 +3,7 @@ import path from 'node:path';
 import { deriveBoardRootFromConfigDir } from '../../shared/board-root.js';
 
 const REF_PREFIX = 'b64:';
+const SHARED_TEMPLATES_CONFIG_NAME = 'templates-config.json';
 const BOARD_REF_FIELDS = Object.freeze([
   'boardRuntimeStoreRef',
   'cardStoreRef',
@@ -102,21 +103,40 @@ function readJsonFile(filePath) {
   return parsed;
 }
 
+function mergeNamedObjectField(left, right, fieldName) {
+  const leftValue = left?.[fieldName];
+  const rightValue = right?.[fieldName];
+  const normalizedLeft = leftValue && typeof leftValue === 'object' && !Array.isArray(leftValue) ? leftValue : {};
+  const normalizedRight = rightValue && typeof rightValue === 'object' && !Array.isArray(rightValue) ? rightValue : {};
+  return {
+    ...normalizedLeft,
+    ...normalizedRight,
+  };
+}
+
 function mergeConfigObjects(base, override) {
   const left = base && typeof base === 'object' && !Array.isArray(base) ? base : {};
   const right = override && typeof override === 'object' && !Array.isArray(override) ? override : {};
   return {
     ...left,
     ...right,
-    firebase: {
-      ...((left.firebase && typeof left.firebase === 'object' && !Array.isArray(left.firebase)) ? left.firebase : {}),
-      ...((right.firebase && typeof right.firebase === 'object' && !Array.isArray(right.firebase)) ? right.firebase : {}),
-    },
-    localfs: {
-      ...((left.localfs && typeof left.localfs === 'object' && !Array.isArray(left.localfs)) ? left.localfs : {}),
-      ...((right.localfs && typeof right.localfs === 'object' && !Array.isArray(right.localfs)) ? right.localfs : {}),
-    },
+    firebase: mergeNamedObjectField(left, right, 'firebase'),
+    localfs: mergeNamedObjectField(left, right, 'localfs'),
+    refsTemplates: mergeNamedObjectField(left, right, 'refsTemplates'),
+    aiWorkspaceTemplates: mergeNamedObjectField(left, right, 'aiWorkspaceTemplates'),
+    uiTemplates: mergeNamedObjectField(left, right, 'uiTemplates'),
+    sampleTemplateCatalog: mergeNamedObjectField(left, right, 'sampleTemplateCatalog'),
   };
+}
+
+function loadComposedConfig(configPath) {
+  const config = readJsonFile(configPath);
+  const configDir = path.dirname(configPath);
+  const sharedConfigPath = path.resolve(configDir, SHARED_TEMPLATES_CONFIG_NAME);
+  if (path.normalize(configPath) === path.normalize(sharedConfigPath) || !fs.existsSync(sharedConfigPath)) {
+    return config;
+  }
+  return mergeConfigObjects(readJsonFile(sharedConfigPath), config);
 }
 
 function resolveProcessConfig(config, processName) {
@@ -256,14 +276,24 @@ function collectSampleBoards(config) {
   return out;
 }
 
-function resolveBoardsIndexRef(config, tokens = {}) {
+function resolveBoardsIndexRef(config, tokens = {}, storageAdapter = 'firebase') {
   const source = config?.['boards-index'];
   if (!source) {
     throw new Error('Config requires a boards-index ref ({kind, value})');
   }
-  const parsed = tryParseKindValueRef(source);
+  const scopedSource = (() => {
+    const direct = tryParseKindValueRef(source);
+    if (direct) {
+      return direct;
+    }
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      return null;
+    }
+    return tryParseKindValueRef(source[storageAdapter]) || tryParseKindValueRef(source.default);
+  })();
+  const parsed = scopedSource;
   if (!parsed) {
-    throw new Error('Config boards-index must be a {kind, value} ref');
+    throw new Error(`Config boards-index must be a {kind, value} ref or a map containing '${storageAdapter}' or 'default'`);
   }
   return {
     kind: parsed.kind,
@@ -297,10 +327,13 @@ function resolveSampleTemplateCatalogConfig(config, configDir, tokens = {}) {
 
 export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv.slice(2), processName = '') {
   const configPath = parseCliConfigPath(defaultConfigPath, cliArgs);
-  const rawConfig = readJsonFile(configPath);
+  const rawConfig = loadComposedConfig(configPath);
   const config = resolveProcessConfig(rawConfig, processName);
   const configDir = path.dirname(configPath);
   const boardRoot = deriveBoardRoot(configDir);
+  const storageAdapter = typeof config.storageAdapter === 'string' && config.storageAdapter.trim()
+    ? config.storageAdapter.trim().toLowerCase()
+    : 'firebase';
   const hostTokens = {
     configDir,
     boardRoot,
@@ -316,16 +349,14 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
     ? config.uiTemplates
     : {};
   const sampleBoards = collectSampleBoards(config);
-  const boardsIndexRef = resolveBoardsIndexRef(config, hostTokens);
+  const boardsIndexRef = resolveBoardsIndexRef(config, hostTokens, storageAdapter);
   const sampleTemplateCatalog = resolveSampleTemplateCatalogConfig(config, configDir, hostTokens);
 
   return {
     configPath,
     configDir,
     boardRoot,
-    storageAdapter: typeof config.storageAdapter === 'string' && config.storageAdapter.trim()
-      ? config.storageAdapter.trim().toLowerCase()
-      : 'firebase',
+    storageAdapter,
     host: typeof config.host === 'string' && config.host.trim() ? config.host.trim() : '127.0.0.1',
     port: Number.isFinite(Number(config.port)) ? Number(config.port) : 7810,
     mcpServerUrl: resolveMcpServerUrl(config),

@@ -722,6 +722,7 @@ async function buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards) {
   const runtimes = new Map();
   const boardConfigs = await dynamicBoards.list();
   for (const boardConfig of boardConfigs) {
+    await runSetupSingleAiWorkspaceScript(boardConfig.id, hostConfig.configPath);
     runtimes.set(boardConfig.id, await buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig, processLogger));
   }
   return runtimes;
