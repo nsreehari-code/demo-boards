@@ -38,11 +38,31 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.config.json');
 const SETUP_SCRIPT_PATH = path.resolve(__dirname, '..', 'scripts', 'setup-single-ai-workspace.js');
-const HOSTED_QUEUE_LANE_TUNING = {
-  chatAgent: {
-    concurrency: 2,
-  },
-};
+function resolveChatAgentVisibilityMs(hostConfig) {
+  const explicitVisibilityMs = Number.isFinite(Number(hostConfig?.chatAgentVisibilityMs))
+    ? Math.floor(Number(hostConfig.chatAgentVisibilityMs))
+    : 0;
+  if (explicitVisibilityMs > 0) {
+    return explicitVisibilityMs;
+  }
+
+  const assistantTimeoutMs = Math.max(
+    Number.isFinite(Number(hostConfig?.chatCopilotTimeoutMs)) ? Math.floor(Number(hostConfig.chatCopilotTimeoutMs)) : 300000,
+    Number.isFinite(Number(hostConfig?.chatFlowTimeoutMs)) ? Math.floor(Number(hostConfig.chatFlowTimeoutMs)) : 0,
+    Number.isFinite(Number(hostConfig?.chatInvokeRefTimeoutMs)) ? Math.floor(Number(hostConfig.chatInvokeRefTimeoutMs)) : 0,
+  );
+
+  return assistantTimeoutMs + 60000;
+}
+
+function buildHostedQueueLaneTuning(hostConfig) {
+  return {
+    chatAgent: {
+      concurrency: 2,
+      visibilityMs: resolveChatAgentVisibilityMs(hostConfig),
+    },
+  };
+}
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -778,7 +798,7 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
     boards: [{
       ...bundle.boardContextConfig,
     }],
-    queueLaneTuning: HOSTED_QUEUE_LANE_TUNING,
+    queueLaneTuning: buildHostedQueueLaneTuning(hostConfig),
     async handleChatAgentRequest(request) {
       await executeChatAgentRequest(request, boardId, boardRuntimeNeeds);
     },
