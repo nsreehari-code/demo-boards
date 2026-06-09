@@ -10,8 +10,7 @@
     "test:firebase": "node demo-board/test/firebase-http-test.js",
     "finbook:build": "npm --prefix mcp-server-managed-truthsets/finbook run build",
     "finbook:check": "npm --prefix mcp-server-managed-truthsets/finbook run check",
-    "install:foundry": "pip install -r demo-board/server/board-worker/source-def-flows/foundry-handler/requirements.txt && pip install -r demo-board/server/chat-flow/foundry-chat/requirements.txt",
-    "postinstall": "npm run install:foundry && npm run check:prereqs",
+    "postinstall": "npm run check:prereqs",
     "start": "node scripts/start-server.cjs demo-board --all",
     "ui": "node ./node_modules/http-server/bin/http-server docs -p 8000 -c-1",
     "mcp:install": "npm --prefix mcp-server install",
@@ -27,10 +26,13 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@azure/ai-agents": "^1.1.0",
+    "@azure/identity": "^4.13.1",
     "@modelcontextprotocol/sdk": "latest",
     "axios": "^1.16.1",
     "better-sqlite3": "^12.9.0",
     "node-sse": "^0.0.2",
+    "pdf-parse": "^2.4.5",
     "yaml-flow": "^8.9.0"
   },
   "devDependencies": {

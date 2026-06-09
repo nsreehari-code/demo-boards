@@ -75,105 +75,40 @@ function resolveWorkiqCliPath() {
   return candidate;
 }
 
-function runCopilotBatSmoke(tmpDir) {
-  if (process.platform !== 'win32') {
-    throw new Error('copilot_wrapper.bat smoke check is only supported on Windows hosts');
-  }
-
-  const wrapperPath = path.join(repoRoot, 'demo-board', 'server', 'chat-flow', 'copilot-chat', 'copilot_wrapper.bat');
-  ensureFileExists(wrapperPath);
-
-  const promptFile = path.join(tmpDir, 'copilot-bat.prompt.txt');
-  const outputFile = path.join(tmpDir, 'copilot-bat.out.txt');
-  const errFile = path.join(tmpDir, 'copilot-bat.err.txt');
-
-  fs.writeFileSync(promptFile, `${query}\n`, 'utf-8');
-  fs.writeFileSync(outputFile, '', 'utf-8');
-  fs.writeFileSync(errFile, '', 'utf-8');
-
-  const result = run('cmd.exe', ['/d', '/s', '/c', wrapperPath, repoRoot, promptFile, outputFile, errFile]);
-  assertSuccess(result, 'copilot_wrapper.bat');
-
-  const output = fs.existsSync(outputFile) ? fs.readFileSync(outputFile, 'utf-8').trim() : '';
-  const stderrText = fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf-8').trim() : '';
-  const combined = `${output}\n${stderrText}`.trim();
-  if (!combined) {
-    throw new Error('copilot_wrapper.bat produced no output');
-  }
-  assertContainsFour(combined, 'copilot_wrapper.bat');
-  console.log('OK  copilot_wrapper.bat query smoke check passed');
-}
-
-function resolvePythonCommand() {
-  const candidates = process.platform === 'win32'
-    ? [
-        { cmd: 'python', argsPrefix: [] },
-        { cmd: 'py', argsPrefix: ['-3'] },
-      ]
-    : [
-        { cmd: 'python3', argsPrefix: [] },
-        { cmd: 'python', argsPrefix: [] },
-      ];
-
-  for (const candidate of candidates) {
-    const probe = run(candidate.cmd, [...candidate.argsPrefix, '--version'], { timeout: 20000 });
-    if (!probe.error && probe.status === 0) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-function runCopilotPythonSmoke(tmpDir) {
-  const wrapperPath = path.join(
+function runCopilotNodeSmoke(tmpDir) {
+  const runnerPath = path.join(
     repoRoot,
     'demo-board',
     'server',
-    'board-worker',
-    'source-def-flows',
-    'copilot-handler',
-    'copilot-wrapper.py',
+    'lib',
+    'copilot-cli.js',
   );
-  ensureFileExists(wrapperPath);
+  ensureFileExists(runnerPath);
 
-  const python = resolvePythonCommand();
-  if (!python) {
-    throw new Error('Could not find a Python interpreter (tried python/py -3)');
-  }
-
-  const promptFile = path.join(tmpDir, 'copilot-py.prompt.txt');
-  const outputFile = path.join(tmpDir, 'copilot-py.out.txt');
-  const sessionDir = path.join(tmpDir, 'copilot-py.session');
+  const promptFile = path.join(tmpDir, 'copilot-node.prompt.txt');
+  const outputFile = path.join(tmpDir, 'copilot-node.out.txt');
 
   fs.writeFileSync(promptFile, `${query}\n`, 'utf-8');
-  fs.mkdirSync(sessionDir, { recursive: true });
 
   const args = [
-    ...python.argsPrefix,
-    wrapperPath,
+    runnerPath,
     '--output-file',
     outputFile,
-    '--session-dir',
-    sessionDir,
     '--cwd',
     repoRoot,
     '--prompt-file',
     promptFile,
-    '--result-type',
-    'raw',
-    '--agent-name',
-    'setup-check',
   ];
 
-  const result = run(python.cmd, args);
-  assertSuccess(result, 'copilot-wrapper.py');
+  const result = run(process.execPath, args);
+  assertSuccess(result, 'copilot-cli.js');
 
   const output = fs.existsSync(outputFile) ? fs.readFileSync(outputFile, 'utf-8').trim() : '';
   if (!output) {
-    throw new Error('copilot-wrapper.py produced no output');
+    throw new Error('copilot-cli.js produced no output');
   }
-  assertContainsFour(output, 'copilot-wrapper.py');
-  console.log('OK  copilot-wrapper.py query smoke check passed');
+  assertContainsFour(output, 'copilot-cli.js');
+  console.log('OK  copilot-cli.js query smoke check passed');
 }
 
 function runWorkiqCliSmoke() {
@@ -196,15 +131,13 @@ function main() {
   try {
     if (mode === 'copilot') {
       console.log('Running Copilot wrapper setup smoke checks...');
-      runCopilotBatSmoke(tmpDir);
-      runCopilotPythonSmoke(tmpDir);
+      runCopilotNodeSmoke(tmpDir);
     } else if (mode === 'workiq') {
       console.log('Running WorkIQ CLI setup smoke check...');
       runWorkiqCliSmoke();
     } else {
       console.log('Running Copilot + WorkIQ CLI setup smoke checks...');
-      runCopilotBatSmoke(tmpDir);
-      runCopilotPythonSmoke(tmpDir);
+      runCopilotNodeSmoke(tmpDir);
       runWorkiqCliSmoke();
     }
     console.log('All setup checks passed.');

@@ -2,10 +2,115 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import { runCopilot as spawnCopilot } from '../../../lib/copilot-cli.js';
 
-const HANDLER_DIR = path.dirname(fileURLToPath(import.meta.url));
+// ---------------------------------------------------------------------------
+// Output processing — copilot decorates its output with tool-op and stats lines
+// that must be stripped before we can parse the model's actual JSON answer.
+// ---------------------------------------------------------------------------
+
+const NOISE_PATTERNS = [
+  /^[\u25cf\u2022] /,                 // ● bullet tool ops
+  /^X /,                             // X failed tool ops
+  /^\$ /,                            // $ shell commands
+  /^[\u2514\u251c]/,                 // └ ├ tree lines
+  /session-state.*\.json/,          // session-state file paths
+  /agent.decision has been simulated/,
+  /has been simulated and saved/,
+  /^\d+ (?:files?|lines?|matches?) found$/,
+  /^No matches found$/,
+  /^Path does not exist$/,
+  /^\d+ lines?(?: read)?$/,
+];
+
+const STATS_PREFIXES = [
+  'Total usage est:', 'API time spent:', 'Total session time:',
+  'Total code changes:', 'Breakdown by AI model:', 'Session:',
+  'Changes', 'Requests', 'Tokens',
+];
+
+const KNOWN_NOISE_LINES = [
+  "error: unknown option '--no-warnings'",
+  "Try 'copilot --help' for more information",
+];
+
+function cleanOutput(raw) {
+  const lines = String(raw).split(/\r?\n/).filter(
+    (line) => !KNOWN_NOISE_LINES.some((noise) => line.includes(noise)),
+  );
+  const contentLines = lines.filter((line) => {
+    const stripped = line.replace(/^\s+/, '');
+    return !NOISE_PATTERNS.some((p) => p.test(stripped));
+  });
+  const resultLines = [];
+  let hitStats = false;
+  for (const line of contentLines) {
+    if (!hitStats) {
+      const stripped = line.replace(/^\s+/, '');
+      if (STATS_PREFIXES.some((prefix) => stripped.startsWith(prefix))) hitStats = true;
+    }
+    if (!hitStats) resultLines.push(line);
+  }
+  return resultLines.join('\n').trim();
+}
+
+function extractJson(text, shapeKeys) {
+  const hasShape = (obj) => !shapeKeys || shapeKeys.length === 0
+    || shapeKeys.every((k) => Object.prototype.hasOwnProperty.call(obj, k));
+
+  const fenced = /```json\s*([\s\S]*?)```/.exec(text);
+  if (fenced) {
+    try {
+      const obj = JSON.parse(fenced[1].trim());
+      if (obj && typeof obj === 'object' && !Array.isArray(obj) && hasShape(obj)) return fenced[1].trim();
+    } catch {}
+  }
+
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth += 1;
+    } else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        const candidate = text.slice(start, i + 1);
+        try {
+          const obj = JSON.parse(candidate);
+          if (obj && typeof obj === 'object' && !Array.isArray(obj) && hasShape(obj)) return candidate;
+        } catch {}
+        start = -1;
+      }
+    }
+  }
+  return null;
+}
+
+function shapeSkeleton(shapeKeys) {
+  if (shapeKeys && shapeKeys.length > 0) {
+    return JSON.stringify(Object.fromEntries(shapeKeys.map((k) => [k, null])));
+  }
+  return '{}';
+}
+
+// Persist a stable session id per agent so copilot's native --session-id can
+// resume multi-turn context across runs.
+function getOrCreateSessionId(aiWorkspaceRoot, bindTo) {
+  const sessionDir = path.join(
+    aiWorkspaceRoot,
+    'copilot-sessions',
+    String(bindTo || 'default').replace(/[^a-zA-Z0-9_-]/g, '_'),
+  );
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const idFile = path.join(sessionDir, 'session.id');
+  if (fs.existsSync(idFile)) return fs.readFileSync(idFile, 'utf-8').trim();
+  const id = randomUUID();
+  fs.writeFileSync(idFile, id, 'utf-8');
+  return id;
+}
 
 function interpolate(template, args) {
   return String(template).replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key) => {
@@ -45,85 +150,41 @@ function resolvePrompt(sourceDef, promptContext) {
   return interpolate(template, args);
 }
 
-function runCopilot(prompt, sourceDef, executorDir, extra) {
-  const wrapperPath = path.join(HANDLER_DIR, 'copilot-wrapper.py');
-  const python = process.platform === 'win32' ? 'python' : 'python3';
+async function runCopilot(prompt, sourceDef, executorDir, extra) {
+  const copilotCwd = extra?.aiWorkspaceRoot || process.cwd();
+  const bindTo = String(sourceDef?.bindTo || 'executor');
+  const sessionId = getOrCreateSessionId(copilotCwd, bindTo);
 
-  if (fs.existsSync(wrapperPath)) {
-    const tmpBase = path.join(process.env.TEMP || process.cwd(), `copilot-handler-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-    const outFile = `${tmpBase}.out.json`;
-    const promptFile = `${tmpBase}.prompt.txt`;
-    const copilotCwd = extra?.aiWorkspaceRoot || process.cwd();
-    const sessionDir = path.join(
-      copilotCwd,
-      'copilot-sessions',
-      String(sourceDef?.bindTo || 'default').replace(/[^a-zA-Z0-9_-]/g, '_'),
-    );
-    fs.mkdirSync(sessionDir, { recursive: true });
-    fs.writeFileSync(promptFile, prompt, 'utf-8');
+  const shape = sourceDef?.copilot?.result_shape ?? sourceDef?.result_shape;
+  const shapeKeys = shape && typeof shape === 'object' && !Array.isArray(shape)
+    ? Object.keys(shape)
+    : null;
 
-    let shapeFile = '';
-    const shape = sourceDef?.copilot?.result_shape ?? sourceDef?.result_shape;
-    if (shape && typeof shape === 'object') {
-      shapeFile = `${tmpBase}.shape.json`;
-      fs.writeFileSync(shapeFile, JSON.stringify(shape), 'utf-8');
-    }
+  const invoke = async (text) => {
+    const { stdout, stderr } = await spawnCopilot({
+      prompt: text,
+      workingDir: copilotCwd,
+      sessionId,
+    });
+    return cleanOutput(stderr ? `${stdout}\n${stderr}` : stdout);
+  };
 
-    const pyArgs = [
-      wrapperPath,
-      '--output-file', outFile,
-      '--session-dir', sessionDir,
-      '--cwd', copilotCwd,
-      '--prompt-file', promptFile,
-      '--result-type', 'json',
-      '--agent-name', String(sourceDef?.bindTo || 'executor'),
-    ];
-    if (shapeFile) {
-      pyArgs.push('--result-shape-file', shapeFile);
-    }
+  // First attempt
+  const cleaned = await invoke(prompt);
+  let found = cleaned ? extractJson(cleaned, shapeKeys) : null;
 
-    try {
-      execFileSync(python, pyArgs, {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: 600_000,
-        windowsHide: true,
-      });
-      return JSON.parse(fs.readFileSync(outFile, 'utf-8').replace(/^\uFEFF/, ''));
-    } finally {
-      try { fs.unlinkSync(promptFile); } catch {}
-      try { fs.unlinkSync(outFile); } catch {}
-      if (shapeFile) { try { fs.unlinkSync(shapeFile); } catch {} }
-    }
+  // One retry asking copilot for JSON only (resumes the same native session)
+  if (!found && cleaned) {
+    const retryPrompt = [
+      'Your previous response did not contain a valid JSON object.',
+      'Please respond with ONLY the JSON object — no markdown, no explanation, no preamble.',
+      'Start your response with { and end with }.',
+    ].join('\n');
+    found = extractJson(await invoke(retryPrompt), shapeKeys);
   }
 
-  // Fallback: direct copilot CLI invocation
-  const stdout = execFileSync('copilot', ['--allow-all'], {
-    input: prompt,
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 120000,
-    cwd: extra?.aiWorkspaceRoot || process.cwd(),
-    windowsHide: true,
-    maxBuffer: 10 * 1024 * 1024,
-  });
-
-  const firstBrace = stdout.indexOf('{');
-  const firstBracket = stdout.indexOf('[');
-  let jsonStart = -1;
-  if (firstBrace === -1) jsonStart = firstBracket;
-  else if (firstBracket === -1) jsonStart = firstBrace;
-  else jsonStart = Math.min(firstBrace, firstBracket);
-
-  if (jsonStart !== -1) {
-    try {
-      return JSON.parse(stdout.slice(jsonStart));
-    } catch {
-      return stdout;
-    }
-  }
-  return stdout;
+  const jsonText = found || shapeSkeleton(shapeKeys);
+  return JSON.parse(jsonText);
 }
 
 export async function execute(context) {
@@ -142,7 +203,7 @@ export async function execute(context) {
   }
 
   try {
-    const resultValue = runCopilot(prompt, sourceDef, executorDir, extra);
+    const resultValue = await runCopilot(prompt, sourceDef, executorDir, extra);
     return { result: 'success', data: { resultValue } };
   } catch (err) {
     const msg = String(err?.message || err);
