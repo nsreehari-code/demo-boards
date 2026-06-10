@@ -161,6 +161,25 @@ async function createTransport(connection) {
   throw new Error(`Unsupported mcp.proxy transport: ${connection.transport}`);
 }
 
+// Many MCP tools (including Sentinel's query_lake) return structured JSON
+// in content[].text rather than in structuredContent. We treat that text as
+// canonical structured data: when it parses cleanly as JSON we surface the
+// parsed value, otherwise the original string is preserved.
+function parseTextAsJsonOrPassThrough(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return text;
+  const first = trimmed[0];
+  if (first !== '{' && first !== '[' && first !== '"' && first !== '-' && (first < '0' || first > '9')
+    && trimmed !== 'true' && trimmed !== 'false' && trimmed !== 'null') {
+    return text;
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return text;
+  }
+}
+
 function normalizeToolResult(response) {
   const content = Array.isArray(response?.content) ? response.content : [];
   const firstText = content.find((entry) => entry?.type === 'text' && typeof entry.text === 'string');
@@ -177,7 +196,7 @@ function normalizeToolResult(response) {
   }
 
   if (firstText && (!structured || (typeof structured === 'object' && Object.keys(structured).length === 0))) {
-    return firstText.text;
+    return parseTextAsJsonOrPassThrough(firstText.text);
   }
 
   return structured ?? content ?? response;
@@ -185,6 +204,33 @@ function normalizeToolResult(response) {
 
 function resolveRemoteCall(args, tool) {
   const config = tool?.config && typeof tool.config === 'object' ? tool.config : {};
+
+  // The mcp.proxy handler supports three calling conventions:
+  //
+  //   1. Router envelope — manifest opts in by declaring
+  //      config.remoteToolFromArg and/or config.remoteArgumentsFromArg.
+  //      The local tool acts as a dispatcher: callers send
+  //      { tool: "<remoteName>", arguments: { ... } } and the proxy
+  //      forwards the inner arguments to the named upstream tool.
+  //
+  //   2. Pinned remote name — manifest sets config.remoteTool to a fixed
+  //      upstream tool name. The caller-supplied args object is forwarded
+  //      verbatim as the upstream arguments.
+  //
+  //   3. Transparent passthrough (default) — neither config key is set.
+  //      The local tool name is reused as the upstream tool name and the
+  //      caller-supplied args object is forwarded verbatim. This mirrors a
+  //      1:1 re-export of the upstream tool.
+  //
+  // Previously the default branch always assumed convention #1, which
+  // silently dropped the caller's arguments (and surfaced as upstream
+  // schema errors like "Argument 'query' for property 'queryFormat' is
+  // not defined in the arguments.") for any transparent re-export.
+
+  const hasRouterConfig =
+    typeof config.remoteToolFromArg === 'string' && config.remoteToolFromArg
+      || typeof config.remoteArgumentsFromArg === 'string' && config.remoteArgumentsFromArg;
+
   const remoteToolField = typeof config.remoteToolFromArg === 'string' && config.remoteToolFromArg
     ? config.remoteToolFromArg
     : 'tool';
@@ -192,13 +238,28 @@ function resolveRemoteCall(args, tool) {
     ? config.remoteArgumentsFromArg
     : 'arguments';
 
-  const remoteTool = typeof config.remoteTool === 'string' && config.remoteTool
-    ? config.remoteTool
-    : (typeof args?.[remoteToolField] === 'string' && args[remoteToolField].trim() ? args[remoteToolField].trim() : tool.name);
+  const safeArgs = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
 
-  const remoteArguments = config.remoteTool
-    ? (args && typeof args === 'object' ? args : {})
-    : (args?.[remoteArgsField] && typeof args[remoteArgsField] === 'object' ? args[remoteArgsField] : {});
+  let remoteTool;
+  let remoteArguments;
+
+  if (typeof config.remoteTool === 'string' && config.remoteTool) {
+    // Convention #2: pinned remote name; forward args verbatim.
+    remoteTool = config.remoteTool;
+    remoteArguments = safeArgs;
+  } else if (hasRouterConfig) {
+    // Convention #1: router envelope; pull the named fields out of args.
+    remoteTool = typeof safeArgs[remoteToolField] === 'string' && safeArgs[remoteToolField].trim()
+      ? safeArgs[remoteToolField].trim()
+      : tool.name;
+    remoteArguments = safeArgs[remoteArgsField] && typeof safeArgs[remoteArgsField] === 'object' && !Array.isArray(safeArgs[remoteArgsField])
+      ? safeArgs[remoteArgsField]
+      : {};
+  } else {
+    // Convention #3: transparent passthrough using the local tool name.
+    remoteTool = tool.name;
+    remoteArguments = safeArgs;
+  }
 
   if (!remoteTool) {
     throw new Error('Unable to resolve remote MCP tool name');

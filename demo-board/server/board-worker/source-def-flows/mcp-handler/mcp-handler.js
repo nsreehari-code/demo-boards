@@ -145,6 +145,41 @@ function normalizeToolResult(response) {
   return structured ?? content ?? response;
 }
 
+// Adapt the upstream MCP result to a known shape declared by the source-def
+// via cfg.responseShape. Throws on shape mismatch (no silent fallbacks).
+//
+// Supported shapes:
+//   "kusto-v2" — Sentinel/Kusto v2 frames array. Extracts the frame whose
+//                TableKind === "PrimaryResult" and emits:
+//                  { columns: [{ name, type }], rows: [{ <col>: <value>, ... }] }
+function applyResponseShape(value, shape) {
+  if (shape === 'kusto-v2') {
+    if (!Array.isArray(value)) {
+      throw new Error(`responseShape "kusto-v2" expected an array of Kusto frames; got ${value === null ? 'null' : typeof value}`);
+    }
+    const primary = value.find((frame) => frame && frame.FrameType === 'DataTable' && frame.TableKind === 'PrimaryResult');
+    if (!primary) {
+      throw new Error('responseShape "kusto-v2": no frame with TableKind="PrimaryResult" in upstream result');
+    }
+    if (!Array.isArray(primary.Columns) || !Array.isArray(primary.Rows)) {
+      throw new Error('responseShape "kusto-v2": PrimaryResult frame is missing Columns or Rows arrays');
+    }
+    const columnNames = primary.Columns.map((col) => col?.ColumnName);
+    const rows = primary.Rows.map((rawRow) => {
+      const obj = {};
+      for (let i = 0; i < columnNames.length; i += 1) {
+        obj[columnNames[i]] = rawRow[i];
+      }
+      return obj;
+    });
+    return {
+      columns: primary.Columns.map((col) => ({ name: col?.ColumnName, type: col?.ColumnType })),
+      rows,
+    };
+  }
+  throw new Error(`Unknown mcp.responseShape: ${JSON.stringify(shape)}. Supported: "kusto-v2".`);
+}
+
 export async function execute(context) {
   const sourceDef = context?.sourceDef || {};
   const extra = context?.extra || {};
@@ -161,10 +196,9 @@ export async function execute(context) {
     return { result: 'failure', data: { error: 'mcp.server is required (string registry name or inline connection object)' }, error: 'missing server' };
   }
 
-  const interpolationContext = {
-    ...(sourceDef._projections || {}),
-    ...((cfg.args && typeof cfg.args === 'object') ? cfg.args : {}),
-  };
+  const interpolationContext = (sourceDef._projections && typeof sourceDef._projections === 'object' && !Array.isArray(sourceDef._projections))
+    ? sourceDef._projections
+    : {};
 
   try {
     // Resolve server: string → look up in mcp-server/registry.json; object → use inline
@@ -202,7 +236,16 @@ export async function execute(context) {
     }
 
     const connection = resolveConnection(manifestConnection, resolvedServerOverride);
-    const toolArguments = interpolateValue(cfg.input && typeof cfg.input === 'object' ? cfg.input : {}, interpolationContext);
+
+    // Tool arguments come from cfg.input. The schema (source_def_flows.json,
+    // mcp kind) declares input as the single canonical payload field.
+    if (cfg.input !== undefined && (typeof cfg.input !== 'object' || cfg.input === null || Array.isArray(cfg.input))) {
+      throw new Error('mcp.input must be an object when provided');
+    }
+    if (cfg.responseShape !== undefined && typeof cfg.responseShape !== 'string') {
+      throw new Error('mcp.responseShape must be a string when provided');
+    }
+    const toolArguments = interpolateValue(cfg.input || {}, interpolationContext);
 
     const { Client } = await importClientModules();
     const client = new Client(
@@ -217,7 +260,10 @@ export async function execute(context) {
         name: cfg.tool,
         arguments: toolArguments,
       });
-      const resultValue = normalizeToolResult(response);
+      const rawValue = normalizeToolResult(response);
+      const resultValue = cfg.responseShape
+        ? applyResponseShape(rawValue, cfg.responseShape)
+        : rawValue;
       return { result: 'success', data: { resultValue } };
     } finally {
       if (typeof transport.close === 'function') {

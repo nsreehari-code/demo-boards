@@ -269,9 +269,10 @@
           "expects": [
             "a logical server name or inline server connection config",
             "a concrete tool name",
-            "optional input or args payloads for that tool"
+            "an optional input object for the tool's arguments",
+            "an optional responseShape adapter for known result formats (e.g. kusto-v2)"
           ],
-          "returns": "The invoked MCP tool result, validated against the selected server/tool surface."
+          "returns": "The invoked MCP tool result, validated against the selected server/tool surface and optionally adapted by responseShape."
         },
         "inputSchema": {
           "mcp": {
@@ -289,11 +290,13 @@
               },
               "input": {
                 "type": "object",
-                "required": false
+                "required": false,
+                "description": "Arguments object forwarded verbatim to the upstream MCP tool. String values support {{projection}} interpolation."
               },
-              "args": {
-                "type": "object",
-                "required": false
+              "responseShape": {
+                "type": "string",
+                "required": false,
+                "description": "Optional adapter applied to the upstream result. Supported values: \"kusto-v2\" — extracts the PrimaryResult frame from a Kusto v2 frames array and emits { columns: [{name,type}], rows: [{<col>: <value>, ...}] }."
               }
             }
           }

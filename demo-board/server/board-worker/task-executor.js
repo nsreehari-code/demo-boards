@@ -412,12 +412,25 @@ async function readJsonFromStdin() {
 }
 
 function validateRunSourcePreflightProjections(sourceDef) {
-  const projections = sourceDef?._projections;
-  if (!projections || typeof projections !== 'object' || Array.isArray(projections)) {
+  const declared = sourceDef?.projections;
+  const declaredKeys = isPlainObject(declared) ? Object.keys(declared) : [];
+
+  // Sources that declare no projections (e.g. hardcoded queries) have nothing
+  // to substitute, so an empty/missing _projections is valid for preflight.
+  if (declaredKeys.length === 0) {
+    return;
+  }
+
+  const resolved = sourceDef?._projections;
+  if (!isPlainObject(resolved)) {
     throw new Error('Missing _projections object for run-source-preflight');
   }
-  if (Object.keys(projections).length === 0) {
-    throw new Error('Missing required projection values for run-source-preflight');
+
+  const missing = declaredKeys.filter((key) => resolved[key] === undefined);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required projection values for run-source-preflight: ${missing.join(', ')}`,
+    );
   }
 }
 
