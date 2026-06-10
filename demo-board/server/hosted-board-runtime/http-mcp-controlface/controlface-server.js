@@ -1157,18 +1157,18 @@ async function main() {
     };
 
     if (parsedBaseUrl.pathname === AGENT_MCP_PATHS.mcp || parsedBaseUrl.pathname === AGENT_MCP_PATHS.manifest) {
-      let agentReq = req;
+      let parsedAgentBody;
       requestDetails = {
         routeKind: 'agent-mcp',
         sessionId: readMcpSessionIdHeader(req),
       };
       if (parsedBaseUrl.pathname === AGENT_MCP_PATHS.mcp && req.method === 'POST') {
         const rawBody = await readRawRequestBody(req);
-        const body = parseJsonObjectOrEmpty(rawBody);
-        const params = body?.params && typeof body.params === 'object' && !Array.isArray(body.params)
-          ? body.params
+        parsedAgentBody = parseJsonObjectOrEmpty(rawBody);
+        const params = parsedAgentBody?.params && typeof parsedAgentBody.params === 'object' && !Array.isArray(parsedAgentBody.params)
+          ? parsedAgentBody.params
           : {};
-        const rpcMethod = normalizeText(body?.method);
+        const rpcMethod = normalizeText(parsedAgentBody?.method);
         const toolName = rpcMethod === 'tools/call' && typeof params?.name === 'string'
           ? params.name.trim()
           : '';
@@ -1180,17 +1180,13 @@ async function main() {
           cardId: normalizeText(readMcpArg(args, 'card_id', 'cardId')),
           turnId: normalizeText(readMcpArg(args, 'turn_id', 'turnId', 'turn')),
         };
-        agentReq = createReplayableRequest(req, rawBody);
-        if (agentReq.headers && typeof agentReq.headers === 'object') {
-          agentReq.headers = { ...agentReq.headers, 'content-length': String(rawBody.length) };
-        }
       }
       requestLogger = processLogger.child(normalizeControlfaceScope('agent-mcp', '', boardRuntimes));
       requestLogger.info(formatControlfacePickupMessage(req, parsedBaseUrl, requestDetails));
       res.once('finish', logCompletionOnce);
       res.once('close', logCompletionOnce);
       try {
-        await agentMcp.handleRequest(agentReq, res, parsedBaseUrl);
+        await agentMcp.handleRequest(req, res, parsedBaseUrl, parsedAgentBody);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         requestDetails.errorMessage = message;

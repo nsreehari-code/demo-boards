@@ -5,6 +5,7 @@ import {
   AGENT_OUTPUT_FILE_STEM,
   getEnhancedChatMessages,
   getCardPrivateChatSection,
+  isAssistantMessageInTurn,
   requireRequiredStrings,
   resolveBoardLogPath,
 } from '../shared.js';
@@ -117,38 +118,8 @@ function formatChatTranscript(messages) {
   return blocks.join('\n\n');
 }
 
-function findAssistantMessage(messages) {
-  if (!Array.isArray(messages)) {
-    return null;
-  }
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role === 'assistant' && typeof message.text === 'string' && message.text.trim().length > 0) {
-      return message;
-    }
-  }
-
-  return null;
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForAssistantMessage(context, cardId, timeoutMs = 10000, pollMs = 250) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() <= deadline) {
-    const turnMessages = await getEnhancedChatMessages(context, { cardId });
-    const assistantMessage = findAssistantMessage(turnMessages);
-    if (assistantMessage) {
-      return assistantMessage;
-    }
-    if (Date.now() < deadline) {
-      await sleep(pollMs);
-    }
-  }
-  return null;
+async function readAssistantMessageOnce(context, cardId) {
+  return isAssistantMessageInTurn(context, { cardId });
 }
 
 function buildCombinedRepairPrompt(cardIdValue) {
@@ -277,7 +248,7 @@ export async function invokeAssistant(context, config = {}) {
         workingDir,
         { continueSession: attempt > 0 },
       );
-      assistantMessage = await waitForAssistantMessage(context, cardIdValue);
+      assistantMessage = await readAssistantMessageOnce(context, cardIdValue);
       if (assistantMessage) {
         break;
       }

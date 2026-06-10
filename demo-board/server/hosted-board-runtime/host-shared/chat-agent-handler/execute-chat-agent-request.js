@@ -6,6 +6,7 @@ import {
   AGENT_OUTPUT_FILE_STEM,
   buildContext,
   deriveLogIdFromCardId,
+  isAssistantMessageInTurn,
   resolveBoardWatchpartyCardDir,
 } from '../../../chat-flow/shared.js';
 import { deriveBoardRootFromModuleUrl } from '../../../shared/board-root.js';
@@ -51,6 +52,10 @@ function normalizeChatAssistant(value) {
 
 function normalizeString(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function trimTrailingSlash(value) {
@@ -165,6 +170,31 @@ async function setChatProcessingState(serverUrl, boardId, cardId, state) {
   }
 }
 
+async function waitForAssistantReplyVisible(serverUrl, boardId, cardId, turnId, options = {}) {
+  const {
+    stopSignal = null,
+    pollMs = 500,
+    timeoutMs = 2100000,
+  } = options;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    if (stopSignal?.stopped === true) {
+      return false;
+    }
+    try {
+      if (await isAssistantMessageInTurn({ serverUrl, boardId, cardId, turnId })) {
+        return true;
+      }
+    } catch {
+      // Best-effort only; the final cleanup path still clears processing.
+    }
+    await sleep(pollMs);
+  }
+
+  return false;
+}
+
 export async function executeChatAgentRequest(request, boardId, boardRuntimeNeeds) {
   const requestArgs = request && typeof request.args === 'object' && !Array.isArray(request.args)
     ? request.args
@@ -201,8 +231,32 @@ export async function executeChatAgentRequest(request, boardId, boardRuntimeNeed
   const assistantName = normalizeChatAssistant(extra.chatAssistant);
   const watchpartyFileRegistry = boardRuntimeNeeds?.chatAgentHandlerNeeds?.watchpartyFileRegistry;
   const notifyUrl = normalizeString(boardRuntimeNeeds?.chatAgentHandlerNeeds?.notifyUrl);
+  const assistantTimeoutMs = normalizePositiveInt(extra.chatCopilotTimeoutMs, 2100000) ?? 2100000;
+  let processingCleared = false;
+  const replyVisibleMonitorState = { stopped: false };
+
+  async function clearChatProcessing() {
+    if (processingCleared) {
+      return;
+    }
+    await setChatProcessingState(serverUrl, boardId, cardId, 'done');
+    processingCleared = true;
+  }
 
   await setChatProcessingState(serverUrl, boardId, cardId, 'started');
+  const replyVisibleMonitorPromise = waitForAssistantReplyVisible(serverUrl, boardId, cardId, turnId, {
+    stopSignal: replyVisibleMonitorState,
+    timeoutMs: assistantTimeoutMs,
+  }).then(async (replyVisible) => {
+    if (!replyVisible) {
+      return;
+    }
+    try {
+      await clearChatProcessing();
+    } catch (clearError) {
+      console.error(`[execute-chat-agent-request] failed to clear chat-processing early for ${boardId}/${cardId}:`, clearError);
+    }
+  });
   try {
     const invokeAssistant = await loadAssistantInvoker(assistantName);
     executeChatAgentLogger.info(`Invoking ${assistantName}`);
@@ -231,8 +285,10 @@ export async function executeChatAgentRequest(request, boardId, boardRuntimeNeed
       }
     }
   } finally {
+    replyVisibleMonitorState.stopped = true;
+    await replyVisibleMonitorPromise.catch(() => {});
     try {
-      await setChatProcessingState(serverUrl, boardId, cardId, 'done');
+      await clearChatProcessing();
     } catch (clearError) {
       console.error(`[execute-chat-agent-request] failed to clear chat-processing for ${boardId}/${cardId}:`, clearError);
     }

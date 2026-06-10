@@ -10,6 +10,26 @@ const FILE_INDEX_PATTERN = /#(\d+)\s*$/;
 const ATTACHMENT_MARKER = '[attachment]';
 const PROBE_PROGRESS_LINE = 'Probe progress: staging assistant reply';
 
+function messageRole(message) {
+  if (typeof message?.role === 'string') {
+    return message.role.trim().toLowerCase();
+  }
+  if (typeof message?.payload?.role === 'string') {
+    return message.payload.role.trim().toLowerCase();
+  }
+  return '';
+}
+
+function messageText(message) {
+  if (typeof message?.text === 'string') {
+    return message.text.trim();
+  }
+  if (typeof message?.payload?.text === 'string') {
+    return message.payload.text.trim();
+  }
+  return '';
+}
+
 function appendProbeOutputProgress(context, text) {
   const watchPartyDir = typeof context?.watchPartyDir === 'string' ? context.watchPartyDir.trim() : '';
   const line = typeof text === 'string' ? text.trim() : '';
@@ -62,8 +82,10 @@ function normalizeProbe(value) {
 function findLatestUserMessage(messages) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message?.role === 'user' && typeof message.text === 'string' && message.text.trim()) {
-      return message.text.trim();
+    const role = messageRole(message);
+    const text = messageText(message);
+    if (role === 'user' && text) {
+      return text;
     }
   }
   return '';
@@ -96,7 +118,7 @@ function parseFileIndexFromMessage(message) {
 function findLatestAttachmentFileIndex(messages) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message?.role !== 'system') {
+    if (messageRole(message) !== 'system') {
       continue;
     }
     const fileIndex = parseFileIndexFromMessage(message);

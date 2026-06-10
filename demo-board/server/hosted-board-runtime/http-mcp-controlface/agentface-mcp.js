@@ -318,7 +318,7 @@ export function createAgentMcpHandler({ hostConfig, boardRuntimes, logger = null
 
   log(`loaded ${surface.toolCount} tools from ${surface.manifestPath}`);
 
-  async function handleRequest(req, res, parsedUrl) {
+  async function handleRequest(req, res, parsedUrl, parsedBodyOverride = undefined) {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, CORS_HEADERS);
       res.end();
@@ -337,7 +337,9 @@ export function createAgentMcpHandler({ hostConfig, boardRuntimes, logger = null
     const sessionId = headerSessionId(req);
 
     if (req.method === 'POST') {
-      const parsedBody = await readJsonBody(req);
+      const parsedBody = parsedBodyOverride === undefined
+        ? await readJsonBody(req)
+        : parsedBodyOverride;
 
       if (sessionId && sessionTransports.has(sessionId)) {
         await sessionTransports.get(sessionId).handleRequest(req, res, parsedBody);

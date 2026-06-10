@@ -303,6 +303,37 @@ async function readChatMessages(serverUrl, boardId, cardId, turnId, tailTurns) {
   return lastRecords;
 }
 
+function isNonEmptyAssistantMessage(message) {
+  const role = typeof message?.role === 'string'
+    ? message.role.trim().toLowerCase()
+    : typeof message?.payload?.role === 'string'
+      ? message.payload.role.trim().toLowerCase()
+      : '';
+  const text = typeof message?.text === 'string'
+    ? message.text.trim()
+    : typeof message?.payload?.text === 'string'
+      ? message.payload.text.trim()
+      : '';
+  return role === 'assistant' && text.length > 0;
+}
+
+export async function isAssistantMessageInTurn(context, { cardId: cardIdOverride, turnId: turnIdOverride, tailTurns = null } = {}) {
+  const serverUrl = context?.serverUrl;
+  const boardId = context?.boardId;
+  const cardId = cardIdOverride !== undefined ? cardIdOverride : context?.cardId;
+  const turnId = turnIdOverride !== undefined ? turnIdOverride : context?.turnId;
+  if (!serverUrl || !boardId || !cardId) {
+    return false;
+  }
+
+  try {
+    const messages = await readChatMessages(serverUrl, boardId, cardId, turnId, tailTurns);
+    return messages.some(isNonEmptyAssistantMessage);
+  } catch {
+    return false;
+  }
+}
+
 export async function getEnhancedChatMessages(context, { cardId: cardIdOverride, turnId: turnIdOverride, tailTurns = null } = {}) {
   const serverUrl = context?.serverUrl;
   const boardId = context?.boardId;

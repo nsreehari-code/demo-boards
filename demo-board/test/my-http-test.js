@@ -20,6 +20,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
 const cliArgs = process.argv.slice(2);
+const DEFAULT_TEST_IDS = ['MB1', 'TE', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F', 'TR'];
+const DEFAULT_TEST_SET = new Set(DEFAULT_TEST_IDS);
 
 function readCliOptionValue(args, optionName) {
   const optionIndex = args.indexOf(optionName);
@@ -52,7 +54,11 @@ function parseRequestedTests(rawValue) {
 }
 
 function isTestSelected(requestedTests, testId) {
-  return !requestedTests || requestedTests.has(String(testId || '').trim().toUpperCase());
+  const normalizedTestId = String(testId || '').trim().toUpperCase();
+  if (requestedTests) {
+    return requestedTests.has(normalizedTestId);
+  }
+  return DEFAULT_TEST_SET.has(normalizedTestId);
 }
 
 function assert(condition, message) {
@@ -731,7 +737,7 @@ async function main() {
   const formatTestId = (testId) => `${modePrefix}-${String(testId || '').trim().toUpperCase()}`;
   const printedTests = requestedTests
     ? Array.from(requestedTests).map((testId) => formatTestId(testId)).join(',')
-    : ['MB1', 'TE', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F', 'TR'].map((testId) => formatTestId(testId)).join(',');
+    : DEFAULT_TEST_IDS.map((testId) => formatTestId(testId)).join(',');
 
   console.log(`\n=== ${modeLabel} controlface MCP smoke test ===`);
   console.log(`target: ${API_BASE}`);
