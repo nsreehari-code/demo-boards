@@ -53,6 +53,24 @@ function defaultQueueRunnerConcurrency() {
   return Math.max(1, os.cpus().length || 1);
 }
 
+function resolveChatAgentVisibilityMs(hostConfig) {
+  const explicitVisibilityMs = readPositiveInt(
+    process.env.DEMO_BOARDS_CHAT_AGENT_VISIBILITY_MS,
+    readPositiveInt(hostConfig?.chatAgentVisibilityMs, 0),
+  );
+  if (explicitVisibilityMs > 0) {
+    return explicitVisibilityMs;
+  }
+
+  const assistantTimeoutMs = Math.max(
+    readPositiveInt(hostConfig?.chatCopilotTimeoutMs, 300000),
+    readPositiveInt(hostConfig?.chatFlowTimeoutMs, 0),
+    readPositiveInt(hostConfig?.chatInvokeRefTimeoutMs, 0),
+  );
+
+  return assistantTimeoutMs + 60000;
+}
+
 function buildHostedQueueLaneTuning(hostConfig) {
   const defaultConcurrency = readPositiveInt(
     process.env.DEMO_BOARDS_QUEUE_CONCURRENCY,
@@ -68,7 +86,10 @@ function buildHostedQueueLaneTuning(hostConfig) {
   };
   return {
     processAccumulated: shared,
-    chatAgent: shared,
+    chatAgent: {
+      ...shared,
+      visibilityMs: resolveChatAgentVisibilityMs(hostConfig),
+    },
     taskExecutor: shared,
   };
 }

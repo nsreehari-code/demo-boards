@@ -9,6 +9,19 @@ export function applyLaneTuning(lane, tuning) {
   };
 }
 
+function createLeaseOperationError(action) {
+  const error = new Error(`Queue lease ${action} rejected`);
+  error.leaseOperation = action;
+  return error;
+}
+
+async function expectLeaseOperation(action, operation) {
+  const settled = await operation();
+  if (settled === false) {
+    throw createLeaseOperationError(action);
+  }
+}
+
 export function createQueueStorageLane(id, queue, handleMessage, onError) {
   return {
     id,
@@ -18,8 +31,8 @@ export function createQueueStorageLane(id, queue, handleMessage, onError) {
         id: lease.id,
         attempt: lease.attempt,
         message: lease.body,
-        ack: () => queue.ack(lease.id, lease.leaseToken),
-        nack: (nackOpts) => queue.nack(lease.id, lease.leaseToken, nackOpts),
+        ack: () => expectLeaseOperation('ack', () => queue.ack(lease.id, lease.leaseToken)),
+        nack: (nackOpts) => expectLeaseOperation('nack', () => queue.nack(lease.id, lease.leaseToken, nackOpts)),
       }));
     },
     async handle() {
@@ -38,8 +51,8 @@ export function createBoardWorkerLane(id, store, handleRequest, onError) {
         id: lease.messageId,
         attempt: lease.attempt,
         message: lease.request,
-        ack: () => store.ackRequest(lease.messageId, lease.leaseToken),
-        nack: (nackOpts) => store.nackRequest(lease.messageId, lease.leaseToken, nackOpts),
+        ack: () => expectLeaseOperation('ack', () => store.ackRequest(lease.messageId, lease.leaseToken)),
+        nack: (nackOpts) => expectLeaseOperation('nack', () => store.nackRequest(lease.messageId, lease.leaseToken, nackOpts)),
       }));
     },
     async handle(message) {
@@ -54,13 +67,22 @@ export async function runLaneLease(lane, lease) {
     await lane.handle(lease.message, lease);
     await lease.ack();
   } catch (error) {
-    const dead = lease.attempt >= Math.max(1, Math.floor(lane.maxAttempts ?? 5));
-    await lease.nack({
-      dead,
-      reason: error instanceof Error ? error.message : String(error),
-    });
+    let reportedError = error;
+    if (error?.leaseOperation !== 'ack') {
+      const dead = lease.attempt >= Math.max(1, Math.floor(lane.maxAttempts ?? 5));
+      try {
+        await lease.nack({
+          dead,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      } catch (nackError) {
+        reportedError = new Error(
+          `${error instanceof Error ? error.message : String(error)}; failed to nack lease: ${nackError instanceof Error ? nackError.message : String(nackError)}`,
+        );
+      }
+    }
     if (typeof lane.onError === 'function') {
-      lane.onError(error, lease);
+      lane.onError(reportedError, lease);
     }
   }
 }

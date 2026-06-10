@@ -74,6 +74,11 @@ function resolveMcpServerUrl(hostRuntime, _apiBasePath = '') {
   return normalizeString(hostRuntime?.mcpServerUrl);
 }
 
+function resolveAgentFaceMcpPath(hostRuntime) {
+  const raw = normalizeString(hostRuntime?.agentFaceMcp) || '/agent/mcp';
+  return raw.startsWith('/') ? raw : `/${raw}`;
+}
+
 function resolveNotifyUrl(hostRuntime, apiBasePath) {
   const explicitNotifyUrl = normalizeString(hostRuntime?.notifyUrl);
   if (explicitNotifyUrl) {
@@ -92,6 +97,7 @@ export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) 
     serverUrl: hostRuntime.serverUrl,
     notifyUrl: resolveNotifyUrl(hostRuntime, apiBasePath),
     mcpServerUrl: resolveMcpServerUrl(hostRuntime, apiBasePath),
+    agentFaceMcp: resolveAgentFaceMcpPath(hostRuntime),
     apiBasePath,
   };
 

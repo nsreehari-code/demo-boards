@@ -1,6 +1,7 @@
 {
   "storageAdapter": "localfs",
   "mcpServerUrl": "http://127.0.0.1:7801/mcp",
+  "agentFaceMcp": "/agent/mcp",
   "apiBasePrefix": "/api/boards",
   "enableAssistantDebug": false,
   "debugAssistantFile": "",
