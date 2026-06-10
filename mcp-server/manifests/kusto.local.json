@@ -1,0 +1,79 @@
+{
+  "server": {
+    "name": "demo-boards-mcp",
+    "version": "0.1.0",
+    "description": "Kusto / Azure Data Explorer query tools for the codeboxTesting security telemetry dataset"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+    "urlDefault": "http://127.0.0.1:7801/mcp"
+  },
+  "tools": [
+    {
+      "name": "kusto.query",
+      "title": "Kusto Query",
+      "description": "Run a read-only KQL query against the configured Azure Data Explorer database and return the primary result table as rows. Defaults to the codeboxTesting database on the kendradatasets.eastus cluster.",
+      "handler": "kusto",
+      "config": {
+        "clusterEnvVar": "KUSTO_CLUSTER_URI",
+        "clusterDefault": "https://kendradatasets.eastus.kusto.windows.net",
+        "databaseEnvVar": "KUSTO_DATABASE",
+        "databaseDefault": "codeboxTesting",
+        "tenantEnvVar": "KUSTO_TENANT_ID"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "The KQL query to execute (e.g. 'SigninLogs | take 10')." },
+          "database": { "type": "string", "description": "Optional database override. Defaults to the configured database (codeboxTesting)." },
+          "maxRows": { "type": "integer", "minimum": 1, "description": "Maximum number of result rows to return. Default 500." }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "kusto.list_tables",
+      "title": "Kusto List Tables",
+      "description": "List the table names available in the configured Azure Data Explorer database (codeboxTesting by default).",
+      "handler": "kusto",
+      "config": {
+        "clusterEnvVar": "KUSTO_CLUSTER_URI",
+        "clusterDefault": "https://kendradatasets.eastus.kusto.windows.net",
+        "databaseEnvVar": "KUSTO_DATABASE",
+        "databaseDefault": "codeboxTesting",
+        "tenantEnvVar": "KUSTO_TENANT_ID"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "database": { "type": "string", "description": "Optional database override. Defaults to the configured database (codeboxTesting)." }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "kusto.get_schema",
+      "title": "Kusto Get Table Schema",
+      "description": "Return the column schema (CSL schema) for a single table in the configured Azure Data Explorer database.",
+      "handler": "kusto",
+      "config": {
+        "clusterEnvVar": "KUSTO_CLUSTER_URI",
+        "clusterDefault": "https://kendradatasets.eastus.kusto.windows.net",
+        "databaseEnvVar": "KUSTO_DATABASE",
+        "databaseDefault": "codeboxTesting",
+        "tenantEnvVar": "KUSTO_TENANT_ID"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": { "type": "string", "description": "The table name to describe (e.g. 'SigninLogs')." },
+          "database": { "type": "string", "description": "Optional database override. Defaults to the configured database (codeboxTesting)." }
+        },
+        "required": ["table"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

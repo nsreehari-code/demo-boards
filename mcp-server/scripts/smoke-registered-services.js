@@ -42,6 +42,10 @@ function main() {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       throw new Error(`Registry server ${serverName} must be an object`);
     }
+    if (entry.disabled === true) {
+      console.log(`[mcp:test] skipping disabled registry service ${serverName}`);
+      continue;
+    }
     if (typeof entry.manifest !== 'string' || !entry.manifest.trim()) {
       throw new Error(`Registry server ${serverName} is missing a manifest string`);
     }

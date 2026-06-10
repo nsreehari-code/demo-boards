@@ -416,6 +416,11 @@ function loadManifestPathsFromRegistry() {
     .flatMap(([serverName, entry]) => {
       if (!entry?.manifest) return [];
 
+      if (entry.disabled === true) {
+        process.stderr.write(`[mcp-server] Skipping disabled registry server "${serverName}"\n`);
+        return [];
+      }
+
       const ref = entry.manifest;
       const manifestPath = path.isAbsolute(ref)
         ? ref

@@ -35,6 +35,9 @@
     },
     "lore": {
       "manifest": "lore.local.json"
+    },
+    "kusto": {
+      "manifest": "kusto.local.json"
     }
   }
 }

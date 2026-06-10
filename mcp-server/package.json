@@ -10,6 +10,7 @@
     "start:stdio": "node src/index.js --transport stdio",
     "dry-run": "node src/index.js --dry-run --transport streamable-http",
     "test:smoke": "node scripts/smoke-registered-services.js",
+    "smoke:kusto": "node scripts/smoke-kusto.js",
     "probe:finbook-workflows": "node scripts/probe-finbook-workflow-tools.js"
   },
   "dependencies": {
