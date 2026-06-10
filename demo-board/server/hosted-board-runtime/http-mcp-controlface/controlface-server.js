@@ -44,7 +44,18 @@ import { createAgentMcpHandler, AGENT_MCP_PATHS } from './agentface-mcp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.config.json');
+
+// Load hosted-board-runtime/.env (if present) for local Firebase/Foundry overrides.
+// See .env.template for supported variables. Real values stay local; .env is gitignored.
+if (typeof process.loadEnvFile === 'function') {
+  try {
+    process.loadEnvFile(path.resolve(__dirname, '..', '.env'));
+  } catch {
+    // No .env present (or unreadable); explicit environment variables still apply.
+  }
+}
+
+const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.localfs.config.json');
 const SETUP_SCRIPT_PATH = path.resolve(__dirname, '..', 'scripts', 'setup-single-ai-workspace.js');
 function resolveChatAgentVisibilityMs(hostConfig) {
   const explicitVisibilityMs = Number.isFinite(Number(hostConfig?.chatAgentVisibilityMs))

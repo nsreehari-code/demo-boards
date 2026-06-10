@@ -5,3 +5,5 @@ live/*
 !live/cards/
 !.retain/
 !.retain/**
+server/hosted-board-runtime/.env
+

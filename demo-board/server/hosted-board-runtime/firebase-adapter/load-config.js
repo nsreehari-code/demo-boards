@@ -332,6 +332,41 @@ function resolveSampleTemplateCatalogConfig(config, configDir, tokens = {}) {
   };
 }
 
+function applyFoundryAgentsEnvOverrides(base) {
+  const result = base && typeof base === 'object' && !Array.isArray(base) ? { ...base } : {};
+  const endpoint = typeof process.env.FOUNDRY_ENDPOINT === 'string' ? process.env.FOUNDRY_ENDPOINT.trim() : '';
+  const chatAgentId = typeof process.env.FOUNDRY_CHAT_AGENT_ID === 'string' ? process.env.FOUNDRY_CHAT_AGENT_ID.trim() : '';
+  const taskExecutorAgentId = typeof process.env.FOUNDRY_TASK_EXECUTOR_AGENT_ID === 'string' ? process.env.FOUNDRY_TASK_EXECUTOR_AGENT_ID.trim() : '';
+  if (endpoint) result.endpoint = endpoint;
+  if (chatAgentId) result.chatAgentId = chatAgentId;
+  if (taskExecutorAgentId) result.taskExecutorAgentId = taskExecutorAgentId;
+  return result;
+}
+
+const FIREBASE_CONFIG_ENV_FIELDS = Object.freeze({
+  apiKey: 'FIREBASE_API_KEY',
+  authDomain: 'FIREBASE_AUTH_DOMAIN',
+  projectId: 'FIREBASE_PROJECT_ID',
+  storageBucket: 'FIREBASE_STORAGE_BUCKET',
+  messagingSenderId: 'FIREBASE_MESSAGING_SENDER_ID',
+  appId: 'FIREBASE_APP_ID',
+});
+
+function applyFirebaseEnvOverrides(base) {
+  const source = base && typeof base === 'object' && !Array.isArray(base) ? { ...base } : {};
+  const firebaseConfig = source.firebaseConfig && typeof source.firebaseConfig === 'object' && !Array.isArray(source.firebaseConfig)
+    ? { ...source.firebaseConfig }
+    : {};
+  for (const [field, envName] of Object.entries(FIREBASE_CONFIG_ENV_FIELDS)) {
+    const value = typeof process.env[envName] === 'string' ? process.env[envName].trim() : '';
+    if (value) firebaseConfig[field] = value;
+  }
+  if (Object.keys(firebaseConfig).length > 0) {
+    source.firebaseConfig = firebaseConfig;
+  }
+  return source;
+}
+
 export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv.slice(2), processName = '') {
   const configPath = parseCliConfigPath(defaultConfigPath, cliArgs);
   const rawConfig = loadComposedConfig(configPath);
@@ -378,15 +413,11 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
     chatCopilotTimeoutMs: Number.isFinite(Number(config.chatCopilotTimeoutMs)) ? Number(config.chatCopilotTimeoutMs) : undefined,
     enableAssistantDebug: config.enableAssistantDebug === true,
     debugAssistantFile: typeof config.debugAssistantFile === 'string' ? config.debugAssistantFile.trim() : '',
-    foundryAgents: config.foundryAgents && typeof config.foundryAgents === 'object' && !Array.isArray(config.foundryAgents)
-      ? config.foundryAgents
-      : {},
+    foundryAgents: applyFoundryAgentsEnvOverrides(config.foundryAgents),
     aiWorkspaceTemplates,
     refsTemplates,
     uiTemplates,
-    firebase: config.firebase && typeof config.firebase === 'object' && !Array.isArray(config.firebase)
-      ? config.firebase
-      : {},
+    firebase: applyFirebaseEnvOverrides(config.firebase),
     bootstrapSampleBoards,
     runtimeBoardsRegistry,
     boardsIndexRef: runtimeBoardsRegistry.boardsIndexRef,

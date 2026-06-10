@@ -12,7 +12,11 @@ function resolveTenant(args, tool) {
 
 function getRequiredResource(tool) {
   const config = tool?.config && typeof tool.config === 'object' ? tool.config : {};
-  const resource = typeof config.resource === 'string' ? config.resource.trim() : '';
+  const resourceFromEnv = typeof config.resourceEnvVar === 'string' && config.resourceEnvVar
+    ? process.env[config.resourceEnvVar]
+    : '';
+  const resource = (resourceFromEnv || '').trim()
+    || (typeof config.resource === 'string' ? config.resource.trim() : '');
   if (!resource) {
     throw new Error('sentinel.login is missing configured auth resource');
   }

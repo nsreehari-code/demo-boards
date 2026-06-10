@@ -4,13 +4,10 @@
   "type": "module",
   "scripts": {
     "stop": "node ./scripts/stop-runtime.js",
-    "start:controlface": "node ./http-mcp-controlface/controlface-server.js --config ./hosted-board-runtime.config.json",
-    "start:queue-runner": "node ./queue-runner/queue-runner.js --config ./hosted-board-runtime.config.json",
+    "start:controlface": "node ./http-mcp-controlface/controlface-server.js --config ./hosted-board-runtime.localfs.config.json",
+    "start:queue-runner": "node ./queue-runner/queue-runner.js --config ./hosted-board-runtime.localfs.config.json",
     "start:controlface:localfs": "node ./http-mcp-controlface/controlface-server.js --config ./hosted-board-runtime.localfs.config.json",
-    "start:queue-runner:localfs": "node ./queue-runner/queue-runner.js --config ./hosted-board-runtime.localfs.config.json",
-    "start:controlface:emulator": "node ./http-mcp-controlface/controlface-server.js --config ./hosted-board-runtime.emulator.config.json",
-    "start:queue-runner:emulator": "node ./queue-runner/queue-runner.js --config ./hosted-board-runtime.emulator.config.json",
-    "start:firebase-emulators": "npx firebase-tools emulators:start --config ../../firebase/firebase.json --project demo-board-local"
+    "start:queue-runner:localfs": "node ./queue-runner/queue-runner.js --config ./hosted-board-runtime.localfs.config.json"
   },
   "dependencies": {
     "firebase": "^12.14.0"

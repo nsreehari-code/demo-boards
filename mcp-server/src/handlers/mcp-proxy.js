@@ -65,9 +65,11 @@ function runAzureCliLogin(auth) {
 }
 
 function mintAzureCliBearerToken(auth) {
-  const resource = typeof auth?.resource === 'string' && auth.resource.trim()
-    ? auth.resource.trim()
+  const resourceFromEnv = typeof auth?.resourceEnvVar === 'string' && auth.resourceEnvVar
+    ? process.env[auth.resourceEnvVar]
     : '';
+  const resource = (resourceFromEnv || '').trim()
+    || (typeof auth?.resource === 'string' ? auth.resource.trim() : '');
   if (!resource) {
     throw new Error('azure-cli-bearer auth requires a non-empty resource');
   }

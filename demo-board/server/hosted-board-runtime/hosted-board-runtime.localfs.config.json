@@ -13,9 +13,9 @@
     "serverOrigin": "http://127.0.0.1:7799"
   },
   "foundryAgents": {
-    "endpoint": "https://sz-foundry.services.ai.azure.com/api/projects/sz-project",
-    "chatAgentId": "asst_IMDJiVnL9fS0QbttDXKxN5lF",
-    "taskExecutorAgentId": "asst_IMDJiVnL9fS0QbttDXKxN5lF",
+    "endpoint": "",
+    "chatAgentId": "",
+    "taskExecutorAgentId": "",
     "chatExposedMcpToolPrefixes": ["liveboards.", "lore."]
   },
   "bootstrap-sample-boards": {
