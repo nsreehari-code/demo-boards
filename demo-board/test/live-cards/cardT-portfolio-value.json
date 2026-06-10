@@ -2,12 +2,24 @@
   "id": "portfolio-value-tc3",
   "meta": {
     "title": "Portfolio Value",
-    "tags": ["portfolio", "value"],
-    "desc": "Computes total portfolio value, gainers/losers summary, and per-position P&L from holdings and live market quotes."
+    "tags": [
+      "portfolio",
+      "value"
+    ],
+    "desc": "Computes total portfolio value, gainers/losers summary, and per-position P&L from holdings and live market quotes.",
+    "presentation": {
+      "footprint": "standard"
+    }
   },
-  "requires": ["holdings_tc1", "quotes_tc2"],
+  "requires": [
+    "holdings_tc1",
+    "quotes_tc2"
+  ],
   "provides": [
-    { "bindTo": "positions_tc3", "ref": "computed_values.positions" }
+    {
+      "bindTo": "positions_tc3",
+      "ref": "computed_values.positions"
+    }
   ],
   "compute": [
     {
@@ -36,27 +48,31 @@
       {
         "kind": "metric",
         "label": "Portfolio Value ($)",
-        "data": { "bind": "computed_values.totalValue" }
+        "data": {
+          "bind": "computed_values.totalValue"
+        }
       },
       {
         "kind": "text",
-        "data": { "bind": "computed_values.gainersLosers" }
+        "data": {
+          "bind": "computed_values.gainersLosers"
+        }
       },
       {
         "kind": "table",
         "label": "Positions",
         "data": {
           "bind": "computed_values.positions",
-          "columns": ["ticker", "value", "gain_$", "gain_%"],
+          "columns": [
+            "ticker",
+            "value",
+            "gain_$",
+            "gain_%"
+          ],
           "sortable": true
         }
       }
-    ],
-    "layout": {
-      "board": { "col": 4, "order": 3 },
-      "canvas": { "x": 840, "y": 50, "w": 420, "h": 380 }
-    },
-    "features": { "chat": true }
+    ]
   },
   "card_data": {}
 }

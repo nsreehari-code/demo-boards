@@ -142,6 +142,12 @@
   },
   "uiTemplates": {
     "default": {
+      "canvasLayout": {
+        "defaultCardWidth": 360,
+        "columnGap": 420,
+        "rowGap": 280,
+        "origin": { "x": 40, "y": 40 }
+      },
       "filters": {
         "gandalf": "meta.gandalf = true",
         "truthset": "meta.truthset = true"

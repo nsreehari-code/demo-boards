@@ -29,22 +29,38 @@ Start authoring from the smallest viable shape and add only what the card needs:
 ```json
 {
   "id": "card-id",
-  "meta": { "title": "Card Title" },
+  "meta": {
+    "title": "Card Title",
+    "presentation": {
+      "footprint": "wide"
+    }
+  },
   "requires": [],
   "source_defs": [],
   "compute": [],
   "provides": [],
   "view": {
-    "elements": [],
-    "layout": {
-      "board": { "col": 4, "order": 1 },
-      "canvas": { "x": 50, "y": 50, "w": 280, "h": 220 }
-    },
-    "features": { "refresh": true, "chat": true }
+    "elements": []
   },
   "card_data": {}
 }
 ```
+
+## Presentation Semantics
+
+Every card you author lives on the Main Canvas. Author only how the card should
+*feel* to the user in `meta.presentation.*`; the frontend computes placement.
+
+- `meta.presentation.prominence` — how much the user should care: `glance`, `standard`, `feature`, or `spotlight`. Default: `standard`; omit it unless the card should clearly feel lower or higher priority.
+- `meta.presentation.footprint` — how much room the card needs to render well: `compact`, `standard`, `wide`, or `large`. Default: `standard`; omit it unless the card needs non-standard width.
+- `meta.presentation.resizable` — whether the user may resize the card at runtime. Default: `true`; omit it unless the card must be fixed-size (`false`).
+
+Content shape is inferred from `view.elements[].kind` — do not restate it.
+Do not author `view.layout`, planes, columns, pixel widths, or coordinates.
+The frontend computes initial canvas placement from board layout config,
+runtime graph shape (`requires` / `provides`), and these semantic hints.
+Live drag / resize coordinates are runtime-owned state and are persisted
+separately from the card JSON.
 
 ## Core Dataflow
 

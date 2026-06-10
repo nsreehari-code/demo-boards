@@ -14,7 +14,10 @@
           "sample",
           "alert"
         ],
-        "desc": "Loads the current alert from the sample cursor and shows the concrete rows the prompt is being judged against."
+        "desc": "Loads the current alert from the sample cursor and shows the concrete rows the prompt is being judged against.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "requires": [
         "current_sample"
@@ -117,23 +120,7 @@
               "maxRows": 8
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 2
-          },
-          "canvas": {
-            "x": 40,
-            "y": 330,
-            "w": 520,
-            "h": 520
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {}
     },
@@ -146,7 +133,10 @@
           "batch",
           "runner"
         ],
-        "desc": "Run the current prompt across a sample set to see whether changes generalize beyond one alert."
+        "desc": "Run the current prompt across a sample set to see whether changes generalize beyond one alert.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "requires": [
         "batch_request",
@@ -227,23 +217,7 @@
               "maxRows": 12
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 10
-          },
-          "canvas": {
-            "x": 1200,
-            "y": 900,
-            "w": 560,
-            "h": 500
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {}
     },
@@ -256,7 +230,10 @@
           "batch",
           "scorecard"
         ],
-        "desc": "Summarize the accumulated run ledger so you can see whether the prompt is improving across iterated samples."
+        "desc": "Summarize the accumulated run ledger so you can see whether the prompt is improving across iterated samples.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "requires": [
         "batch_request",
@@ -308,22 +285,7 @@
               "bind": "computed_values.scorecard_markdown"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 11
-          },
-          "canvas": {
-            "x": 40,
-            "y": 1460,
-            "w": 520,
-            "h": 260
-          }
-        },
-        "features": {
-          "chat": true
-        }
+        ]
       },
       "card_data": {}
     },
@@ -336,7 +298,10 @@
           "code",
           "execution"
         ],
-        "desc": "Runs extracted code for the current sample through the existing ModularCode executor."
+        "desc": "Runs extracted code for the current sample through the existing ModularCode executor.",
+        "presentation": {
+          "footprint": "wide"
+        }
       },
       "requires": [
         "current_sample",
@@ -409,23 +374,7 @@
               "bind": "computed_values.execution_files"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 6,
-            "order": 5
-          },
-          "canvas": {
-            "x": 600,
-            "y": 1060,
-            "w": 560,
-            "h": 320
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {}
     },
@@ -438,7 +387,10 @@
           "batch",
           "failures"
         ],
-        "desc": "Cluster repeated failure modes from the run ledger so prompt changes target patterns instead of anecdotes."
+        "desc": "Cluster repeated failure modes from the run ledger so prompt changes target patterns instead of anecdotes.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "requires": [
         "run_ledger_summary"
@@ -475,23 +427,7 @@
               "maxRows": 8
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 12
-          },
-          "canvas": {
-            "x": 40,
-            "y": 1760,
-            "w": 560,
-            "h": 340
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {}
     },
@@ -504,7 +440,10 @@
           "guidance",
           "prompt-tuning"
         ],
-        "desc": "Capture the durable guidance this stage should optimize for across many samples."
+        "desc": "Capture the durable guidance this stage should optimize for across many samples.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "compute": [
         {
@@ -535,22 +474,7 @@
               "bind": "computed_values.guidance_preview"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 8
-          },
-          "canvas": {
-            "x": 40,
-            "y": 1440,
-            "w": 520,
-            "h": 340
-          }
-        },
-        "features": {
-          "chat": true
-        }
+        ]
       },
       "card_data": {
         "guidance_text": "- Output should be structurally parseable before it is considered useful.\n- Prefer concise, stage-specific instructions over broad generic language.\n- Tune for robustness across TP and FP samples, not one-off wins."
@@ -565,7 +489,10 @@
           "observations",
           "prompt-tuning"
         ],
-        "desc": "Capture short empirical notes about regressions, improvements, and repeated failure behavior."
+        "desc": "Capture short empirical notes about regressions, improvements, and repeated failure behavior.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "compute": [
         {
@@ -596,22 +523,7 @@
               "bind": "computed_values.observations_preview"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 9
-          },
-          "canvas": {
-            "x": 600,
-            "y": 1440,
-            "w": 560,
-            "h": 340
-          }
-        },
-        "features": {
-          "chat": true
-        }
+        ]
       },
       "card_data": {
         "observation_text": "- Use this card to record what changed across multiple samples, not just one run."
@@ -626,7 +538,10 @@
           "prompt",
           "medeina"
         ],
-        "desc": "Browse the available Medeina prompt slots, inspect the selected prompt file, and draft edits in card_data."
+        "desc": "Browse the available Medeina prompt slots, inspect the selected prompt file, and draft edits in card_data.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "requires": [
         "tuning_target"
@@ -733,23 +648,7 @@
               "writeTo": "card_data.prompt_draft"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 3
-          },
-          "canvas": {
-            "x": 600,
-            "y": 40,
-            "w": 560,
-            "h": 980
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {
         "prompt_draft": ""
@@ -764,7 +663,11 @@
           "prompt",
           "revision"
         ],
-        "desc": "Propose the next prompt revision from current failures, guidance, and observations."
+        "desc": "Propose the next prompt revision from current failures, guidance, and observations.",
+        "presentation": {
+          "prominence": "spotlight",
+          "footprint": "large"
+        }
       },
       "requires": [
         "prompt_text",
@@ -853,23 +756,7 @@
               "bind": "computed_values.proposed_prompt_markdown"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 8,
-            "order": 13
-          },
-          "canvas": {
-            "x": 1200,
-            "y": 1460,
-            "w": 560,
-            "h": 520
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {}
     },
@@ -882,7 +769,10 @@
           "ledger",
           "samples"
         ],
-        "desc": "Accumulate one row per sample run so the board can summarize repeated behavior without one giant batch call."
+        "desc": "Accumulate one row per sample run so the board can summarize repeated behavior without one giant batch call.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "requires": [
         "batch_request",
@@ -975,23 +865,7 @@
               "maxRows": 12
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 9
-          },
-          "canvas": {
-            "x": 1200,
-            "y": 900,
-            "w": 560,
-            "h": 420
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {}
     },
@@ -1004,7 +878,10 @@
           "cursor",
           "samples"
         ],
-        "desc": "Advance through the chosen sample set one alert at a time. This is the counter that drives the single-run chain."
+        "desc": "Advance through the chosen sample set one alert at a time. This is the counter that drives the single-run chain.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "requires": [
         "batch_request"
@@ -1094,23 +971,7 @@
               "maxRows": 1
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 8
-          },
-          "canvas": {
-            "x": 600,
-            "y": 900,
-            "w": 560,
-            "h": 300
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {
         "cursor": {
@@ -1127,7 +988,10 @@
           "batch",
           "samples"
         ],
-        "desc": "Choose the sample set and iteration limits that the board will walk through one sample at a time."
+        "desc": "Choose the sample set and iteration limits that the board will walk through one sample at a time.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "source_defs": [
         {
@@ -1256,23 +1120,7 @@
               "maxRows": 12
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 7
-          },
-          "canvas": {
-            "x": 40,
-            "y": 900,
-            "w": 520,
-            "h": 460
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {
         "sample_set": {
@@ -1291,7 +1139,10 @@
           "stage",
           "copilot"
         ],
-        "desc": "Run the current prompt stage against the sample selected by the cursor."
+        "desc": "Run the current prompt stage against the sample selected by the cursor.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "requires": [
         "tuning_target",
@@ -1412,23 +1263,7 @@
               "hideIfEmpty": true
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 4
-          },
-          "canvas": {
-            "x": 1200,
-            "y": 40,
-            "w": 560,
-            "h": 980
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {
         "investigation_plan_json": "",
@@ -1444,7 +1279,10 @@
           "control",
           "prompt-tuning"
         ],
-        "desc": "Select the alert sample and prompt slot to tune. This card publishes the working target for the rest of the board."
+        "desc": "Select the alert sample and prompt slot to tune. This card publishes the working target for the rest of the board.",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "compute": [
         {
@@ -1510,22 +1348,7 @@
               "bind": "computed_values.target_summary"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 1
-          },
-          "canvas": {
-            "x": 40,
-            "y": 40,
-            "w": 520,
-            "h": 250
-          }
-        },
-        "features": {
-          "chat": true
-        }
+        ]
       },
       "card_data": {
         "target": {
@@ -1545,7 +1368,10 @@
           "validation",
           "feedback"
         ],
-        "desc": "Deterministic heuristic validation for v1. It judges whether the current stage output is usable enough to keep iterating."
+        "desc": "Deterministic heuristic validation for v1. It judges whether the current stage output is usable enough to keep iterating.",
+        "presentation": {
+          "footprint": "wide"
+        }
       },
       "requires": [
         "ground_truth_label",
@@ -1624,23 +1450,7 @@
               "bind": "computed_values.next_action"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 6,
-            "order": 6
-          },
-          "canvas": {
-            "x": 1200,
-            "y": 1060,
-            "w": 560,
-            "h": 320
-          }
-        },
-        "features": {
-          "refresh": true,
-          "chat": true
-        }
+        ]
       },
       "card_data": {}
     }

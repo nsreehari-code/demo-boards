@@ -17,15 +17,21 @@
 ## Layout
 
 ```json
-"layout": {
-  "board":  { "col": 4, "order": 5 },
-  "canvas": { "x": 300, "y": 400, "w": 280, "h": 180 }
+"meta": {
+  "presentation": {
+    "footprint": "wide"
+  }
 }
 ```
 
-- `board.col` — Bootstrap 12-column span: `3`=quarter, `4`=third, `6`=half, `8`=two-thirds, `12`=full
-- `board.order` — ascending integer, controls vertical sort in board view
-- `canvas` — pixel coordinates/size for drag-layout (canvas mode). `h` must be tall enough for all rendered content — a card with metrics + a 4-row table typically needs 400–500px. Too small a height causes an in-card scrollbar; when in doubt, size generously.
+Every card you author lives on the Main Canvas. Author only how the card should
+*feel* to the user; the frontend computes where it goes.
+
+- `meta.presentation.prominence` — how much the user should care about this card: `glance`, `standard`, `feature`, or `spotlight`. Default: `standard`; omit it unless the card should feel clearly lower or higher priority. A one-line `metric` can still be `spotlight`; a big reference `table` can be `glance`.
+- `meta.presentation.footprint` — how much room the card needs to render well, independent of attention: `compact`, `standard`, `wide`, or `large`. Default: `standard`; omit it unless the card needs a non-standard width.
+- `meta.presentation.resizable` — whether the user may resize the card at runtime. Default: `true`; omit it unless the card must be fixed-size (`false`).
+- Do not author content shape — it is inferred from `view.elements[].kind` (a `table` card reads as data, a `chart` as a chart, `narrative`/`markdown` as a write-up, `todo` as a checklist).
+- Do not author columns, pixel widths, or any coordinates. Initial canvas placement is computed in the frontend from board layout config, the runtime dependency graph, and `meta.presentation.*`. Live drag / resize state is runtime-owned and persisted separately from the card.
 
 ---
 
@@ -119,7 +125,7 @@ Two input shapes are accepted on `data.bind`:
 - `stacked` — for bar/area, stack multi-series instead of grouping.
 - `legend`, `grid` — toggle legend / grid lines (defaults: on when useful).
 - `height` — pixel height of the chart area (default 220). Make sure the card's
-  `canvas.h` leaves room for the chart plus header.
+  rendered shell leaves room for the chart plus header.
 
 ### Authoring tips
 

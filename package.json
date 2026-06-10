@@ -35,7 +35,7 @@
     "better-sqlite3": "^12.9.0",
     "node-sse": "^0.0.2",
     "pdf-parse": "^2.4.5",
-    "yaml-flow": "^8.9.2"
+    "yaml-flow": "^8.11.0"
   },
   "devDependencies": {
     "http-server": "^14.1.1"

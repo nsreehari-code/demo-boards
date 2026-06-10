@@ -9,11 +9,7 @@
     ],
     "desc": "Shows the latest fiscal total income for each account from the local Finbook repo through MCP.",
     "presentation": {
-      "plane": "workspace",
-      "priority": 12,
-      "emphasis": "wide",
-      "column": 2,
-      "width": 620
+      "footprint": "wide"
     }
   },
   "requires": [],
@@ -78,10 +74,7 @@
           "maxRows": 8
         }
       }
-    ],
-    "features": {
-      "refresh": true
-    }
+    ]
   },
   "card_data": {}
 }

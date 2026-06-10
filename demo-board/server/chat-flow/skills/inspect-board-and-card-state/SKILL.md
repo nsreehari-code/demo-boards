@@ -70,8 +70,6 @@ computed values, the rendered `view_model`, and any attached file refs:
     "provides": { "<output-key>": {} },
     "computed_values": {},
     "rendered_view": {
-      "layout": "...",
-      "features": {},
       "elements": [ { "id": "...", "kind": "...", "label": "...", "visible": true, "resolved": "..." } ]
     }
   }

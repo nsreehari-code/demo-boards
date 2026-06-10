@@ -10,7 +10,10 @@
           "m365",
           "workiq"
         ],
-        "desc": "Displays your M365 display name via WorkIQ (Microsoft 365 Copilot)."
+        "desc": "Displays your M365 display name via WorkIQ (Microsoft 365 Copilot).",
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "source_defs": [
         {
@@ -60,22 +63,7 @@
               "bind": "computed_values.managerLine"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 4,
-            "order": 10
-          },
-          "canvas": {
-            "x": 50,
-            "y": 450,
-            "w": 420,
-            "h": 260
-          }
-        },
-        "features": {
-          "refresh": true
-        }
+        ]
       },
       "card_data": {}
     },
@@ -87,7 +75,10 @@
           "workiq",
           "m365"
         ],
-        "desc": "WorkIQ brief of the highest-priority signals across email, meetings, chats, and tasks."
+        "desc": "WorkIQ brief of the highest-priority signals across email, meetings, chats, and tasks.",
+        "presentation": {
+          "footprint": "wide"
+        }
       },
       "requires": [],
       "source_defs": [
@@ -143,22 +134,7 @@
               "bind": "computed_values.briefMarkdown"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 6,
-            "order": 21
-          },
-          "canvas": {
-            "x": 50,
-            "y": 900,
-            "w": 520,
-            "h": 380
-          }
-        },
-        "features": {
-          "refresh": true
-        }
+        ]
       },
       "card_data": {
         "period": "today"
@@ -172,7 +148,10 @@
           "workiq",
           "m365"
         ],
-        "desc": "WorkIQ view of the people and threads that mattered most recently."
+        "desc": "WorkIQ view of the people and threads that mattered most recently.",
+        "presentation": {
+          "footprint": "wide"
+        }
       },
       "requires": [],
       "source_defs": [
@@ -228,22 +207,7 @@
               "bind": "computed_values.radarMarkdown"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 6,
-            "order": 22
-          },
-          "canvas": {
-            "x": 620,
-            "y": 900,
-            "w": 520,
-            "h": 420
-          }
-        },
-        "features": {
-          "refresh": true
-        }
+        ]
       },
       "card_data": {
         "period": "the last 7 days"

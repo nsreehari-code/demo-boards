@@ -11,7 +11,10 @@
           "ai",
           "live"
         ],
-        "desc": "Generates a concise AI brief for any portfolio or market topic using Azure AI Foundry."
+        "desc": "Generates a concise AI brief for any portfolio or market topic using Azure AI Foundry.",
+        "presentation": {
+          "footprint": "wide"
+        }
       },
       "requires": [],
       "source_defs": [
@@ -62,22 +65,7 @@
               "bind": "computed_values.brief_text"
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 6,
-            "order": 20
-          },
-          "canvas": {
-            "x": 1200,
-            "y": 900,
-            "w": 520,
-            "h": 380
-          }
-        },
-        "features": {
-          "refresh": true
-        }
+        ]
       },
       "card_data": {
         "query": "Give a brief summary of current market themes to watch for an equity portfolio investor."

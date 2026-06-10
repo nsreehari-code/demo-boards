@@ -208,18 +208,16 @@ Card authoring is workflow authoring, not just view authoring.
 ```json
 {
   "id": "my-card",
-  "meta": { "title": "Card Title" },
+  "meta": {
+    "title": "Card Title",
+    "presentation": { "footprint": "wide" }
+  },
   "requires": [],
   "source_defs": [],
   "compute": [],
   "provides": [],
   "view": {
-    "elements": [],
-    "layout": {
-      "board": { "col": 4, "order": 1 },
-      "canvas": { "x": 50, "y": 50, "w": 280, "h": 180 }
-    },
-    "features": { "refresh": true, "chat": true }
+    "elements": []
   },
   "card_data": {}
 }

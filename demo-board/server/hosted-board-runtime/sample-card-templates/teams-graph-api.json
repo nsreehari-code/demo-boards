@@ -11,7 +11,10 @@
           "teams",
           "graph"
         ],
-        "desc": "Reads recent messages from a Teams channel via an MCP-hosted Zoltbook Graph tool."
+        "desc": "Reads recent messages from a Teams channel via an MCP-hosted Zoltbook Graph tool.",
+        "presentation": {
+          "footprint": "wide"
+        }
       },
       "requires": [],
       "source_defs": [
@@ -99,22 +102,7 @@
               "maxRows": 5
             }
           }
-        ],
-        "layout": {
-          "board": {
-            "col": 6,
-            "order": 11
-          },
-          "canvas": {
-            "x": 500,
-            "y": 450,
-            "w": 560,
-            "h": 380
-          }
-        },
-        "features": {
-          "refresh": true
-        }
+        ]
       },
       "card_data": {
         "team_id": "c1d30cbf-82fc-41c3-b233-916282bdfcc7",
