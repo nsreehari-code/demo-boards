@@ -30,14 +30,10 @@ function readCliOptionValue(args, optionName) {
 function parseMode(rawValue) {
   const normalized = typeof rawValue === 'string' ? rawValue.trim().toLowerCase() : '';
   if (!normalized || normalized === 'localfs' || normalized === 'local') return 'localfs';
-  if (normalized === 'firebase') return 'firebase';
-  throw new Error(`Unsupported --mode '${rawValue}'. Use 'localfs' or 'firebase'.`);
+  throw new Error(`Unsupported --mode '${rawValue}'. Only 'localfs' is bundled; re-add the firebase hosted config to enable firebase mode.`);
 }
 
-function defaultHostedConfigPathForMode(mode) {
-  if (mode === 'firebase') {
-    return path.resolve(__dirname, '../server/hosted-board-runtime/hosted-board-runtime.config.json');
-  }
+function defaultHostedConfigPathForMode() {
   return path.resolve(__dirname, '../server/hosted-board-runtime/hosted-board-runtime.localfs.config.json');
 }
 

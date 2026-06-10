@@ -10,6 +10,7 @@
     "auth": {
       "type": "azure-cli-bearer",
       "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
+      "resourceEnvVar": "SENTINEL_RESOURCE",
       "tenantEnvVar": "SENTINEL_TENANT_ID",
       "loginOnDemand": true
     }

@@ -23,7 +23,7 @@ import { createWakeTrigger, queueCollectionPath, startLaneRunners } from '../hos
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.config.json');
+const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.localfs.config.json');
 
 function readPositiveInt(value, fallback) {
   const num = Number(value);
