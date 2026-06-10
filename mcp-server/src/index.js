@@ -16,6 +16,18 @@ import { resolveHandler } from './handler-registry.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const MCP_SERVER_DIR = path.resolve(__dirname, '..');
+
+// Load mcp-server/.env (if present) so manifest env vars resolve without exporting them manually.
+// See .env.template for the supported variables. Real values stay local; .env is gitignored.
+const MCP_SERVER_ENV_PATH = path.join(MCP_SERVER_DIR, '.env');
+if (typeof process.loadEnvFile === 'function' && existsSync(MCP_SERVER_ENV_PATH)) {
+  try {
+    process.loadEnvFile(MCP_SERVER_ENV_PATH);
+  } catch {
+    // Ignore malformed .env; explicit environment variables still take effect.
+  }
+}
+
 const MCP_SERVER_LOG_PATH = path.join(MCP_SERVER_DIR, 'logs', 'mcp-server.log');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
