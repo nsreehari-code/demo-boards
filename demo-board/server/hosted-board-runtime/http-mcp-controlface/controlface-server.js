@@ -117,6 +117,9 @@ function defaultBoardId(boardRuntimes) {
 
 function normalizeControlfaceScope(routeKind, boardId, boardRuntimes) {
   const resolvedBoardId = normalizeText(boardId) || defaultBoardId(boardRuntimes) || 'controlface';
+  if (routeKind === 'agent-mcp') {
+    return `${resolvedBoardId}:agentface`;
+  }
   return `${resolvedBoardId}:controlface`;
 }
 
@@ -125,16 +128,29 @@ function resolveControlfaceRouteLabel(parsedUrl, details = {}) {
   if (!pathname) {
     return '/';
   }
+  if (details.routeKind === 'agent-mcp' && pathname.startsWith('/agent/')) {
+    return pathname;
+  }
   const segments = pathname.split('/').filter(Boolean);
   const stem = segments[segments.length - 1] || '';
   return stem ? `/${stem}` : '/';
 }
 
+function formatMcpRequestDetails(details = {}) {
+  const sessionId = normalizeText(details.sessionId);
+  return [
+    normalizeText(details.toolName) || normalizeText(details.rpcMethod),
+    normalizeText(details.cardId),
+    normalizeText(details.turnId),
+    sessionId ? `session=${sessionId}` : '',
+  ];
+}
+
 function formatControlfacePickupMessage(req, parsedUrl, details = {}) {
   const method = normalizeText(req?.method) || 'GET';
   const routeLabel = resolveControlfaceRouteLabel(parsedUrl, details);
-  if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions' || details.routeKind === 'mcp-extras') {
-    return joinParts([method, routeLabel, normalizeText(details.toolName), normalizeText(details.cardId), normalizeText(details.turnId)]);
+  if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions' || details.routeKind === 'mcp-extras' || details.routeKind === 'agent-mcp') {
+    return joinParts([method, routeLabel, ...formatMcpRequestDetails(details)]);
   }
   return joinParts([method, routeLabel]);
 }
@@ -143,8 +159,8 @@ function formatControlfaceCompletionMessage(req, parsedUrl, details = {}, status
   const method = normalizeText(req?.method) || 'GET';
   const status = String(statusCode || 0);
   const routeLabel = resolveControlfaceRouteLabel(parsedUrl, details);
-  if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions' || details.routeKind === 'mcp-extras') {
-    return joinParts([method, routeLabel, normalizeText(details.toolName), normalizeText(details.cardId), normalizeText(details.turnId), status, normalizeText(details.errorMessage)]);
+  if (details.routeKind === 'mcp' || details.routeKind === 'mcp-controlplane' || details.routeKind === 'mcp-actions' || details.routeKind === 'mcp-extras' || details.routeKind === 'agent-mcp') {
+    return joinParts([method, routeLabel, ...formatMcpRequestDetails(details), status, normalizeText(details.errorMessage)]);
   }
   return joinParts([method, routeLabel, status, normalizeText(details.errorMessage)]);
 }
@@ -169,6 +185,11 @@ function parseJsonObjectOrEmpty(buffer) {
   } catch {
     return {};
   }
+}
+
+function readMcpSessionIdHeader(req) {
+  const raw = req?.headers?.['mcp-session-id'];
+  return normalizeText(Array.isArray(raw) ? raw[0] : raw);
 }
 
 function createReplayableRequest(req, rawBodyBuffer) {
@@ -1136,13 +1157,40 @@ async function main() {
     };
 
     if (parsedBaseUrl.pathname === AGENT_MCP_PATHS.mcp || parsedBaseUrl.pathname === AGENT_MCP_PATHS.manifest) {
-      requestDetails = { routeKind: 'agent-mcp' };
+      let agentReq = req;
+      requestDetails = {
+        routeKind: 'agent-mcp',
+        sessionId: readMcpSessionIdHeader(req),
+      };
+      if (parsedBaseUrl.pathname === AGENT_MCP_PATHS.mcp && req.method === 'POST') {
+        const rawBody = await readRawRequestBody(req);
+        const body = parseJsonObjectOrEmpty(rawBody);
+        const params = body?.params && typeof body.params === 'object' && !Array.isArray(body.params)
+          ? body.params
+          : {};
+        const rpcMethod = normalizeText(body?.method);
+        const toolName = rpcMethod === 'tools/call' && typeof params?.name === 'string'
+          ? params.name.trim()
+          : '';
+        const args = normalizeMcpArgs(params?.arguments);
+        requestDetails = {
+          ...requestDetails,
+          rpcMethod,
+          toolName,
+          cardId: normalizeText(readMcpArg(args, 'card_id', 'cardId')),
+          turnId: normalizeText(readMcpArg(args, 'turn_id', 'turnId', 'turn')),
+        };
+        agentReq = createReplayableRequest(req, rawBody);
+        if (agentReq.headers && typeof agentReq.headers === 'object') {
+          agentReq.headers = { ...agentReq.headers, 'content-length': String(rawBody.length) };
+        }
+      }
       requestLogger = processLogger.child(normalizeControlfaceScope('agent-mcp', '', boardRuntimes));
       requestLogger.info(formatControlfacePickupMessage(req, parsedBaseUrl, requestDetails));
       res.once('finish', logCompletionOnce);
       res.once('close', logCompletionOnce);
       try {
-        await agentMcp.handleRequest(req, res, parsedBaseUrl);
+        await agentMcp.handleRequest(agentReq, res, parsedBaseUrl);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         requestDetails.errorMessage = message;

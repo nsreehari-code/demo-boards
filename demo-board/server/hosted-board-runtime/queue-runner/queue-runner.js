@@ -135,18 +135,11 @@ function summarizeTaskExecutorRequest(request, lease) {
     : request?.args?.source_def && typeof request.args.source_def === 'object' && !Array.isArray(request.args.source_def)
       ? request.args.source_def
       : {};
-  const quoteUrls = sourceDef?._projections?.quote_urls;
-  const quoteUrlsShape = Array.isArray(quoteUrls)
-    ? `quoteUrls[${quoteUrls.length}]`
-    : quoteUrls === undefined
-      ? 'quoteUrls=missing'
-      : `quoteUrls=${typeof quoteUrls}`;
   return joinParts([
     readCardId(request),
-    normalizeText(sourceDef?.kind),
-    normalizeText(sourceDef?.bindTo),
-    normalizeText(sourceDef?.outputFile),
-    quoteUrlsShape,
+    normalizeText(sourceDef?.kind) ? `kind=${normalizeText(sourceDef.kind)}` : '',
+    normalizeText(sourceDef?.bindTo) ? `bindTo=${normalizeText(sourceDef.bindTo)}` : '',
+    normalizeText(sourceDef?.outputFile) ? `outputFile=${normalizeText(sourceDef.outputFile)}` : '',
   ]);
 }
 
@@ -595,8 +588,6 @@ async function main() {
       startWatchingBoard(boardConfig);
       processLogger.info(`[queue-runner] reloaded board ${boardConfig.id}`);
     }
-
-    processLogger.info(`Watching ${watchedBoards.size} board(s)`);
   }
 
   await reconcileBoards();
