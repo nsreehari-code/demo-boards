@@ -33,9 +33,6 @@
     "graph": {
       "manifest": "demo-boards.graph.json"
     },
-    "liveboards": {
-      "manifest": "demo-boards.liveboards.json"
-    },
     "lore": {
       "manifest": "lore.local.json"
     }

@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { deriveBoardRootFromModuleUrl } from '../../shared/board-root.js';
 import { loadFirebaseHostConfig } from '../firebase-adapter/load-config.js';
@@ -69,6 +70,11 @@ const scratchDir = path.normalize(scratchStoreRaw);
 const watchpartyDir = path.join(configuredBoardRoot, 'logs', 'watch-party', boardIdArg);
 
 const mcpServerUrl = hostConfig.mcpServerUrl;
+const controlfaceHost = (hostConfig.controlface?.host || '127.0.0.1').toString().trim() || '127.0.0.1';
+const controlfacePort = hostConfig.controlface?.port || 7799;
+const agentFacePathRaw = (hostConfig.agentFaceMcp || '/agent/mcp').toString().trim() || '/agent/mcp';
+const agentFacePath = agentFacePathRaw.startsWith('/') ? agentFacePathRaw : `/${agentFacePathRaw}`;
+const agentFaceMcpUrl = `http://${controlfaceHost}:${controlfacePort}${agentFacePath}`;
 
 function resolveDir(rel) {
   if (typeof rel !== 'string' || !rel.trim()) return null;
@@ -125,7 +131,9 @@ function substituteTemplateTokens(value) {
   return value
     .replace(/\{\{\s*boardId\s*\}\}/g, boardIdArg)
     .replace(/\{\{\s*BOARD_ROOT\s*\}\}/g, configuredBoardRoot)
-    .replace(/\{\{\s*boardRoot\s*\}\}/g, configuredBoardRoot);
+    .replace(/\{\{\s*boardRoot\s*\}\}/g, configuredBoardRoot)
+    .replace(/\{\{\s*AGENT_FACE_MCP_URL\s*\}\}/g, agentFaceMcpUrl)
+    .replace(/\{\{\s*MCP_SERVER_URL\s*\}\}/g, mcpServerUrl || '');
 }
 
 function setupCopilot() {
@@ -187,6 +195,25 @@ function setupCopilot() {
     }, null, 2)}\n`, 'utf8');
 
     console.log(`[${TAG}] ai=copilot board=${boardIdArg} stem=${stem} instructions=${parts.length} agents=${agentsCount} hooks=${hooksCount} skills=${skillsCount} scripts=${scriptsCount} -> ${workspaceRoot}`);
+  }
+
+  const setupScripts = Array.isArray(template.copilotSetupScripts)
+    ? template.copilotSetupScripts.filter((spec) => spec && typeof spec === 'object' && typeof spec.script === 'string')
+    : [];
+  for (const spec of setupScripts) {
+    const scriptPath = substituteTemplateTokens(spec.script);
+    const resolvedScript = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(configuredBoardRoot, scriptPath);
+    const scriptArgs = (Array.isArray(spec.args) ? spec.args : []).map(substituteTemplateTokens);
+    try {
+      execFileSync(process.execPath, [resolvedScript, ...scriptArgs], {
+        cwd: path.dirname(resolvedScript),
+        stdio: 'inherit',
+      });
+      console.log(`[${TAG}] ran copilotSetupScript ${path.basename(resolvedScript)} ${scriptArgs.join(' ')}`);
+    } catch (err) {
+      console.error(`[${TAG}] copilotSetupScript failed: ${resolvedScript} :: ${String(err?.message || err)}`);
+      process.exit(1);
+    }
   }
 }
 

@@ -1,13 +1,8 @@
 {
   "server": {
-    "name": "demo-boards-mcp",
+    "name": "demo-boards-agentface",
     "version": "0.1.0",
-    "description": "Live board runtime tools proxied through board-server MCP routes"
-  },
-  "connection": {
-    "transport": "streamable-http",
-    "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
-    "urlDefault": "http://127.0.0.1:7801/mcp"
+    "description": "Live board runtime tools served in-process by the controlface agentface MCP endpoint"
   },
   "tools": [
     {

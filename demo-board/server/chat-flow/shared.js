@@ -26,7 +26,7 @@ export function requireRequiredStrings(fields, contextLabel = 'handler') {
   }
 }
 
-const CONTEXT_FIELDS = ['serverUrl', 'mcpServerUrl', 'boardId', 'cardId', 'logId', 'turnId', 'watchPartyDir'];
+const CONTEXT_FIELDS = ['serverUrl', 'mcpServerUrl', 'agentFaceMcp', 'boardId', 'cardId', 'logId', 'turnId', 'watchPartyDir'];
 
 export const AGENT_OUTPUT_FILE_STEM = 'agent-output.txt';
 const AGENT_TOOLS_FILE_STEM = 'agent-tools.txt';
@@ -149,8 +149,29 @@ async function fetchServerTool(serverUrl, tool, args = {}, { controlplane = fals
   return payload;
 }
 
+export function resolveAgentFaceMcpUrl(context) {
+  const serverUrl = typeof context?.serverUrl === 'string' ? context.serverUrl.trim().replace(/\/+$/, '') : '';
+  if (!serverUrl) return '';
+  const rawPath = typeof context?.agentFaceMcp === 'string' && context.agentFaceMcp.trim()
+    ? context.agentFaceMcp.trim()
+    : '/agent/mcp';
+  const normalizedPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+  return `${serverUrl}${normalizedPath}`;
+}
+
+// liveboards.* tools are served in-process by the controlface agentface endpoint
+// (serverUrl + agentFaceMcp). Everything else (lore.*, etc.) stays on mcpServerUrl.
+export function resolveMcpUrlForTool(context, toolName) {
+  const name = typeof toolName === 'string' ? toolName.trim() : '';
+  if (name.startsWith('liveboards.')) {
+    const agentFaceUrl = resolveAgentFaceMcpUrl(context);
+    if (agentFaceUrl) return agentFaceUrl;
+  }
+  return typeof context?.mcpServerUrl === 'string' ? context.mcpServerUrl.trim() : '';
+}
+
 export async function invokeMcpServerTool(context, toolName, args = {}) {
-  const normalizedUrl = typeof context?.mcpServerUrl === 'string' ? context.mcpServerUrl.trim() : '';
+  const normalizedUrl = resolveMcpUrlForTool(context, toolName);
   if (!normalizedUrl) {
     throw new Error(`${toolName} requires context.mcpServerUrl`);
   }

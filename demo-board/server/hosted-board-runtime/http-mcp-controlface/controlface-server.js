@@ -24,7 +24,6 @@ import {
   runSetupSingleAiWorkspaceScript,
 } from '../host-shared/ai-workspace-setup.js';
 import { createLogger, HOSTED_SERVER_LOG_PATH } from '../host-shared/logging.js';
-import { deriveCardIdFromLogId, resolveBoardAgentToolsLogFilePath } from '../../chat-flow/shared.js';
 import {
   createHostedImmediateTaskExecutorRef,
   loadTaskExecutorModule,
@@ -33,6 +32,15 @@ import {
   getSampleTemplateEnvelope,
   listSampleTemplateEntries,
 } from '../host-shared/mcp-extras/sample-template-catalog.js';
+import {
+  emitWatchpartyToolsNotification,
+  invokeBoardRuntimeJson,
+  normalizeMcpArgs,
+  readMcpArg,
+  stripLogIdFromMcpBody,
+  createControlfaceMcpSurface,
+} from './controlface-mcp-surface.js';
+import { createAgentMcpHandler, AGENT_MCP_PATHS } from './agentface-mcp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -116,218 +124,6 @@ function formatControlfaceCompletionMessage(req, parsedUrl, details = {}, status
   return joinParts([method, routeLabel, status, normalizeText(details.errorMessage)]);
 }
 
-function titleCase(text) {
-  return String(text || '')
-    .split(/[._\-\s]+/g)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
-    .trim();
-}
-
-function resolveMcpToolSemanticName(toolName) {
-  const normalized = typeof toolName === 'string' ? toolName.trim() : '';
-  if (!normalized) {
-    return 'Unknown MCP Tool';
-  }
-  return titleCase(normalized) || 'Unknown MCP Tool';
-}
-
-function normalizeMcpToolName(toolName) {
-  const normalized = typeof toolName === 'string' ? toolName.trim() : '';
-  if (!normalized) return '';
-  return normalized.replace(/^liveboards\./, '');
-}
-
-function normalizeMcpArgs(body) {
-  if (body?.args && typeof body.args === 'object' && !Array.isArray(body.args)) {
-    return body.args;
-  }
-  if (body?.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments)) {
-    return body.arguments;
-  }
-  return {};
-}
-
-function stripLogIdFromArgs(args) {
-  if (!args || typeof args !== 'object' || Array.isArray(args)) {
-    return { strippedArgs: {}, logId: '' };
-  }
-  const { log_id, ...rest } = args;
-  return {
-    strippedArgs: rest,
-    logId: typeof log_id === 'string' ? log_id.trim() : '',
-  };
-}
-
-function stripLogIdFromMcpBody(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return { strippedBody: {}, logId: '' };
-  }
-
-  const strippedBody = { ...body };
-  let logId = '';
-
-  if (body.args && typeof body.args === 'object' && !Array.isArray(body.args)) {
-    const stripped = stripLogIdFromArgs(body.args);
-    strippedBody.args = stripped.strippedArgs;
-    logId = stripped.logId;
-  }
-
-  if (body.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments)) {
-    const stripped = stripLogIdFromArgs(body.arguments);
-    strippedBody.arguments = stripped.strippedArgs;
-    if (!logId) {
-      logId = stripped.logId;
-    }
-  }
-
-  return { strippedBody, logId };
-}
-
-function readMcpArg(args, ...keys) {
-  for (const key of keys) {
-    if (!key) continue;
-    if (Object.prototype.hasOwnProperty.call(args, key)) {
-      return args[key];
-    }
-  }
-  return undefined;
-}
-
-function formatChatHistoryScope(args) {
-  if (readMcpArg(args, 'all-turns', 'allTurns') === true) {
-    return 'across all turns';
-  }
-  const tailTurns = readMcpArg(args, 'tail-turns', 'tailTurns', 'tail');
-  const n = Number.isInteger(tailTurns)
-    ? tailTurns
-    : Number.parseInt(String(tailTurns ?? ''), 10);
-  if (Number.isInteger(n) && n > 0) {
-    return `across the last ${n} message${n === 1 ? '' : 's'}`;
-  }
-  return null;
-}
-
-function joinPhrases(parts) {
-  const filtered = parts.filter((part) => typeof part === 'string' && part.trim().length > 0);
-  if (filtered.length === 0) return '';
-  if (filtered.length === 1) return ` ${filtered[0]}`;
-  if (filtered.length === 2) return ` ${filtered[0]} and ${filtered[1]}`;
-  return ` ${filtered.slice(0, -1).join(', ')} and ${filtered[filtered.length - 1]}`;
-}
-
-function phraseForCard(cardId) {
-  const text = cardId === undefined || cardId === null ? '' : String(cardId).trim();
-  return text ? `for ${text}` : null;
-}
-
-function phraseForFileIdx(idx) {
-  if (idx === undefined || idx === null || idx === '') return null;
-  return `file no. ${idx}`;
-}
-
-function phraseForFileName(name) {
-  const text = name === undefined || name === null ? '' : String(name).trim();
-  return text ? `file '${text}'` : null;
-}
-
-function phraseForAttachments(count) {
-  if (!Number.isInteger(count) || count <= 0) return 'with no attachments';
-  return `with ${count} attachment${count === 1 ? '' : 's'}`;
-}
-
-function formatMcpLogDetails(toolName, body) {
-  const normalizedToolName = normalizeMcpToolName(toolName);
-  const args = normalizeMcpArgs(body);
-  const parts = [];
-  const cardId = readMcpArg(args, 'card_id', 'cardId');
-
-  switch (normalizedToolName) {
-    case 'inspect.board-runtime-status':
-    case 'discover.source-kinds':
-      break;
-    case 'inspect.card-definition-and-runtime':
-    case 'manage.read-card':
-    case 'manage.upsert-card':
-    case 'manage.remove-card':
-    case 'provide-final-reply-to-user':
-      parts.push(phraseForCard(cardId));
-      break;
-    case 'inspect.chat-messages-on-cards':
-      parts.push(phraseForCard(cardId));
-      parts.push(formatChatHistoryScope(args));
-      break;
-    case 'inspect.file-contents':
-      parts.push(phraseForCard(cardId));
-      parts.push(phraseForFileIdx(readMcpArg(args, 'file_idx', 'fileIdx')));
-      break;
-    case 'manage.upload-card-file':
-      parts.push(phraseForCard(cardId));
-      parts.push(phraseForFileName(readMcpArg(args, 'key', 'templateKey')));
-      break;
-    case 'stage-ai-response-and-any-attachments': {
-      parts.push(phraseForCard(cardId));
-      const files = readMcpArg(args, 'files');
-      const attachmentCount = Array.isArray(files) ? files.length : 0;
-      parts.push(phraseForAttachments(attachmentCount));
-      break;
-    }
-    default:
-      if (normalizedToolName.startsWith('preflight.')) {
-        parts.push(phraseForCard(cardId));
-      }
-      break;
-  }
-
-  return joinPhrases(parts);
-}
-
-function formatWatchpartyToolMessage(phase, toolName, body) {
-  const semanticName = resolveMcpToolSemanticName(toolName);
-  const details = formatMcpLogDetails(toolName, body);
-  return `${phase} '${semanticName}'${details}`;
-}
-
-function appendWatchpartyToolsLog(boardId, logId, phase, toolName, body) {
-  const sanitizedCardId = deriveCardIdFromLogId(logId);
-  if (!sanitizedCardId || !boardId) {
-    return null;
-  }
-
-  const outputPath = resolveBoardAgentToolsLogFilePath(boardId, sanitizedCardId);
-  const line = formatWatchpartyToolMessage(phase, toolName, body);
-
-  try {
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.appendFileSync(outputPath, `${line}\n`, 'utf8');
-    const text = fs.readFileSync(outputPath, 'utf8');
-    return { cardId: sanitizedCardId, channel: 'agent-tools', line, text };
-  } catch {
-    // Watchparty tool logging must never block request handling.
-    return { cardId: sanitizedCardId, channel: 'agent-tools', line, text: line };
-  }
-}
-
-function emitWatchpartyToolsNotification(runtime, boardId, logId, phase, toolName, body) {
-  const appended = appendWatchpartyToolsLog(boardId, logId, phase, toolName, body);
-  if (!appended || !runtime || typeof runtime.emitNotification !== 'function') {
-    return;
-  }
-  try {
-    runtime.emitNotification({
-      kind: 'card_watchparty',
-      cardId: appended.cardId,
-      channel: appended.channel,
-      replace: true,
-      payload: { text: appended.text },
-      sentAtMs: Date.now(),
-    });
-  } catch {
-    // Watchparty emission must never block request handling.
-  }
-}
-
 function readRawRequestBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -357,80 +153,6 @@ function createReplayableRequest(req, rawBodyBuffer) {
   replayReq.headers = req.headers;
   replayReq.httpVersion = req.httpVersion;
   return replayReq;
-}
-
-function createCaptureResponse() {
-  let statusCode = 200;
-  let headers = {};
-  const chunks = [];
-
-  return {
-    get statusCode() {
-      return statusCode;
-    },
-    set statusCode(value) {
-      statusCode = value;
-    },
-    writeHead(nextStatusCode, nextHeaders = {}) {
-      statusCode = nextStatusCode;
-      headers = { ...headers, ...nextHeaders };
-      return this;
-    },
-    setHeader(name, value) {
-      headers[String(name || '').toLowerCase()] = value;
-    },
-    getHeader(name) {
-      return headers[String(name || '').toLowerCase()];
-    },
-    write(chunk, encoding) {
-      if (chunk !== undefined && chunk !== null) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8'));
-      }
-      return true;
-    },
-    end(chunk, encoding) {
-      if (chunk !== undefined && chunk !== null) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8'));
-      }
-      return this;
-    },
-    once() {
-      return this;
-    },
-    on() {
-      return this;
-    },
-    get bodyText() {
-      return Buffer.concat(chunks).toString('utf8');
-    },
-  };
-}
-
-async function invokeBoardRuntimeJson(entry, hostConfig, boardId, routeKind, body) {
-  const routePath = `${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/${routeKind}`;
-  const requestBody = Buffer.from(JSON.stringify(body), 'utf8');
-  const replayReq = Readable.from(requestBody.length > 0 ? [requestBody] : []);
-  replayReq.method = 'POST';
-  replayReq.url = routePath;
-  replayReq.headers = {
-    'content-type': 'application/json',
-    'content-length': String(requestBody.length),
-  };
-  replayReq.httpVersion = '1.1';
-  const captureRes = createCaptureResponse();
-  const parsedUrl = new URL(`http://${hostConfig.host}:${hostConfig.port}${routePath}`);
-  const handled = await entry.runtime.handleRuntimeApi(replayReq, captureRes, parsedUrl);
-  if (!handled) {
-    throw new Error(`board runtime did not handle ${routeKind} for '${boardId}'`);
-  }
-  const payload = captureRes.bodyText ? JSON.parse(captureRes.bodyText) : null;
-  if ((captureRes.statusCode || 0) >= 400) {
-    const message = typeof payload?.error === 'string' && payload.error.trim()
-      ? payload.error.trim()
-      : `board runtime request failed with status ${captureRes.statusCode || 0}`;
-    throw new Error(message);
-  }
-  return payload;
 }
 
 function isBoardSseConnectRequest(req, parsedUrl, boardId, apiBasePrefix) {
@@ -1357,30 +1079,9 @@ async function handleManageBoardsRoute({
   sendJson(res, 400, { status: 'error', error: `unknown subcommand '${subcommand}'` });
 }
 
-async function handleMcpExtrasRoute({ rawBody, res, hostConfig }) {
+async function handleMcpExtrasRoute({ rawBody, res, controlfaceMcp }) {
   const body = parseJsonObjectOrEmpty(rawBody);
-  const toolName = typeof body?.tool === 'string' ? body.tool.trim() : '';
-  const args = normalizeMcpArgs(body);
-
-  if (!toolName) {
-    sendJson(res, 400, { error: 'tool is required' });
-    return;
-  }
-
-  if (toolName === 'explore.list-sample-templates') {
-    sendJson(res, 200, listSampleTemplateEntries(hostConfig));
-    return;
-  }
-
-  if (toolName === 'explore.get-sample-template') {
-    const key = typeof readMcpArg(args, 'key', 'templateKey') === 'string'
-      ? readMcpArg(args, 'key', 'templateKey').trim()
-      : '';
-    sendJson(res, 200, getSampleTemplateEnvelope(hostConfig, key));
-    return;
-  }
-
-  sendJson(res, 400, { error: `unknown mcp-extras tool '${toolName}'` });
+  sendJson(res, 200, controlfaceMcp.executeExtrasHttp(body));
 }
 
 async function main() {
@@ -1391,6 +1092,9 @@ async function main() {
     : await initializeFirebaseServices(hostConfig.firebase);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
   const boardRuntimes = await buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards);
+
+  const controlfaceMcp = createControlfaceMcpSurface({ hostConfig, boardRuntimes });
+  const agentMcp = createAgentMcpHandler({ hostConfig, boardRuntimes, logger: processLogger });
 
   const server = http.createServer(async (req, res) => {
     let requestDetails = null;
@@ -1405,6 +1109,24 @@ async function main() {
       completionLogged = true;
       requestLogger.info(formatControlfaceCompletionMessage(req, parsedBaseUrl, requestDetails, res.statusCode || 0));
     };
+
+    if (parsedBaseUrl.pathname === AGENT_MCP_PATHS.mcp || parsedBaseUrl.pathname === AGENT_MCP_PATHS.manifest) {
+      requestDetails = { routeKind: 'agent-mcp' };
+      requestLogger = processLogger.child(normalizeControlfaceScope('agent-mcp', '', boardRuntimes));
+      requestLogger.info(formatControlfacePickupMessage(req, parsedBaseUrl, requestDetails));
+      res.once('finish', logCompletionOnce);
+      res.once('close', logCompletionOnce);
+      try {
+        await agentMcp.handleRequest(req, res, parsedBaseUrl);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        requestDetails.errorMessage = message;
+        if (!res.headersSent) {
+          sendJson(res, 500, { error: message });
+        }
+      }
+      return;
+    }
 
     if (req.method === 'OPTIONS') {
       requestDetails = {};
@@ -1478,7 +1200,7 @@ async function main() {
       res.once('finish', logCompletionOnce);
       res.once('close', logCompletionOnce);
       try {
-        await handleMcpExtrasRoute({ rawBody, res, hostConfig });
+        await handleMcpExtrasRoute({ rawBody, res, controlfaceMcp });
       } catch (err) {
         const statusCode = Number.isInteger(err?.statusCode) && err.statusCode >= 400 ? err.statusCode : 500;
         sendJson(res, statusCode, {
