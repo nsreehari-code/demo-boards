@@ -23,6 +23,17 @@ import { createWakeTrigger, queueCollectionPath, startLaneRunners } from '../hos
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load hosted-board-runtime/.env (if present) for local Firebase/Foundry overrides.
+// See .env.template for supported variables. Real values stay local; .env is gitignored.
+if (typeof process.loadEnvFile === 'function') {
+  try {
+    process.loadEnvFile(path.resolve(__dirname, '..', '.env'));
+  } catch {
+    // No .env present (or unreadable); explicit environment variables still apply.
+  }
+}
+
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.localfs.config.json');
 
 function readPositiveInt(value, fallback) {
