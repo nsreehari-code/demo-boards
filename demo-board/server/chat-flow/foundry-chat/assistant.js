@@ -14,6 +14,7 @@ import {
   getEnhancedChatMessages,
   requireRequiredStrings,
   resolveBoardLogPath,
+  resolveAgentFaceMcpUrl,
   getCardPrivateChatSection,
   setCardPrivateChatSection,
 } from '../shared.js';
@@ -210,6 +211,7 @@ export async function invokeAssistant(context, config = {}) {
     turnId,
     serverUrl,
     mcpServerUrl,
+    agentFaceMcp,
     watchPartyDir,
   } = context;
   const {
@@ -329,18 +331,47 @@ export async function invokeAssistant(context, config = {}) {
   }
 
   const { Client, StreamableHTTPClientTransport } = await importMcpClient();
-  const mcpClient = new Client({ name: 'foundry-chat', version: '1.0.0' }, { capabilities: {} });
-  const transport = new StreamableHTTPClientTransport(new URL(normalizedMcpServerUrl));
+
+  // liveboards.* tools are served in-process by the controlface agentface endpoint
+  // (serverUrl + agentFaceMcp). Everything else (lore.* ...) stays on mcpServerUrl.
+  const agentFaceMcpUrl = resolveAgentFaceMcpUrl({ serverUrl, agentFaceMcp });
+  const otherMcpUrl = normalizedMcpServerUrl;
+  const liveboardsClient = agentFaceMcpUrl
+    ? new Client({ name: 'foundry-chat-liveboards', version: '1.0.0' }, { capabilities: {} })
+    : null;
+  const otherClient = new Client({ name: 'foundry-chat-other', version: '1.0.0' }, { capabilities: {} });
+
+  const routeClientForTool = (name) => (
+    liveboardsClient && typeof name === 'string' && name.startsWith('liveboards.')
+      ? liveboardsClient
+      : otherClient
+  );
+
+  async function closeAllClients() {
+    if (liveboardsClient) { try { await liveboardsClient.close(); } catch {} }
+    try { await otherClient.close(); } catch {}
+  }
 
   let resolvedThreadId = existingThreadId;
   try {
-    appendOutput(`Connecting to MCP server at ${normalizedMcpServerUrl}. Exposed prefixes: ${exposedPrefixes.join(', ')}.`);
-    await mcpClient.connect(transport);
+    const endpoints = [];
+    if (liveboardsClient) endpoints.push(`liveboards@${agentFaceMcpUrl}`);
+    endpoints.push(`other@${otherMcpUrl}`);
+    appendOutput(`Connecting to MCP endpoints (${endpoints.join(', ')}). Exposed prefixes: ${exposedPrefixes.join(', ')}.`);
 
-    const toolsResult = await mcpClient.listTools();
-    const toolsMeta = (toolsResult?.tools || []).filter(
-      (t) => exposedPrefixes.length === 0 || exposedPrefixes.some((p) => t.name.startsWith(p)),
-    );
+    if (liveboardsClient) {
+      await liveboardsClient.connect(new StreamableHTTPClientTransport(new URL(agentFaceMcpUrl)));
+    }
+    await otherClient.connect(new StreamableHTTPClientTransport(new URL(otherMcpUrl)));
+
+    const matchesExposed = (name) => exposedPrefixes.length === 0 || exposedPrefixes.some((p) => name.startsWith(p));
+    const liveboardsTools = liveboardsClient
+      ? ((await liveboardsClient.listTools())?.tools || [])
+          .filter((t) => t.name.startsWith('liveboards.') && matchesExposed(t.name))
+      : [];
+    const otherTools = ((await otherClient.listTools())?.tools || [])
+      .filter((t) => matchesExposed(t.name) && (!liveboardsClient || !t.name.startsWith('liveboards.')));
+    const toolsMeta = [...liveboardsTools, ...otherTools];
     appendOutput(`Discovered ${toolsMeta.length} tools from MCP.`);
     appendDebug('foundry-assistant:toolsDiscovered', { count: toolsMeta.length });
 
@@ -380,7 +411,7 @@ export async function invokeAssistant(context, config = {}) {
         appendOutput(`Invoking '${realName}' with ${JSON.stringify(mergedArgs).slice(0, 260)}.`);
         let resultText;
         try {
-          const result = await mcpClient.callTool({ name: realName, arguments: mergedArgs });
+          const result = await routeClientForTool(realName).callTool({ name: realName, arguments: mergedArgs });
           resultText = normalizeMcpToolResult(result);
         } catch (e) {
           resultText = JSON.stringify({ error: `${realName} failed: ${e?.message || e}` });
@@ -405,7 +436,7 @@ export async function invokeAssistant(context, config = {}) {
       // Agent finished without staging — surface the last assistant message ourselves.
       const text = await getLastAssistantText(client, resolvedThreadId);
       if (text.trim()) {
-        await mcpClient.callTool({
+        await routeClientForTool(STAGE_TOOL_NAME).callTool({
           name: STAGE_TOOL_NAME,
           arguments: { board_id: boardId, card_id: cardId, turn_id: turnId, text: text.trim(), files: [], log_id: logId },
         });
@@ -419,7 +450,7 @@ export async function invokeAssistant(context, config = {}) {
     appendDebug('foundry-assistant:invokeFailed', { message: err?.message || String(err) });
     throw err;
   } finally {
-    try { await mcpClient.close(); } catch {}
+    await closeAllClients();
   }
 
   if (resolvedThreadId && resolvedThreadId !== existingThreadId) {

@@ -108,6 +108,12 @@
           "agentsHooks": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/gandalf/hooks"],
           "copyScripts": ["{{BOARD_ROOT}}/scripts/cli"]
         }
+      ],
+      "copilotSetupScripts": [
+        {
+          "script": "{{BOARD_ROOT}}/server/sync-copilot-mcp-config.js",
+          "args": ["--refresh", "--agentface-url", "{{AGENT_FACE_MCP_URL}}"]
+        }
       ]
     }
   },

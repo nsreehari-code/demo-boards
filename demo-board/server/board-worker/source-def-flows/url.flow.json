@@ -15,7 +15,7 @@
           "data.fanout_mode = $exists(expects_data.sourceDef.urls.projectionList) and expects_data.sourceDef.urls.projectionList != ''",
           "data.target_urls = data.fanout_mode ? $lookup(expects_data.sourceDef._projections, expects_data.sourceDef.urls.projectionList) : [expects_data.sourceDef.urls.url]",
           "data.sourceDef = expects_data.sourceDef",
-          "result = $type(data.target_urls) = 'array' and $count(data.target_urls) > 0 ? 'success' : 'failure'"
+          "result = $type(data.target_urls) = 'array' ? 'success' : 'failure'"
         ]
       },
       "transitions": {

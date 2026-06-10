@@ -11,6 +11,13 @@ const REPO_ROOT = path.resolve(BOARD_ROOT, '..');
 const MCP_SERVER_ROOT = path.join(REPO_ROOT, 'mcp-server');
 const DEFAULT_REGISTRY_PATH = path.join(MCP_SERVER_ROOT, 'registry.json');
 const DEFAULT_COPILOT_CONFIG_PATH = path.join(os.homedir(), '.copilot', 'mcp-config.json');
+const DEFAULT_AGENTFACE_MANIFEST_PATH = path.join(
+  SERVER_DIR,
+  'hosted-board-runtime',
+  'http-mcp-controlface',
+  'agentface.tools.json',
+);
+const DEFAULT_AGENTFACE_NAME = 'liveboards';
 
 function parseArgs(argv) {
   const args = {
@@ -18,6 +25,9 @@ function parseArgs(argv) {
     refresh: false,
     registryPath: DEFAULT_REGISTRY_PATH,
     configPath: DEFAULT_COPILOT_CONFIG_PATH,
+    agentfaceUrl: '',
+    agentfaceManifest: DEFAULT_AGENTFACE_MANIFEST_PATH,
+    agentfaceName: DEFAULT_AGENTFACE_NAME,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -38,10 +48,40 @@ function parseArgs(argv) {
     if (value === '--config' && argv[i + 1]) {
       args.configPath = path.resolve(process.cwd(), argv[i + 1]);
       i += 1;
+      continue;
+    }
+    if (value === '--agentface-url' && argv[i + 1]) {
+      args.agentfaceUrl = String(argv[i + 1]).trim();
+      i += 1;
+      continue;
+    }
+    if (value === '--agentface-manifest' && argv[i + 1]) {
+      args.agentfaceManifest = path.resolve(process.cwd(), argv[i + 1]);
+      i += 1;
+      continue;
+    }
+    if (value === '--agentface-name' && argv[i + 1]) {
+      args.agentfaceName = String(argv[i + 1]).trim();
+      i += 1;
     }
   }
 
   return args;
+}
+
+function buildAgentfaceEntry(manifestPath, url) {
+  const manifest = readJsonFile(manifestPath);
+  const tools = Array.isArray(manifest?.tools)
+    ? manifest.tools.map((tool) => tool?.name).filter((toolName) => typeof toolName === 'string' && toolName)
+    : [];
+  if (tools.length === 0) {
+    throw new Error(`Agentface manifest ${manifestPath} does not declare any tools`);
+  }
+  return {
+    type: 'http',
+    url,
+    tools,
+  };
 }
 
 function readJsonFile(filePath, { missingOk = false } = {}) {
@@ -255,6 +295,9 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const registry = readJsonFile(args.registryPath);
   const translatedEntries = buildMissingEntries(registry);
+  if (args.agentfaceUrl) {
+    translatedEntries[args.agentfaceName] = buildAgentfaceEntry(args.agentfaceManifest, args.agentfaceUrl);
+  }
   const existingConfig = readJsonFile(args.configPath, { missingOk: true });
   const { mergedConfig, added, updated, skipped } = args.refresh
     ? refreshEntries(existingConfig, translatedEntries)
