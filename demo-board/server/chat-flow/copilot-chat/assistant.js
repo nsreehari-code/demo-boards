@@ -171,13 +171,13 @@ export async function invokeAssistant(context, config = {}) {
   } = context;
   const {
     aiWorkspaceRoot = '',
-    chatCopilotTimeoutMs: rawChatCopilotTimeoutMs = 300000,
+    chatCopilotTimeoutMs: rawChatCopilotTimeoutMs = 2100000,
     enableAssistantDebug = false,
   } = config;
 
   const chatCopilotTimeoutMs = Number.isFinite(Number(rawChatCopilotTimeoutMs)) && Number(rawChatCopilotTimeoutMs) > 0
     ? Math.floor(Number(rawChatCopilotTimeoutMs))
-    : 300000;
+    : 2100000;
 
   const DEBUG_LOG_FILE = resolveBoardLogPath(context, 'copilot-assistant-debug.jsonl');
   const agentOutputFile = path.join(watchPartyDir, AGENT_OUTPUT_FILE_STEM);

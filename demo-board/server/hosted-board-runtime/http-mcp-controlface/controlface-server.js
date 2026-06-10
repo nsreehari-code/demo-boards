@@ -57,28 +57,42 @@ if (typeof process.loadEnvFile === 'function') {
 
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'hosted-board-runtime.localfs.config.json');
 const SETUP_SCRIPT_PATH = path.resolve(__dirname, '..', 'scripts', 'setup-single-ai-workspace.js');
-function resolveChatAgentVisibilityMs(hostConfig) {
-  const explicitVisibilityMs = Number.isFinite(Number(hostConfig?.chatAgentVisibilityMs))
-    ? Math.floor(Number(hostConfig.chatAgentVisibilityMs))
-    : 0;
-  if (explicitVisibilityMs > 0) {
-    return explicitVisibilityMs;
-  }
+function readPositiveIntValue(value, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return Math.floor(num);
+}
 
+function resolveAssistantDerivedVisibilityMs(hostConfig) {
   const assistantTimeoutMs = Math.max(
-    Number.isFinite(Number(hostConfig?.chatCopilotTimeoutMs)) ? Math.floor(Number(hostConfig.chatCopilotTimeoutMs)) : 300000,
-    Number.isFinite(Number(hostConfig?.chatFlowTimeoutMs)) ? Math.floor(Number(hostConfig.chatFlowTimeoutMs)) : 0,
-    Number.isFinite(Number(hostConfig?.chatInvokeRefTimeoutMs)) ? Math.floor(Number(hostConfig.chatInvokeRefTimeoutMs)) : 0,
+    readPositiveIntValue(hostConfig?.chatCopilotTimeoutMs, 2100000),
+    readPositiveIntValue(hostConfig?.chatFlowTimeoutMs, 0),
+    readPositiveIntValue(hostConfig?.chatInvokeRefTimeoutMs, 0),
   );
 
   return assistantTimeoutMs + 60000;
 }
 
+function resolveLaneVisibilityMs(configValue, assistantDerivedMs) {
+  const explicit = readPositiveIntValue(configValue, 0);
+  return explicit > 0 ? explicit : assistantDerivedMs;
+}
+
 function buildHostedQueueLaneTuning(hostConfig) {
+  // Every lane can run AI-backed work bounded by the assistant timeout, so each
+  // lane's lease visibility defaults to that timeout (+60s) and can be overridden
+  // independently from the hosted config.
+  const assistantDerivedVisibilityMs = resolveAssistantDerivedVisibilityMs(hostConfig);
   return {
+    processAccumulated: {
+      visibilityMs: resolveLaneVisibilityMs(hostConfig?.processAccumulatedVisibilityMs, assistantDerivedVisibilityMs),
+    },
     chatAgent: {
       concurrency: 2,
-      visibilityMs: resolveChatAgentVisibilityMs(hostConfig),
+      visibilityMs: resolveLaneVisibilityMs(hostConfig?.chatAgentVisibilityMs, assistantDerivedVisibilityMs),
+    },
+    taskExecutor: {
+      visibilityMs: resolveLaneVisibilityMs(hostConfig?.taskExecutorVisibilityMs, assistantDerivedVisibilityMs),
     },
   };
 }

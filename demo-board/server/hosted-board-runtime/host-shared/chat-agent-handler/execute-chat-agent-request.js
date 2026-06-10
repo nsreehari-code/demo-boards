@@ -119,7 +119,7 @@ export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) 
       enableAssistantDebug: hostRuntime?.enableAssistantDebug === true,
       debugAssistantFile: typeof hostRuntime?.debugAssistantFile === 'string' ? hostRuntime.debugAssistantFile.trim() : '',
       aiWorkspaceRoot,
-      chatCopilotTimeoutMs: normalizePositiveInt(hostRuntime?.chatCopilotTimeoutMs, 300000) ?? 300000,
+      chatCopilotTimeoutMs: normalizePositiveInt(hostRuntime?.chatCopilotTimeoutMs, 2100000) ?? 2100000,
         chatAssistant: normalizeChatAssistant(boardConfig?.ai),
       foundryEndpoint: typeof foundryAgents.endpoint === 'string' ? foundryAgents.endpoint.trim() : '',
       foundryChatAgentId: typeof foundryAgents.chatAgentId === 'string' ? foundryAgents.chatAgentId.trim() : '',
@@ -133,6 +133,9 @@ export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) 
       aiWorkspaceRoot,
       foundryEndpoint: typeof foundryAgents.endpoint === 'string' ? foundryAgents.endpoint.trim() : '',
       foundryTaskExecutorAgentId: typeof foundryAgents.taskExecutorAgentId === 'string' ? foundryAgents.taskExecutorAgentId.trim() : '',
+      taskExecutorTimeoutMs: normalizePositiveInt(hostRuntime?.taskExecutorTimeoutMs, null)
+        ?? normalizePositiveInt(hostRuntime?.chatCopilotTimeoutMs, 2100000)
+        ?? 2100000,
     },
   };
 }

@@ -3,7 +3,7 @@
   "settings": {
     "start_step": "execute",
     "max_total_steps": 8,
-    "timeout_ms": 300000
+    "timeout_ms": 2100000
   },
   "steps": {
     "execute": {

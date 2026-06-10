@@ -173,7 +173,7 @@ export async function runAgentToolLoop({
   onToolCall,
   shouldStop,
   onProgress,
-  timeoutMs = 300000,
+  timeoutMs = 2100000,
   maxIters = 64,
   fetchFinalText = false,
 }) {

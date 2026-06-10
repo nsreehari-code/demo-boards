@@ -368,6 +368,11 @@ export async function execute(context) {
 
   const tools = allowedDirs.length ? buildFileTools() : [];
 
+  const configuredTimeoutMs = [cfg.timeout_ms, extra.taskExecutorTimeoutMs]
+    .map((value) => Number(value))
+    .find((value) => Number.isFinite(value) && value > 0);
+  const timeoutMs = configuredTimeoutMs ?? 2_100_000;
+
   let client;
   let threadId;
   try {
@@ -381,7 +386,7 @@ export async function execute(context) {
       threadId,
       userPrompt: prompt,
       tools,
-      timeoutMs: 300_000,
+      timeoutMs,
       maxIters: 10,
       fetchFinalText: true,
       onToolCall: async (name, args) => {

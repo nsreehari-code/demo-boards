@@ -5,6 +5,8 @@
   "apiBasePrefix": "/api/boards",
   "enableAssistantDebug": false,
   "debugAssistantFile": "",
+  "chatCopilotTimeoutMs": 2100000,
+  "taskExecutorTimeoutMs": 2100000,
   "controlface": {
     "host": "127.0.0.1",
     "port": 7799

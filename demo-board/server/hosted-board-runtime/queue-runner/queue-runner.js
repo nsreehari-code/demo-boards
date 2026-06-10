@@ -53,22 +53,19 @@ function defaultQueueRunnerConcurrency() {
   return Math.max(1, os.cpus().length || 1);
 }
 
-function resolveChatAgentVisibilityMs(hostConfig) {
-  const explicitVisibilityMs = readPositiveInt(
-    process.env.DEMO_BOARDS_CHAT_AGENT_VISIBILITY_MS,
-    readPositiveInt(hostConfig?.chatAgentVisibilityMs, 0),
-  );
-  if (explicitVisibilityMs > 0) {
-    return explicitVisibilityMs;
-  }
-
+function resolveAssistantDerivedVisibilityMs(hostConfig) {
   const assistantTimeoutMs = Math.max(
-    readPositiveInt(hostConfig?.chatCopilotTimeoutMs, 300000),
+    readPositiveInt(hostConfig?.chatCopilotTimeoutMs, 2100000),
     readPositiveInt(hostConfig?.chatFlowTimeoutMs, 0),
     readPositiveInt(hostConfig?.chatInvokeRefTimeoutMs, 0),
   );
 
   return assistantTimeoutMs + 60000;
+}
+
+function resolveLaneVisibilityMs(envValue, configValue, assistantDerivedMs) {
+  const explicit = readPositiveInt(envValue, readPositiveInt(configValue, 0));
+  return explicit > 0 ? explicit : assistantDerivedMs;
 }
 
 function buildHostedQueueLaneTuning(hostConfig) {
@@ -80,17 +77,40 @@ function buildHostedQueueLaneTuning(hostConfig) {
     process.env.DEMO_BOARDS_QUEUE_FALLBACK_POLL_MS,
     readPositiveInt(hostConfig?.queueFallbackPollMs, 3000),
   );
+  // All lanes can run AI-backed work that may take up to the assistant timeout,
+  // so their lease visibility defaults to that timeout (+60s) to avoid a lease
+  // expiring mid-run and the message being reclaimed and re-executed. Each lane
+  // can still be overridden independently from the hosted config or env.
+  const assistantDerivedVisibilityMs = resolveAssistantDerivedVisibilityMs(hostConfig);
   const shared = {
     concurrency: defaultConcurrency,
     pollIntervalMs: fallbackPollIntervalMs,
   };
   return {
-    processAccumulated: shared,
+    processAccumulated: {
+      ...shared,
+      visibilityMs: resolveLaneVisibilityMs(
+        process.env.DEMO_BOARDS_PROCESS_ACCUMULATED_VISIBILITY_MS,
+        hostConfig?.processAccumulatedVisibilityMs,
+        assistantDerivedVisibilityMs,
+      ),
+    },
     chatAgent: {
       ...shared,
-      visibilityMs: resolveChatAgentVisibilityMs(hostConfig),
+      visibilityMs: resolveLaneVisibilityMs(
+        process.env.DEMO_BOARDS_CHAT_AGENT_VISIBILITY_MS,
+        hostConfig?.chatAgentVisibilityMs,
+        assistantDerivedVisibilityMs,
+      ),
     },
-    taskExecutor: shared,
+    taskExecutor: {
+      ...shared,
+      visibilityMs: resolveLaneVisibilityMs(
+        process.env.DEMO_BOARDS_TASK_EXECUTOR_VISIBILITY_MS,
+        hostConfig?.taskExecutorVisibilityMs,
+        assistantDerivedVisibilityMs,
+      ),
+    },
   };
 }
 

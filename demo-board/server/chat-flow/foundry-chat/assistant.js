@@ -219,13 +219,13 @@ export async function invokeAssistant(context, config = {}) {
     foundryEndpoint = '',
     foundryChatAgentId = '',
     foundryChatExposedMcpToolPrefixes = [],
-    chatCopilotTimeoutMs: rawTimeoutMs = 300000,
+    chatCopilotTimeoutMs: rawTimeoutMs = 2100000,
     enableAssistantDebug = false,
   } = config;
 
   const chatTimeoutMs = Number.isFinite(Number(rawTimeoutMs)) && Number(rawTimeoutMs) > 0
     ? Math.floor(Number(rawTimeoutMs))
-    : 300000;
+    : 2100000;
 
   const DEBUG_LOG_FILE = resolveBoardLogPath(context, 'foundry-assistant-debug.jsonl');
   const INVOKE_STDERR_LOG_FILE = resolveBoardLogPath(context, 'foundry-invoke.stderr.log');
