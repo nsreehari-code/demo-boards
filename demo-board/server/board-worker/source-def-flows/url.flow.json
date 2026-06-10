@@ -8,14 +8,15 @@
   "steps": {
     "prepare": {
       "description": "Resolve URL targets",
-      "produces_data": ["target_urls", "fanout_mode", "sourceDef"],
+      "produces_data": ["target_urls", "fanout_mode", "sourceDef", "error"],
       "handler": {
         "type": "compute-jsonata",
         "expr": [
           "data.fanout_mode = $exists(expects_data.sourceDef.urls.projectionList) and expects_data.sourceDef.urls.projectionList != ''",
-          "data.target_urls = data.fanout_mode ? $lookup(expects_data.sourceDef._projections, expects_data.sourceDef.urls.projectionList) : [expects_data.sourceDef.urls.url]",
+          "data.resolved_urls = data.fanout_mode ? $lookup(expects_data.sourceDef._projections, expects_data.sourceDef.urls.projectionList) : [expects_data.sourceDef.urls.url]",
+          "data.target_urls = $type(data.resolved_urls) = 'array' ? data.resolved_urls : ($exists(data.resolved_urls) ? [data.resolved_urls] : [])",
           "data.sourceDef = expects_data.sourceDef",
-          "result = $type(data.target_urls) = 'array' ? 'success' : 'failure'"
+          "result = 'success'"
         ]
       },
       "transitions": {

@@ -135,11 +135,18 @@ function summarizeTaskExecutorRequest(request, lease) {
     : request?.args?.source_def && typeof request.args.source_def === 'object' && !Array.isArray(request.args.source_def)
       ? request.args.source_def
       : {};
+  const quoteUrls = sourceDef?._projections?.quote_urls;
+  const quoteUrlsShape = Array.isArray(quoteUrls)
+    ? `quoteUrls[${quoteUrls.length}]`
+    : quoteUrls === undefined
+      ? 'quoteUrls=missing'
+      : `quoteUrls=${typeof quoteUrls}`;
   return joinParts([
     readCardId(request),
     normalizeText(sourceDef?.kind),
     normalizeText(sourceDef?.bindTo),
     normalizeText(sourceDef?.outputFile),
+    quoteUrlsShape,
   ]);
 }
 
@@ -432,7 +439,10 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
                 ...(request.extra ? { extra: request.extra } : {}),
               }
             : request;
+          const quoteUrls = executorRequest?.source_def?._projections?.quote_urls;
+          const projectedQuoteUrls = Array.isArray(quoteUrls) ? quoteUrls : null;
           trace(`task-executor-handle-start board=${boardId} hasSourceDef=${Boolean(executorRequest?.source_def)} callback=${Boolean(executorRequest?.callback)} output=${Boolean(executorRequest?.output)}`);
+          trace(`source projections board=${boardId} bindTo=${typeof executorRequest?.source_def?.bindTo === 'string' ? executorRequest.source_def.bindTo : ''} quoteUrlsType=${projectedQuoteUrls ? 'array' : quoteUrls === undefined ? 'missing' : typeof quoteUrls} quoteUrlsCount=${projectedQuoteUrls ? projectedQuoteUrls.length : 0} firstQuoteUrl=${projectedQuoteUrls?.[0] || ''}`);
           await taskExecutor(executorRequest);
           trace(`task-executor-handle-complete board=${boardId} hasSourceDef=${Boolean(executorRequest?.source_def)}`);
         }

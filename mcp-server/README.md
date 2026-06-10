@@ -142,6 +142,20 @@ npm run start:stdio -- --manifest manifests/your-non-tty-tools.json
 
 That will intentionally fail if the selected manifest declares `requiresTerminalStdin`.
 
+## Sentinel auth troubleshooting
+
+If Sentinel cards/tools fail with tenant or token errors:
+- Confirm `SENTINEL_TENANT_ID` in `mcp-server/.env` matches the tenant you expect.
+- Run `npm run smoke:sentinel:tenant` from `mcp-server/` to verify Azure CLI account context and Sentinel token mint.
+- If the check fails due to stale or wrong login, run `npm run smoke:sentinel:tenant -- --login` and complete the browser prompt for the target tenant.
+- If you still see `AADSTS500213`, your signed-in identity is blocked by cross-tenant policy in that tenant; use an allowed account.
+
+From `demo-boards-ns-code/` root, the same check is available as:
+
+```bash
+npm run mcp:sentinel:tenant-check
+```
+
 ## Next steps
 
 1. Add more repo-owned executable manifests for other local tool surfaces.

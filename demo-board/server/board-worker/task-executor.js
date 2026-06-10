@@ -132,6 +132,62 @@ function sanitizeRuntimeSourceDef(sourceDef) {
   return sanitized;
 }
 
+function summarizeSourceInvocationContext(sourceDef, extra = {}, refs = {}, callback) {
+  const summary = {};
+
+  if (typeof extra?.boardId === 'string' && extra.boardId) {
+    summary.boardId = extra.boardId;
+  }
+  if (typeof callback?.token === 'string' && callback.token) {
+    summary.callbackToken = callback.token;
+  }
+  if (typeof callback?.via?.howToRun === 'string' && callback.via.howToRun) {
+    summary.callbackHowToRun = callback.via.howToRun;
+  }
+  if (callback?.via?.whatToRun) {
+    summary.callbackWhatToRun = typeof callback.via.whatToRun === 'string'
+      ? callback.via.whatToRun
+      : callback.via.whatToRun.value;
+  }
+
+  if (typeof sourceDef?.bindTo === 'string' && sourceDef.bindTo) {
+    summary.bindTo = sourceDef.bindTo;
+  }
+  if (typeof sourceDef?.outputFile === 'string' && sourceDef.outputFile) {
+    summary.outputFile = sourceDef.outputFile;
+  }
+  if (typeof sourceDef?.kind === 'string' && sourceDef.kind) {
+    summary.kindHint = sourceDef.kind;
+  }
+
+  if (sourceDef?.mcp && typeof sourceDef.mcp === 'object' && !Array.isArray(sourceDef.mcp)) {
+    if (typeof sourceDef.mcp.server === 'string' && sourceDef.mcp.server) {
+      summary.mcpServer = sourceDef.mcp.server;
+    }
+    if (typeof sourceDef.mcp.tool === 'string' && sourceDef.mcp.tool) {
+      summary.mcpTool = sourceDef.mcp.tool;
+    }
+  }
+
+  if (refs?.inRef?.value) summary.inRef = refs.inRef.value;
+  if (refs?.outRef?.value) summary.outRef = refs.outRef.value;
+  if (refs?.errRef?.value) summary.errRef = refs.errRef.value;
+
+  return summary;
+}
+
+function logSourceInvocationFailure(context, err) {
+  if (!traceEnabled()) return;
+  const errorPayload = {
+    ...context,
+    error: String(err && err.message || err),
+  };
+  console.error(`${LOG_PREFIX} source invocation context ${JSON.stringify(errorPayload)}`);
+  if (err?.stack) {
+    console.error(`${LOG_PREFIX} source invocation stack ${err.stack}`);
+  }
+}
+
 function matchesDetectRule(sourceDef, detect) {
   if (!detect || typeof detect !== 'object') return false;
   if (typeof detect.field === 'string') {
@@ -208,7 +264,9 @@ async function executeStepMachineSourceFlow(context) {
   }
 
   if (run.intent !== 'success') {
-    const reason = typeof run.data?.error === 'string' ? run.data.error : `flow returned intent: ${run.intent}`;
+    const reason = typeof run.data?.error === 'string' && run.data.error
+      ? `${run.data.error} (intent: ${run.intent})`
+      : `flow returned intent: ${run.intent}`;
     throw new Error(reason);
   }
 
@@ -302,6 +360,8 @@ async function runSourceFetchSubcommand(argv) {
     failRef(`Cannot resolve source_def: ${String(err && err.message || err)}`, callback);
   }
 
+  const invocationContext = summarizeSourceInvocationContext(sourceDef, extra, { inRef, outRef, errRef }, callback);
+
   trace(`run-source-fetch-start bindTo=${typeof sourceDef?.bindTo === 'string' ? sourceDef.bindTo : ''} kindHint=${typeof sourceDef?.kind === 'string' ? sourceDef.kind : ''} callback=${Boolean(callback)} outRef=${outRef?.value || ''}`);
 
   let kind;
@@ -312,6 +372,7 @@ async function runSourceFetchSubcommand(argv) {
     flowResult = resolved.flowResult;
   } catch (err) {
     const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
+    logSourceInvocationFailure({ ...invocationContext, resolvedKind: kind || undefined }, err);
     trace(`run-source-fetch-error bindTo=${typeof sourceDef?.bindTo === 'string' ? sourceDef.bindTo : ''} message=${String(err && err.message || err)}`);
     failRef(`source invocation failed: ${String(err && err.message || err)}${detail}`, callback);
   }
@@ -355,6 +416,7 @@ async function executeLogicalSourceFetchRequest(request) {
   const errRef = diagnosticsRefStr ? parseRef(diagnosticsRefStr) : undefined;
   const outStorage = blobStorageForRef(outRef);
   const errStorage = errRef ? blobStorageForRef(errRef) : undefined;
+  const invocationContext = summarizeSourceInvocationContext(sourceDef, extra, { outRef, errRef }, callback);
 
   const reportHostedFailure = (msg) => {
     if (errStorage && errRef) { try { errStorage.write(errRef.value, msg); } catch {} }
@@ -368,6 +430,7 @@ async function executeLogicalSourceFetchRequest(request) {
     flowResult = resolved.flowResult;
   } catch (err) {
     const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
+    logSourceInvocationFailure(invocationContext, err);
     reportHostedFailure(`source invocation failed: ${String(err && err.message || err)}${detail}`);
     return;
   }
