@@ -420,7 +420,7 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
       ? async (args, request) => {
           if (isDummyTaskExecutorRequest(args)) {
             const marker = typeof args.marker === 'string' ? args.marker : '';
-            console.log(`[queue-runner] tt-dummy-picked-up board=${boardId}${marker ? ` marker=${marker}` : ''}`);
+            trace(`tt-dummy-picked-up board=${boardId}${marker ? ` marker=${marker}` : ''}`);
             return;
           }
           const executorRequest = args && typeof args === 'object' && !Array.isArray(args)
