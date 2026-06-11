@@ -12,6 +12,7 @@ import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-nod
 import { buildBoardBundle as buildFirebaseBoardBundle } from '../firebase-adapter/build-board-bundle.js';
 import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js';
 import { loadFirebaseHostConfig, resolveConfigRelativePath } from '../firebase-adapter/load-config.js';
+import { createBoardLayoutsStore } from '../board-layouts/layout-store.js';
 import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
 import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
@@ -660,6 +661,10 @@ function summarizeBoardForList(board) {
   };
 }
 
+function summarizeBoardLayout(layout) {
+  return layout && typeof layout === 'object' && !Array.isArray(layout) ? layout : null;
+}
+
 function normalizeImportMode(value) {
   const mode = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return mode === 'ingest' ? 'ingest' : 'replace';
@@ -947,6 +952,43 @@ async function handleManageBoardsRoute({
     return;
   }
 
+  if (subcommand === 'get-layout') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const board = await dynamicBoards.get(id);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    const layout = await boardLayouts.get(id);
+    sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(layout) } });
+    return;
+  }
+
+  if (subcommand === 'save-layout') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const layout = args?.layout;
+    if (!layout || typeof layout !== 'object' || Array.isArray(layout)) {
+      sendJson(res, 400, { status: 'error', error: 'args.layout is required (object)' });
+      return;
+    }
+    const board = await dynamicBoards.get(id);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    await boardLayouts.set(id, layout);
+    sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(layout) } });
+    return;
+  }
+
   if (subcommand === 'save-board-record') {
     const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
     if (!id) {
@@ -1017,6 +1059,7 @@ async function handleManageBoardsRoute({
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
     }
+    await boardLayouts.remove(id);
     boardRuntimes.delete(id);
     sendJson(res, 200, {
       status: 'success',
@@ -1137,6 +1180,7 @@ async function main() {
     ? await initializeLocalFsServices(hostConfig.localfs)
     : await initializeFirebaseServices(hostConfig.firebase);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
+  const boardLayouts = createBoardLayoutsStore({ registry: hostConfig.runtimeBoardsRegistry, adapterServices });
   const boardRuntimes = await buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards);
 
   const controlfaceMcp = createControlfaceMcpSurface({ hostConfig, boardRuntimes });

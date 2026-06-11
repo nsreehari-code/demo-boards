@@ -123,6 +123,10 @@
         "kind": "fs-path",
         "value": "{{BOARD_ROOT}}/workspaces/_boards-index"
       },
+      "boards-layout": {
+        "kind": "fs-path",
+        "value": "{{BOARD_ROOT}}/workspaces/_boards-layout"
+      },
       "deprecatedContainer": {
         "kind": "fs-path",
         "value": "{{BOARD_ROOT}}/workspaces/_deprecated"
@@ -132,6 +136,10 @@
       "boards-index": {
         "kind": "firestore",
         "value": "boards-index"
+      },
+      "boards-layout": {
+        "kind": "firestore",
+        "value": "boards-layout"
       },
       "deprecatedContainer": null
     }

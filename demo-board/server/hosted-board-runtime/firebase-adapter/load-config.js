@@ -287,6 +287,10 @@ function resolveRuntimeBoardsRegistry(config, tokens = {}, storageAdapter = 'fir
   if (!boardsIndexRef) {
     throw new Error(`Config runtimeBoardsRegistry.${storageAdapter}.boards-index must be a {kind, value} ref`);
   }
+  const boardsLayoutRef = tryParseKindValueRef(scopedSource['boards-layout']);
+  if (!boardsLayoutRef) {
+    throw new Error(`Config runtimeBoardsRegistry.${storageAdapter}.boards-layout must be a {kind, value} ref`);
+  }
   const deprecatedContainerSource = Object.prototype.hasOwnProperty.call(scopedSource, 'deprecatedContainer')
     ? scopedSource.deprecatedContainer
     : null;
@@ -298,6 +302,10 @@ function resolveRuntimeBoardsRegistry(config, tokens = {}, storageAdapter = 'fir
     boardsIndexRef: {
       kind: boardsIndexRef.kind,
       value: replaceTemplateTokens(boardsIndexRef.value, tokens),
+    },
+    boardsLayoutRef: {
+      kind: boardsLayoutRef.kind,
+      value: replaceTemplateTokens(boardsLayoutRef.value, tokens),
     },
     deprecatedContainerRef: deprecatedContainerRef
       ? {
@@ -428,6 +436,7 @@ export function loadFirebaseHostConfig(defaultConfigPath, cliArgs = process.argv
     bootstrapSampleBoards,
     runtimeBoardsRegistry,
     boardsIndexRef: runtimeBoardsRegistry.boardsIndexRef,
+    boardsLayoutRef: runtimeBoardsRegistry.boardsLayoutRef,
     deprecatedContainerRef: runtimeBoardsRegistry.deprecatedContainerRef,
     sampleTemplateCatalog,
   };
