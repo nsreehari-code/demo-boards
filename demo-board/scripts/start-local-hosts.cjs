@@ -62,6 +62,7 @@ function prepareHosts() {
     cwd: runtimeDir,
     env: sharedEnv,
     stdio: 'inherit',
+    windowsHide: true,
   });
   child.on('exit', (code) => {
     if ((code ?? 0) !== 0) {
@@ -82,6 +83,7 @@ function startRuntime(entryPath, label) {
     cwd: runtimeDir,
     env: sharedEnv,
     stdio: 'inherit',
+    windowsHide: true,
   });
   child.on('exit', (code) => {
     if (shuttingDown) return;

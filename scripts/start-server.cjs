@@ -65,12 +65,14 @@ const mcp = spawn(process.execPath, [mcpServerPath, '--transport', 'streamable-h
   cwd: path.resolve(workspaceDir, 'mcp-server'),
   env: sharedEnv,
   stdio: 'inherit',
+  windowsHide: true,
 });
 
 const hostedRuntime = spawn(process.execPath, [runtimeLauncherPath], {
   cwd: boardDir,
   env: sharedEnv,
   stdio: 'inherit',
+  windowsHide: true,
 });
 
 let shuttingDown = false;

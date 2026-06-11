@@ -17,15 +17,45 @@ The published frontend artifacts remain in this repo under `docs/`, but the Vite
 npm install
 ```
 
-2. Start the local backend (MCP server + hosted runtime):
+2. Start the local backend (MCP server + hosted runtime) as a background daemon:
 
 ```bash
-npm start
+npm i -g pm2   # one-time, required by the daemon (see below)
+npm start      # runs detached via PM2 — the terminal can be closed
+```
+
+   To run in the foreground instead (logs stream to the terminal):
+
+```bash
+npm run start:fg
 ```
 
 3. Open the hosted frontend in your browser:
 
 - https://nsreehari-code.github.io/demo-boards
+
+## Run as a background daemon (optional)
+
+The backend runs as a background daemon via [PM2](https://pm2.keymetrics.io/) so it
+keeps running without an open terminal:
+
+```bash
+npm i -g pm2          # one-time, global install
+npm start             # start detached (alias for start:daemon)
+npm run daemon:logs   # tail combined logs
+npm run status:daemon # show process status
+npm stop              # stop the daemon (alias for stop:daemon)
+```
+
+To auto-start on reboot:
+
+```bash
+pm2 save
+pm2 startup           # follow the printed instructions (Windows: install pm2-windows-startup)
+```
+
+PM2 wraps `scripts/start-server.cjs`, auto-restarts on crash, and writes logs to
+`demo-board/logs/pm2-out.log` and `demo-board/logs/pm2-error.log`.
 
 ## Frontend Source
 
@@ -36,7 +66,13 @@ npm start
 
 | Script | What it does |
 |---|---|
-| `npm start` | Start the MCP server and hosted runtime locally (frontend is hosted at https://nsreehari-code.github.io/demo-boards) |
+| `npm start` | Start the backend detached via PM2 (alias for `start:daemon`; terminal can be closed) |
+| `npm stop` | Stop the PM2-managed backend (alias for `stop:daemon`) |
+| `npm run start:fg` | Start the MCP server and hosted runtime locally in the foreground (frontend is hosted at https://nsreehari-code.github.io/demo-boards) |
+| `npm run start:daemon` | Start the backend detached via PM2 (terminal can be closed) |
+| `npm run stop:daemon` | Stop the PM2-managed backend |
+| `npm run status:daemon` | Show PM2 process status |
+| `npm run daemon:logs` | Tail the PM2-managed backend logs |
 | `npm run mcp:install` | Install dependencies for `mcp-server/` |
 | `npm run mcp:dry-run` | Validate the WorkIQ MCP manifest without starting transport |
 | `npm run setup:check:copilot-only` | Smoke-check both Copilot wrappers with a simple query (`what is two plus two`) |
@@ -44,7 +80,7 @@ npm start
 | `npm run setup:check:copilot-workiq` | Smoke-check both Copilot wrappers and run a direct WorkIQ CLI query (`what is two plus two`) without starting MCP |
 | `npm run mcp:start` | Start the hosted MCP server for the demo-boards WorkIQ manifest at `http://127.0.0.1:7801/mcp` |
 | `npm run clean` | Wipe runtime state in `demo-board/boards/live/` (preserves cards) |
-| `npm run stop` | Kill processes on ports 7799 and 7801 |
+| `npm run stop:fg` | Kill foreground processes on ports 7799 and 7801 |
 
 ## Directory structure
 
