@@ -33,8 +33,22 @@ function readRegistry() {
   return servers;
 }
 
+function parseDisabledHandlers() {
+  const raw = process.env.DISABLE_HANDLERS;
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return new Set();
+  }
+  return new Set(
+    raw
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
 function main() {
   const servers = readRegistry();
+  const disabledHandlers = parseDisabledHandlers();
   const seenToolNames = new Map();
   const summaries = [];
 
@@ -44,6 +58,10 @@ function main() {
     }
     if (entry.disabled === true) {
       console.log(`[mcp:test] skipping disabled registry service ${serverName}`);
+      continue;
+    }
+    if (disabledHandlers.has(serverName.toLowerCase())) {
+      console.log(`[mcp:test] skipping registry service ${serverName} (DISABLE_HANDLERS)`);
       continue;
     }
     if (typeof entry.manifest !== 'string' || !entry.manifest.trim()) {

@@ -59,6 +59,19 @@ function hasFlag(flag) {
   return process.argv.includes(flag);
 }
 
+function parseDisabledHandlers() {
+  const raw = process.env.DISABLE_HANDLERS;
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return new Set();
+  }
+  return new Set(
+    raw
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
 function validateTransportCompatibility(tools, transport) {
   if (transport !== 'stdio') return;
 
@@ -412,12 +425,18 @@ function loadManifestPathsFromRegistry() {
     return [];
   }
   const servers = registry?.servers || {};
+  const disabledHandlers = parseDisabledHandlers();
   return Object.entries(servers)
     .flatMap(([serverName, entry]) => {
       if (!entry?.manifest) return [];
 
       if (entry.disabled === true) {
         process.stderr.write(`[mcp-server] Skipping disabled registry server "${serverName}"\n`);
+        return [];
+      }
+
+      if (disabledHandlers.has(serverName.toLowerCase())) {
+        process.stderr.write(`[mcp-server] Skipping registry server "${serverName}" (DISABLE_HANDLERS)\n`);
         return [];
       }
 
