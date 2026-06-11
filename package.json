@@ -23,7 +23,7 @@
     "setup:check:copilot-workiq": "node scripts/setup-check-copilot-workiq.mjs",
     "mcp:start": "npm --prefix mcp-server run start:http",
     "restart": "npm run stop:fg && npm run start:fg",
-    "start:daemon": "pm2 start ecosystem.config.cjs",
+    "start:daemon": "pm2 startOrRestart ecosystem.config.cjs",
     "stop:daemon": "pm2 stop ecosystem.config.cjs",
     "status:daemon": "pm2 status demo-boards",
     "daemon:restart": "pm2 restart ecosystem.config.cjs",
@@ -42,7 +42,9 @@
     "better-sqlite3": "^12.9.0",
     "node-sse": "^0.0.2",
     "pdf-parse": "^2.4.5",
-    "pm2": "^5.4.3",
     "yaml-flow": "^8.11.1"
+  },
+  "devDependencies": {
+    "pm2": "^5.4.3"
   }
 }
