@@ -17,27 +17,26 @@ The published frontend artifacts remain in this repo under `docs/`, but the Vite
 npm install
 ```
 
-2. Serve the published frontend artifacts locally:
+2. Start the local backend (MCP server + hosted runtime):
 
 ```bash
-npm run frontend
+npm start
 ```
 
-3. Open in browser:
+3. Open the hosted frontend in your browser:
 
-- http://127.0.0.1:8000/
+- https://nsreehari-code.github.io/demo-boards
 
 ## Frontend Source
 
-- Published frontend artifacts are kept in `docs/` in this repo.
-- Frontend source, build, and Pages deployment now live in the separate `demo-boards-frontend` repo.
-- The root `npm start` flow in this repo still needs rewiring after the frontend split, so use `npm run frontend` for the checked-in site artifacts.
+- The frontend is hosted via GitHub Pages at https://nsreehari-code.github.io/demo-boards.
+- Frontend source, build, and Pages deployment live in the separate `demo-boards-frontend` repo.
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
-| `npm run frontend` | Serve `docs/` as static files at `http://127.0.0.1:8000` |
+| `npm start` | Start the MCP server and hosted runtime locally (frontend is hosted at https://nsreehari-code.github.io/demo-boards) |
 | `npm run mcp:install` | Install dependencies for `mcp-server/` |
 | `npm run mcp:dry-run` | Validate the WorkIQ MCP manifest without starting transport |
 | `npm run setup:check:copilot-only` | Smoke-check both Copilot wrappers with a simple query (`what is two plus two`) |
@@ -45,7 +44,7 @@ npm run frontend
 | `npm run setup:check:copilot-workiq` | Smoke-check both Copilot wrappers and run a direct WorkIQ CLI query (`what is two plus two`) without starting MCP |
 | `npm run mcp:start` | Start the hosted MCP server for the demo-boards WorkIQ manifest at `http://127.0.0.1:7801/mcp` |
 | `npm run clean` | Wipe runtime state in `demo-board/boards/live/` (preserves cards) |
-| `npm run stop` | Kill processes on ports 7799, 7801 and 8000 |
+| `npm run stop` | Kill processes on ports 7799 and 7801 |
 
 ## Directory structure
 

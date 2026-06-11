@@ -17,13 +17,8 @@ if (!fs.existsSync(runtimeLauncherPath)) {
 }
 
 const mcpServerPath = path.resolve(workspaceDir, 'mcp-server', 'src', 'index.js');
-const frontendDir = path.resolve(workspaceDir, 'docs');
 if (!fs.existsSync(mcpServerPath)) {
   console.error(`[start-server] Missing ${mcpServerPath}. Run \"npm install\" first.`);
-  process.exit(1);
-}
-if (!fs.existsSync(frontendDir)) {
-  console.error(`[start-server] Missing ${frontendDir}. Frontend artifacts now live in docs/. Fetch or rebuild them from the separate demo-boards-frontend repo.`);
   process.exit(1);
 }
 
@@ -64,7 +59,7 @@ async function handleMcpExit(code) {
 console.log(`[start-server] board dir: ${boardDir}`);
 console.log(`[start-server] controlface: launched from ${path.relative(workspaceDir, runtimeLauncherPath)}`);
 console.log('[start-server] mcp:      http://127.0.0.1:7801/mcp');
-console.log('[start-server] frontend: http://127.0.0.1:8000');
+console.log('[start-server] frontend: https://nsreehari-code.github.io/demo-boards');
 
 const mcp = spawn(process.execPath, [mcpServerPath, '--transport', 'streamable-http'], {
   cwd: path.resolve(workspaceDir, 'mcp-server'),
@@ -78,13 +73,6 @@ const hostedRuntime = spawn(process.execPath, [runtimeLauncherPath], {
   stdio: 'inherit',
 });
 
-let frontend = null;
-const httpServerEntry = require.resolve('http-server/bin/http-server');
-frontend = spawn(process.execPath, [httpServerEntry, frontendDir, '-p', '8000', '-c-1'], {
-  cwd: workspaceDir,
-  stdio: 'inherit',
-});
-
 let shuttingDown = false;
 
 function shutdown(signal) {
@@ -93,12 +81,10 @@ function shutdown(signal) {
 
   if (!mcp.killed) mcp.kill('SIGTERM');
   if (!hostedRuntime.killed) hostedRuntime.kill('SIGTERM');
-  if (frontend && !frontend.killed) frontend.kill('SIGTERM');
 
   setTimeout(() => {
     if (!mcp.killed) mcp.kill('SIGKILL');
     if (!hostedRuntime.killed) hostedRuntime.kill('SIGKILL');
-    if (frontend && !frontend.killed) frontend.kill('SIGKILL');
     process.exit(0);
   }, 1200);
 
@@ -114,13 +100,6 @@ mcp.on('exit', (code) => {
 hostedRuntime.on('exit', (code) => {
   if (!shuttingDown) {
     console.error(`[start-server] hosted runtime exited with code ${code ?? 0}`);
-    shutdown();
-  }
-});
-
-frontend.on('exit', (code) => {
-  if (!shuttingDown) {
-    console.error(`[start-server] frontend exited with code ${code ?? 0}`);
     shutdown();
   }
 });
