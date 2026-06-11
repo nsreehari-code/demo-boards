@@ -686,23 +686,31 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function collectTemplatePrivateChatEntries(templatePrivateChat, parentKey = 'chat') {
-  if (!isPlainObject(templatePrivateChat)) {
+function collectTemplatePrivateEntries(templatePrivateSection, parentKey = '') {
+  if (!isPlainObject(templatePrivateSection)) {
     return [];
   }
 
-  return Object.entries(templatePrivateChat).flatMap(([key, value]) => {
+  return Object.entries(templatePrivateSection).flatMap(([key, value]) => {
     const normalizedKey = typeof key === 'string' ? key.trim() : '';
     if (!normalizedKey) {
       return [];
     }
 
-    const dottedKey = `${parentKey}.${normalizedKey}`;
-    if (!isPlainObject(value)) {
-      return [{ key: dottedKey, value }];
+    if (normalizedKey === 'visible_controlplane_only') {
+      return [];
     }
 
-    const nestedEntries = collectTemplatePrivateChatEntries(value, dottedKey);
+    const dottedKey = parentKey ? `${parentKey}.${normalizedKey}` : normalizedKey;
+    const isAddressablePrivateKey = dottedKey.includes('.');
+    if (!isPlainObject(value)) {
+      return isAddressablePrivateKey ? [{ key: dottedKey, value }] : [];
+    }
+
+    const nestedEntries = collectTemplatePrivateEntries(value, dottedKey);
+    if (!isAddressablePrivateKey) {
+      return nestedEntries;
+    }
     return nestedEntries.length > 0
       ? [{ key: dottedKey, value }, ...nestedEntries]
       : [{ key: dottedKey, value }];
@@ -710,13 +718,9 @@ function collectTemplatePrivateChatEntries(templatePrivateChat, parentKey = 'cha
 }
 
 async function applyTemplatePrivateState({ boardEntry, hostConfig, boardId, cardId, card }) {
-  const templatePrivateChat = card?.__private?.chat;
-  const entries = collectTemplatePrivateChatEntries(templatePrivateChat);
+  const templatePrivate = card?.__private;
+  const entries = collectTemplatePrivateEntries(templatePrivate);
   for (const entry of entries) {
-    if (entry.key === 'chat.visible_controlplane_only') {
-      continue;
-    }
-
     await invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, 'mcp-controlplane', {
       tool: 'setstate.card-private',
       args: {

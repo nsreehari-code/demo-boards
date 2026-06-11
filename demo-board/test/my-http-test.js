@@ -834,6 +834,43 @@ async function main() {
     },
   });
 
+  const adminTemplateCardId = 'gandalf-intake';
+  const listedAdminCard = findBoardStatusCard(
+    expectMcpSuccess(
+      await callMcp('inspect.board-runtime-status', {}),
+      'MB1 inspect.board-runtime-status for admin card visibility',
+    ),
+    adminTemplateCardId,
+  );
+  assert(
+    !listedAdminCard,
+    `${formatTestId('MB1')} expected ${adminTemplateCardId} to be hidden from regular board listings`,
+  );
+
+  const regularAdminRead = readStoredCard(
+    expectMcpSuccess(
+      await callMcp('manage.read-card', { card_id: adminTemplateCardId }),
+      'MB1 manage.read-card admin card',
+    ),
+  );
+  assert(regularAdminRead, `${formatTestId('MB1')} regular read did not return ${adminTemplateCardId}`);
+  assert(
+    !Object.prototype.hasOwnProperty.call(regularAdminRead, '__private'),
+    `${formatTestId('MB1')} regular read leaked __private for ${adminTemplateCardId}: ${jsonText(regularAdminRead)}`,
+  );
+
+  const adminReadPayload = expectMcpSuccess(
+    await callControlplaneMcp('manage.admin-read-card', { card_id: adminTemplateCardId }),
+    'MB1 manage.admin-read-card admin card',
+  );
+  const adminReadCard = Array.isArray(adminReadPayload?.cards) ? adminReadPayload.cards[0] : null;
+  assert(adminReadCard, `${formatTestId('MB1')} admin read did not return ${adminTemplateCardId}`);
+  assert(
+    adminReadCard?.__private?.visible_controlplane_only === true,
+    `${formatTestId('MB1')} expected __private.visible_controlplane_only=true for ${adminTemplateCardId}: ${jsonText(adminReadCard)}`,
+  );
+  console.log(`[${formatTestId('MB1')}] verified ${adminTemplateCardId} is control-plane-only and stores __private.visible_controlplane_only=true`);
+
   async function readChatMessages(cardId, turnId = '') {
     const payload = expectMcpSuccess(
       await callMcp('inspect.chat-messages-on-cards', {
