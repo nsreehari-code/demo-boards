@@ -150,16 +150,26 @@
   },
   "uiTemplates": {
     "default": {
-      "canvasLayout": {
-        "defaultCardWidth": 360,
-        "columnGap": 420,
-        "rowGap": 280,
-        "origin": { "x": 40, "y": 40 }
-      },
-      "filters": {
-        "gandalf": "meta.gandalf = true",
-        "truthset": "meta.truthset = true"
-      },
+      "paneRules": [
+        {
+          "pane": "gandalf",
+          "when": "meta.gandalf = true"
+        },
+        {
+          "pane": "truthset",
+          "when": "meta.truthset = true"
+        }
+      ],
+      "cardRendererRules": [
+        {
+          "renderer": "protected",
+          "when": "meta.highconfidential = true or meta.confidential = true"
+        },
+        {
+          "renderer": "ingest",
+          "when": "meta.ingest = true or meta.gandalf = true"
+        }
+      ],
       "admin-cards": [
         {
           "id": "gandalf-intake",
