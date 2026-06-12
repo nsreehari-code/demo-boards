@@ -135,6 +135,7 @@ export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) 
       watchpartyFileRegistry: hostRuntime?.watchpartyFileRegistry || null,
     },
     taskExecutorExtra: {
+      boardId,
       aiWorkspaceRoot,
       foundryEndpoint: typeof foundryAgents.endpoint === 'string' ? foundryAgents.endpoint.trim() : '',
       foundryTaskExecutorAgentId: typeof foundryAgents.taskExecutorAgentId === 'string' ? foundryAgents.taskExecutorAgentId.trim() : '',

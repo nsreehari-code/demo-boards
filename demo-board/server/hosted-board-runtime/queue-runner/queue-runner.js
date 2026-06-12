@@ -490,6 +490,24 @@ async function main() {
     const apiBaseUrl = `${callbackServerOrigin}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}`;
     const webhooksUrl = `${apiBaseUrl}/mcp-webhooks`;
     const controlplaneUrl = `${apiBaseUrl}/mcp-controlplane`;
+    // Build the board runtime needs up front so the task-executor ref carries the
+    // full execution extra (aiWorkspaceRoot, boardId, foundry handles). Source_def
+    // runs (copilot/foundry) rely on aiWorkspaceRoot to run in the board's own
+    // workspace and on boardId to scope liveboards.* tool calls to this board.
+    const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
+      serverUrl: callbackServerOrigin,
+      notifyServerUrl: callbackServerOrigin,
+      notifyUrl: `${apiBaseUrl}/notify-q`,
+      mcpServerUrl: hostConfig.mcpServerUrl,
+      apiBasePrefix: hostConfig.apiBasePrefix,
+      configDir: hostConfig.configDir,
+      foundryAgents: hostConfig.foundryAgents,
+      chatFlowTimeoutMs: hostConfig.chatFlowTimeoutMs,
+      chatInvokeRefTimeoutMs: hostConfig.chatInvokeRefTimeoutMs,
+      chatCopilotTimeoutMs: hostConfig.chatCopilotTimeoutMs,
+      taskExecutorTimeoutMs: hostConfig.taskExecutorTimeoutMs,
+      watchpartyFileRegistry: adapterServices?.watchpartyFileRegistry,
+    });
     const bundle = buildBoardBundle(
       boardId,
       boardConfig,
@@ -498,7 +516,7 @@ async function main() {
       {
         callbackTransport: createHttpBoardCallbackTransport(webhooksUrl),
         configDir: hostConfig.configDir,
-        taskExecutorRef: createHostedImmediateTaskExecutorRef(boardId),
+        taskExecutorRef: createHostedImmediateTaskExecutorRef(boardId, boardRuntimeNeeds.taskExecutorExtra),
         resolveConfigRelativePath,
       },
     );

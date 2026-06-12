@@ -150,6 +150,22 @@ function resolvePrompt(sourceDef, promptContext) {
   return interpolate(template, args);
 }
 
+// Prepend a runtime handles block so a source_def copilot run knows which board
+// it belongs to. The chat path injects board_id into liveboards.* tool args
+// automatically; source_def runs talk to MCP directly, so we surface the same
+// board_id in the prompt and instruct the agent to pass it on every call.
+function buildHandlesSection(extra) {
+  const boardId = typeof extra?.boardId === 'string' ? extra.boardId.trim() : '';
+  if (!boardId) return '';
+  return [
+    'RUNTIME HANDLES (provided by the board runtime — use these exact values):',
+    `- board_id: "${boardId}"`,
+    'This is the board you are running on. Whenever you call a liveboards.* tool that takes a board_id (or board) argument, pass this exact board_id so the tool reads and writes your own board rather than any default.',
+    '',
+    '',
+  ].join('\n');
+}
+
 async function runCopilot(prompt, sourceDef, executorDir, extra) {
   const copilotCwd = extra?.aiWorkspaceRoot || process.cwd();
   const bindTo = String(sourceDef?.bindTo || 'executor');
@@ -203,7 +219,9 @@ export async function execute(context) {
   }
 
   try {
-    const resultValue = await runCopilot(prompt, sourceDef, executorDir, extra);
+    const handles = buildHandlesSection(extra);
+    const finalPrompt = handles ? `${handles}${prompt}` : prompt;
+    const resultValue = await runCopilot(finalPrompt, sourceDef, executorDir, extra);
     return { result: 'success', data: { resultValue } };
   } catch (err) {
     const msg = String(err?.message || err);

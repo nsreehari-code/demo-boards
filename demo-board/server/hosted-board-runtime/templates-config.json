@@ -194,6 +194,200 @@
           "card_data": {}
         }
       ]
+    },
+    "journeys": {
+      "paneRules": [
+        {
+          "pane": "gandalf",
+          "when": "meta.gandalf = true"
+        },
+        {
+          "pane": "truthset",
+          "when": "meta.truthset = true"
+        }
+      ],
+      "cardRendererRules": [
+        {
+          "renderer": "protected",
+          "when": "meta.highconfidential = true or meta.confidential = true"
+        },
+        {
+          "renderer": "ingest",
+          "when": "meta.ingest = true or meta.gandalf = true"
+        }
+      ],
+      "admin-cards": [
+        {
+          "id": "gandalf-intake",
+          "meta": {
+            "title": "Evidence Intake",
+            "gandalf": true,
+            "desc": "Board intake card for reviewing and managing incoming evidence."
+          },
+          "__private": {
+            "chat": {"copilot": {"ws": "gandalf"}, "visible_controlplane_only": true }
+          },
+          "view": {
+            "elements": [
+              {
+                "kind": "markdown",
+                "data": {
+                  "value": "Review and manage incoming evidence for this board."
+                }
+              }
+            ]
+          },
+          "card_data": {}
+        },
+        {
+          "id": "journey-strategist",
+          "meta": {
+            "title": "Journey Strategist",
+            "gandalf": true,
+            "tags": ["strategist", "journey", "exploration"],
+            "desc": "Board-level exploration strategist. Wakes on board topology change (sys_keys_board_state) or an edit to its objective notes, reads the current journey via board-inspection tools, and authors the next set of exploration cards to keep the investigative graph moving forward.",
+            "presentation": {
+              "footprint": "wide"
+            }
+          },
+          "__private": {
+            "chat": {"copilot": {"ws": "gandalf"}, "visible_controlplane_only": true }
+          },
+          "requires": [
+            "sys_keys_board_state"
+          ],
+          "source_defs": [
+            {
+              "bindTo": "exploration_plan",
+              "outputFile": "journey-strategist-plan.json",
+              "projections": {
+                "objective": "card_data.notes",
+                "board_card_ids": "requires.sys_keys_board_state.card_ids",
+                "board_token_keys": "requires.sys_keys_board_state.data_object_keys",
+                "max_new_cards_per_cycle": "card_data.max_new_cards_per_cycle",
+                "max_depth": "card_data.max_depth"
+              },
+              "copilot": {
+                "result_shape": {
+                  "status": null,
+                  "rationale": null,
+                  "created_cards": null,
+                  "next_candidates": null
+                },
+                "prompt_template": "You are the Journey Strategist on a live exploration board. The board is a living graph of cards that work together to move an investigation continuously forward toward an objective. Your role is to sense where the exploration stands right now and extend it with the next worthwhile step.\n\nRUNTIME HANDLES (use these exact values): your board_id is \"{{boardId}}\". Whenever you call a liveboards.* tool that takes a board_id (or board) argument, pass this exact board_id so the tool reads and writes your own board rather than any default.\n\nOBJECTIVE (the steering intent, editable by the analyst):\n{{objective}}\n\nYou were just woken because the board changed. Here is its current shape (your own card and tokens are already excluded):\n- card ids: {{board_card_ids}}\n- published token keys: {{board_token_keys}}\n\nApproach this as exploration, and learn the environment as you go:\n- Discover which tools are available to you and what each one does, then use them to read the cards on the board, the tokens they publish, and the data flowing between them.\n- Form your own picture of the journey so far: where it began, what it has learned, where its open edges are, and how close it seems to the objective.\n- Choose the next step that most increases progress toward the objective — climbing toward a promising lead, stepping sideways to open a parallel thread, or following a surprising signal, whichever the evidence favours.\n\nWhen you extend the board, author the next card(s) with the liveboards.* mcp tools available for managing cards, and connect each new card to the card that feeds it so the new relationship is real data wiring in the graph.\n\nPace yourself so the board stays legible and the journey converges: this cycle, add around {{max_new_cards_per_cycle}} card(s) and keep the journey within roughly {{max_depth}} steps of its origin. Build on what already exists rather than repeating it. When the objective looks satisfied, or no step would add real progress, rest and report the journey as converged.\n\nTreat every result as information — including empty or still-running ones — and decide for yourself what each means for where the journey goes next.\n\nRespond with a single JSON object and nothing else, beginning with { and ending with }:\n\n{\n  \"status\": \"advancing | waiting | converged\",\n  \"rationale\": \"<a sentence or two on the step you chose, grounded in what you actually read>\",\n  \"created_cards\": [ { \"card_id\": \"<id>\", \"purpose\": \"<short>\", \"parent\": \"<parent card id or null>\" } ],\n  \"next_candidates\": [ \"<a branch you noticed but chose to defer>\" ]\n}"
+              }
+            }
+          ],
+          "compute": [
+            {
+              "bindTo": "status_value",
+              "expr": "fetched_sources.exploration_plan.status ? fetched_sources.exploration_plan.status : 'idle'"
+            },
+            {
+              "bindTo": "cards_created_count",
+              "expr": "fetched_sources.exploration_plan.created_cards ? $count(fetched_sources.exploration_plan.created_cards) : 0"
+            },
+            {
+              "bindTo": "journey_size",
+              "expr": "requires.sys_keys_board_state.card_ids ? $count(requires.sys_keys_board_state.card_ids) : 0"
+            },
+            {
+              "bindTo": "rationale",
+              "expr": "fetched_sources.exploration_plan.rationale"
+            },
+            {
+              "bindTo": "created_table",
+              "expr": "fetched_sources.exploration_plan.created_cards"
+            },
+            {
+              "bindTo": "next_candidates_list",
+              "expr": "fetched_sources.exploration_plan.next_candidates"
+            },
+            {
+              "bindTo": "plan",
+              "expr": "fetched_sources.exploration_plan"
+            }
+          ],
+          "provides": [
+            {
+              "bindTo": "exploration_plan",
+              "ref": "computed_values.plan"
+            }
+          ],
+          "view": {
+            "elements": [
+              {
+                "kind": "notes",
+                "label": "Objective / Guidance (editable)",
+                "data": {
+                  "bind": "card_data.notes",
+                  "writeTo": "card_data.notes"
+                }
+              },
+              {
+                "kind": "badge",
+                "label": "Strategist Status",
+                "data": {
+                  "bind": "computed_values.status_value",
+                  "colorMap": {
+                    "advancing": "success",
+                    "waiting": "warning",
+                    "converged": "blue",
+                    "idle": "secondary"
+                  }
+                }
+              },
+              {
+                "kind": "metric",
+                "label": "Cards Added This Cycle",
+                "data": {
+                  "bind": "computed_values.cards_created_count"
+                }
+              },
+              {
+                "kind": "metric",
+                "label": "Journey Size (cards)",
+                "data": {
+                  "bind": "computed_values.journey_size"
+                }
+              },
+              {
+                "kind": "markdown",
+                "label": "Rationale",
+                "data": {
+                  "bind": "computed_values.rationale"
+                }
+              },
+              {
+                "kind": "table",
+                "label": "Cards Created This Cycle",
+                "data": {
+                  "bind": "computed_values.created_table",
+                  "columns": [
+                    "card_id",
+                    "purpose",
+                    "parent"
+                  ],
+                  "maxRows": 12
+                }
+              },
+              {
+                "kind": "list",
+                "label": "Deferred Branches",
+                "data": {
+                  "bind": "computed_values.next_candidates_list",
+                  "placeholder": "No deferred branches"
+                }
+              }
+            ]
+          },
+          "card_data": {
+            "notes": "Investigate the seed hunting query. Prioritise pivots on suspicious identities, IPs, and devices. Open an issue card for empty or failed queries rather than forcing a next step.",
+            "max_new_cards_per_cycle": 2,
+            "max_depth": 6
+          }
+        }
+      ]
     }
   }
 }

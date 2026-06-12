@@ -65,6 +65,20 @@ function replaceTemplateTokens(value, tokens) {
   );
 }
 
+// Deep-expand template tokens (e.g. {{boardId}}) through every string in a
+// nested object/array, returning a new structure. Used to make admin-card
+// templates board-aware at instantiation time.
+function deepReplaceTemplateTokens(value, tokens) {
+  if (typeof value === 'string') return replaceTemplateTokens(value, tokens);
+  if (Array.isArray(value)) return value.map((item) => deepReplaceTemplateTokens(item, tokens));
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = deepReplaceTemplateTokens(v, tokens);
+    return out;
+  }
+  return value;
+}
+
 function deriveBoardRoot(configDir) {
   return deriveBoardRootFromConfigDir(configDir);
 }
@@ -232,7 +246,9 @@ export function buildBoardConfig(boardId, source, { configDir, boardRoot = deriv
     if (!template) {
       throw new Error(`Board '${normalizedBoardId}' references unknown uiTemplate '${uiTemplateName}'`);
     }
-    ui = template && typeof template === 'object' && !Array.isArray(template) ? template : {};
+    ui = template && typeof template === 'object' && !Array.isArray(template)
+      ? deepReplaceTemplateTokens(template, tokens)
+      : {};
   }
 
   return {

@@ -28,6 +28,14 @@
       "cardsTemplate": "portfolio-management",
       "refsTemplate": "localfs-default",
       "uiTemplate": "default"
+    },
+    "investigate": {
+      "label": "Investigative Journey",
+      "ai": "copilot",
+      "aiWorkspaceTemplate": "default",
+      "cardsTemplate": "journey-seed",
+      "refsTemplate": "localfs-default",
+      "uiTemplate": "journeys"
     }
   }
 }

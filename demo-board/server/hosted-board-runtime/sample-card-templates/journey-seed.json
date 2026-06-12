@@ -1,0 +1,43 @@
+{
+  "boardLabel": "Investigation Journey Seed",
+  "boardSubtitle": "Single natural-language intent card to begin a strategist-led exploration",
+  "cards": [
+    {
+      "id": "card-journey-seed",
+      "meta": {
+        "title": "Journey Seed",
+        "tags": [
+          "journey",
+          "seed",
+          "intent"
+        ],
+        "desc": "The origin of an exploration. Describe what you want to investigate in plain language; the Journey Strategist reads this and grows the board from here. Edit the intent any time to steer the journey.",
+        "presentation": {
+          "footprint": "standard"
+        }
+      },
+      "provides": [
+        {
+          "bindTo": "nl_intent",
+          "ref": "card_data.intent"
+        }
+      ],
+      "compute": [],
+      "view": {
+        "elements": [
+          {
+            "kind": "notes",
+            "label": "What do you want to investigate?",
+            "data": {
+              "bind": "card_data.intent",
+              "writeTo": "card_data.intent"
+            }
+          }
+        ]
+      },
+      "card_data": {
+        "intent": "Describe the question or hypothesis to investigate here in plain language. For example: which sign-ins in the last 7 days look anomalous, and who is behind them?"
+      }
+    }
+  ]
+}

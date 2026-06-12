@@ -29,6 +29,12 @@
       "label": "WFPv1 Prompt Tuning (15 cards)",
       "description": "Alert-focused prompt tuning workbench with sample review, revisions, validation, and batch scoring",
       "fileName": "wfpv1-prompt-tuning.json"
+    },
+    {
+      "key": "journey-seed",
+      "label": "Journey Seed (1 card)",
+      "description": "Single natural-language intent card to begin a strategist-led exploration",
+      "fileName": "journey-seed.json"
     }
   ]
 }
