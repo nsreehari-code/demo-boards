@@ -9,8 +9,12 @@
  * Auth: DefaultAzureCredential (Managed Identity in prod, `az login` locally).
  */
 
+import { createRequire } from 'node:module';
 import { DefaultAzureCredential } from '@azure/identity';
 import { AgentsClient } from '@azure/ai-agents';
+
+const require = createRequire(import.meta.url);
+const childProcess = require('node:child_process');
 
 export const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired']);
 
@@ -18,11 +22,73 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function withWindowsHiddenChildProcesses(fn) {
+  if (process.platform !== 'win32') {
+    return fn();
+  }
+
+  const originalExec = childProcess.exec;
+  const originalExecFile = childProcess.execFile;
+
+  childProcess.exec = function patchedExec(command, options, callback) {
+    let normalizedOptions = options;
+    let normalizedCallback = callback;
+
+    if (typeof normalizedOptions === 'function') {
+      normalizedCallback = normalizedOptions;
+      normalizedOptions = undefined;
+    }
+
+    return originalExec.call(this, command, { ...(normalizedOptions || {}), windowsHide: true }, normalizedCallback);
+  };
+
+  childProcess.execFile = function patchedExecFile(file, args, options, callback) {
+    let normalizedArgs = args;
+    let normalizedOptions = options;
+    let normalizedCallback = callback;
+
+    if (!Array.isArray(normalizedArgs)) {
+      normalizedCallback = normalizedOptions;
+      normalizedOptions = normalizedArgs;
+      normalizedArgs = [];
+    }
+    if (typeof normalizedOptions === 'function') {
+      normalizedCallback = normalizedOptions;
+      normalizedOptions = undefined;
+    }
+
+    return originalExecFile.call(
+      this,
+      file,
+      normalizedArgs,
+      { ...(normalizedOptions || {}), windowsHide: true },
+      normalizedCallback,
+    );
+  };
+
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      childProcess.exec = originalExec;
+      childProcess.execFile = originalExecFile;
+    });
+}
+
+class WindowsHiddenCredential {
+  constructor(inner) {
+    this.inner = inner;
+  }
+
+  async getToken(scopes, options) {
+    return await withWindowsHiddenChildProcesses(() => this.inner.getToken(scopes, options));
+  }
+}
+
 /** Create a Foundry AgentsClient for the given project endpoint. */
 export function createFoundryClient(endpoint) {
   const ep = typeof endpoint === 'string' ? endpoint.trim() : '';
   if (!ep) throw new Error('foundry endpoint is required');
-  const credential = new DefaultAzureCredential();
+  const credential = new WindowsHiddenCredential(new DefaultAzureCredential());
   return new AgentsClient(ep, credential);
 }
 

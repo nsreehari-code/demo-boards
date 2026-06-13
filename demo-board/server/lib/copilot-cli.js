@@ -48,14 +48,15 @@ export function runCopilot(opts = {}) {
   } = opts;
 
   return new Promise((resolve, reject) => {
+    const onWindows = process.platform === 'win32';
     const args = [];
     if (workingDir) args.push('-C', workingDir);
     if (continueSession) args.push('--continue');
     if (sessionId) args.push('--session-id', sessionId);
     args.push('-s', '--no-ask-user', '--allow-all-tools', '--model', model);
+    if (onWindows) args.push('--deny-tool', 'shell');
     for (const dir of addDirs) args.push('--add-dir', dir);
 
-    const onWindows = process.platform === 'win32';
     const command = onWindows ? 'copilot.exe' : 'copilot';
     const spawnArgs = args;
 
