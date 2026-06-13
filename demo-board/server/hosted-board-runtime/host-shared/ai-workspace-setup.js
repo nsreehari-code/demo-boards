@@ -22,7 +22,10 @@ export function runSetupSingleAiWorkspaceScript(setupScriptPath, boardId, config
     if (configPath) {
       args.push('--config', configPath);
     }
-    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
     const stdoutChunks = [];
     const stderrChunks = [];
     child.stdout.on('data', (chunk) => stdoutChunks.push(chunk));

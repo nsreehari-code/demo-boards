@@ -56,8 +56,8 @@ export function runCopilot(opts = {}) {
     for (const dir of addDirs) args.push('--add-dir', dir);
 
     const onWindows = process.platform === 'win32';
-    const command = onWindows ? 'cmd.exe' : 'copilot';
-    const spawnArgs = onWindows ? ['/d', '/c', 'copilot', ...args] : args;
+    const command = onWindows ? 'copilot.exe' : 'copilot';
+    const spawnArgs = args;
 
     const child = spawn(command, spawnArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
