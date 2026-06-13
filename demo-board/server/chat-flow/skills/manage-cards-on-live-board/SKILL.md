@@ -62,6 +62,31 @@ runtime graph shape (`requires` / `provides`), and these semantic hints.
 Live drag / resize coordinates are runtime-owned state and are persisted
 separately from the card JSON.
 
+## Path State (exploration lifecycle)
+
+For exploration / journey boards, a card may belong to a line of inquiry that you
+decide to park or rule out. Record that decision **on the card itself** so it is
+durable and visible — never in a side journal. This is a pure annotation: it
+changes only how the card body is rendered and how you read the board on a later
+pass. It does **not** stop the reactive graph; tokens still flow to children.
+
+- `meta.path_state` — lifecycle of this card's path. Omit it (the default) for an
+  active path. Allowed values:
+  - `suspended` — explored, nothing conclusive yet; parked to pursue other leads.
+    You may re-enter it later. The body renders dimmed with a "Suspended" pill.
+  - `dead_ended` — ruled out by evidence; do not re-open without new reason. The
+    body renders greyed with a "Ruled out" pill.
+  - `wiped` — exploration abandoned but kept as a breadcrumb ("I was here"). The
+    body renders struck through with a "Wiped" pill.
+- `meta.path_state_rationale` — one sentence on *why* you set the state (e.g.
+  "30d lookback returned 0; ruling out the spray hypothesis"). Shown on hover.
+
+Set these with the same card-authoring tools you use for any other `meta` field.
+On a later cycle, read `meta.path_state` on existing cards to avoid re-walking a
+`dead_ended` path and to decide whether a `suspended` one is worth resuming.
+`path_state` is independent of `meta.presentation.*` (which is purely layout) and
+of `card_data` (which is user-owned, not for agent lifecycle state).
+
 ## Core Dataflow
 
 - One execution order:

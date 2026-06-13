@@ -271,7 +271,7 @@ export async function executeChatAgentRequest(request, boardId, boardRuntimeNeed
           cardId,
           channel: 'agent-output',
           clearOnRegister: true,
-          replace: true,
+          replace: false,
         })
       : null;
     const config = { ...extra };

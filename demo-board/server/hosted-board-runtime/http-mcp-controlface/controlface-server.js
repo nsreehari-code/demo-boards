@@ -42,6 +42,7 @@ import {
   createControlfaceMcpSurface,
 } from './controlface-mcp-surface.js';
 import { createAgentMcpHandler, AGENT_MCP_PATHS } from './agentface-mcp.js';
+import { WATCHPARTY_AGENT_TOOL_ACTIONS } from '../../../../../shared/watchparty-agent-tools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1357,7 +1358,7 @@ async function main() {
           res.once('finish', logCompletionOnce);
           res.once('close', logCompletionOnce);
 
-          emitWatchpartyToolsNotification(entry.runtime, boardId, logId, 'Invoking', toolName, strippedBody);
+          emitWatchpartyToolsNotification(entry.runtime, boardId, logId, WATCHPARTY_AGENT_TOOL_ACTIONS.INVOKING, toolName, strippedBody);
 
           let watchpartyCompletionLogged = false;
           const logWatchpartyCompletionOnce = () => {
@@ -1365,7 +1366,7 @@ async function main() {
               return;
             }
             watchpartyCompletionLogged = true;
-            emitWatchpartyToolsNotification(entry.runtime, boardId, logId, 'Completed', toolName, strippedBody);
+            emitWatchpartyToolsNotification(entry.runtime, boardId, logId, WATCHPARTY_AGENT_TOOL_ACTIONS.COMPLETED, toolName, strippedBody);
           };
           res.once('finish', logWatchpartyCompletionOnce);
           res.once('close', logWatchpartyCompletionOnce);

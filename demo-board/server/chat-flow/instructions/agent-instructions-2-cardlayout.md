@@ -33,6 +33,14 @@ Every card you author lives on the Main Canvas. Author only how the card should
 - Do not author content shape — it is inferred from `view.elements[].kind` (a `table` card reads as data, a `chart` as a chart, `narrative`/`markdown` as a write-up, `todo` as a checklist).
 - Do not author columns, pixel widths, or any coordinates. Initial canvas placement is computed in the frontend from board layout config, the runtime dependency graph, and `meta.presentation.*`. Live drag / resize state is runtime-owned and persisted separately from the card.
 
+### Path state (exploration lifecycle)
+
+On exploration / journey boards, mark a line of inquiry you park or rule out **on the card** via `meta.path_state` — durable and visible, never a side journal. It is annotation only; the reactive graph still flows. Independent of `meta.presentation.*` (layout) and `card_data` (user-owned).
+
+- `meta.path_state` — omit for active paths. Values: `suspended` (parked, may resume), `dead_ended` (ruled out by evidence), `wiped` (abandoned, kept as a breadcrumb). The frontend dims / greys / strikes the card body accordingly.
+- `meta.path_state_rationale` — one sentence on why (shown on hover).
+- On later passes, read `meta.path_state` on existing cards to avoid re-walking a `dead_ended` path and to decide whether a `suspended` one is worth resuming.
+
 ---
 
 ## View Kinds — Required Data Shape

@@ -24,6 +24,8 @@ import {
   functionTool,
   runAgentToolLoop,
 } from '../../../lib/foundry-agents.js';
+import { createWatchpartyEmitter } from '../../../shared/watchparty-notify.js';
+import { deriveLogIdFromCardId } from '../../../chat-flow/shared.js';
 
 const HANDLER_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,19 +38,25 @@ function interpolate(template, args) {
 }
 
 // Prepend a runtime handles block so a source_def foundry run knows which board
-// it belongs to. The chat path injects board_id into liveboards.* tool args
-// automatically; source_def runs talk to MCP directly, so we surface the same
-// board_id in the prompt and instruct the agent to pass it on every call.
+// it belongs to. The chat path injects board_id + log_id into liveboards.* tool
+// args automatically; source_def runs talk to MCP directly, so we surface the
+// same handles in the prompt and instruct the agent to pass them on every call.
+// Passing log_id is what keys the agent-tools watch-party stream back to this
+// card (the controlface surface only emits the tools stream when log_id is set).
 function buildHandlesSection(extra) {
   const boardId = typeof extra?.boardId === 'string' ? extra.boardId.trim() : '';
   if (!boardId) return '';
-  return [
+  const cardId = typeof extra?.cardId === 'string' ? extra.cardId.trim() : '';
+  const logId = cardId ? deriveLogIdFromCardId(cardId) : '';
+  const lines = [
     'RUNTIME HANDLES (provided by the board runtime — use these exact values):',
     `- board_id: "${boardId}"`,
-    'This is the board you are running on. Whenever you call a liveboards.* tool that takes a board_id (or board) argument, pass this exact board_id so the tool reads and writes your own board rather than any default.',
-    '',
-    '',
-  ].join('\n');
+  ];
+  if (logId) lines.push(`- log_id: "${logId}"`);
+  lines.push('This is the board you are running on. Whenever you call a liveboards.* tool that takes a board_id (or board) argument, pass this exact board_id so the tool reads and writes your own board rather than any default.');
+  if (logId) lines.push('Also pass this exact log_id on every liveboards.* tool call so your tool activity streams to your own card\'s watch-party.');
+  lines.push('', '');
+  return lines.join('\n');
 }
 
 const DEFAULT_PROMPT_CONTEXT = {

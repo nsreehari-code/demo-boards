@@ -11,33 +11,11 @@ import {
   deriveCardIdFromLogId,
   resolveBoardAgentToolsLogFilePath,
 } from '../../chat-flow/shared.js';
+import { buildWatchpartyAgentToolPayload } from '../../../../../shared/watchparty-agent-tools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_MANIFEST_PATH = path.resolve(__dirname, 'agentface.tools.json');
-
-function titleCase(text) {
-  return String(text || '')
-    .split(/[._\-\s]+/g)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
-    .trim();
-}
-
-function resolveMcpToolSemanticName(toolName) {
-  const normalized = typeof toolName === 'string' ? toolName.trim() : '';
-  if (!normalized) {
-    return 'Unknown MCP Tool';
-  }
-  return titleCase(normalized) || 'Unknown MCP Tool';
-}
-
-function normalizeMcpToolName(toolName) {
-  const normalized = typeof toolName === 'string' ? toolName.trim() : '';
-  if (!normalized) return '';
-  return normalized.replace(/^liveboards\./, '');
-}
 
 export function normalizeMcpArgs(body) {
   if (body?.args && typeof body.args === 'object' && !Array.isArray(body.args)) {
@@ -95,108 +73,29 @@ export function readMcpArg(args, ...keys) {
   return undefined;
 }
 
-function formatChatHistoryScope(args) {
-  if (readMcpArg(args, 'all-turns', 'allTurns') === true) {
-    return 'across all turns';
-  }
-  const tailTurns = readMcpArg(args, 'tail-turns', 'tailTurns', 'tail');
-  const n = Number.isInteger(tailTurns)
-    ? tailTurns
-    : Number.parseInt(String(tailTurns ?? ''), 10);
-  if (Number.isInteger(n) && n > 0) {
-    return `across the last ${n} message${n === 1 ? '' : 's'}`;
-  }
-  return null;
-}
-
-function joinPhrases(parts) {
-  const filtered = parts.filter((part) => typeof part === 'string' && part.trim().length > 0);
-  if (filtered.length === 0) return '';
-  if (filtered.length === 1) return ` ${filtered[0]}`;
-  if (filtered.length === 2) return ` ${filtered[0]} and ${filtered[1]}`;
-  return ` ${filtered.slice(0, -1).join(', ')} and ${filtered[filtered.length - 1]}`;
-}
-
-function phraseForCard(cardId) {
-  const text = cardId === undefined || cardId === null ? '' : String(cardId).trim();
-  return text ? `for ${text}` : null;
-}
-
-function phraseForFileIdx(idx) {
-  if (idx === undefined || idx === null || idx === '') return null;
-  return `file no. ${idx}`;
-}
-
-function phraseForFileName(name) {
-  const text = name === undefined || name === null ? '' : String(name).trim();
-  return text ? `file '${text}'` : null;
-}
-
-function phraseForAttachments(count) {
-  if (!Number.isInteger(count) || count <= 0) return 'with no attachments';
-  return `with ${count} attachment${count === 1 ? '' : 's'}`;
-}
-
-function formatMcpLogDetails(toolName, body) {
-  const normalizedToolName = normalizeMcpToolName(toolName);
+function buildWatchpartyToolPayload(action, toolName, body) {
   const args = normalizeMcpArgs(body);
-  const parts = [];
-  const cardId = readMcpArg(args, 'card_id', 'cardId');
-
-  switch (normalizedToolName) {
-    case 'inspect.board-runtime-status':
-    case 'discover.source-kinds':
-      break;
-    case 'inspect.card-definition-and-runtime':
-    case 'manage.read-card':
-    case 'manage.upsert-card':
-    case 'manage.remove-card':
-    case 'provide-final-reply-to-user':
-      parts.push(phraseForCard(cardId));
-      break;
-    case 'inspect.chat-messages-on-cards':
-      parts.push(phraseForCard(cardId));
-      parts.push(formatChatHistoryScope(args));
-      break;
-    case 'inspect.file-contents':
-      parts.push(phraseForCard(cardId));
-      parts.push(phraseForFileIdx(readMcpArg(args, 'file_idx', 'fileIdx')));
-      break;
-    case 'manage.upload-card-file':
-      parts.push(phraseForCard(cardId));
-      parts.push(phraseForFileName(readMcpArg(args, 'key', 'templateKey')));
-      break;
-    case 'stage-ai-response-and-any-attachments': {
-      parts.push(phraseForCard(cardId));
-      const files = readMcpArg(args, 'files');
-      const attachmentCount = Array.isArray(files) ? files.length : 0;
-      parts.push(phraseForAttachments(attachmentCount));
-      break;
-    }
-    default:
-      if (normalizedToolName.startsWith('preflight.')) {
-        parts.push(phraseForCard(cardId));
-      }
-      break;
-  }
-
-  return joinPhrases(parts);
+  return buildWatchpartyAgentToolPayload({
+    tool: toolName,
+    action,
+    card_id: readMcpArg(args, 'card_id', 'cardId'),
+    turn_id: readMcpArg(args, 'turn_id', 'turnId', 'turn'),
+    file_idx: readMcpArg(args, 'file_idx', 'fileIdx'),
+  });
 }
 
-function formatWatchpartyToolMessage(phase, toolName, body) {
-  const semanticName = resolveMcpToolSemanticName(toolName);
-  const details = formatMcpLogDetails(toolName, body);
-  return `${phase} '${semanticName}'${details}`;
-}
-
-export function emitWatchpartyToolsNotification(runtime, boardId, logId, phase, toolName, body) {
+export function emitWatchpartyToolsNotification(runtime, boardId, logId, action, toolName, body) {
   const sanitizedCardId = deriveCardIdFromLogId(logId);
   if (!sanitizedCardId || !boardId) {
     return;
   }
 
   const outputPath = resolveBoardAgentToolsLogFilePath(boardId, sanitizedCardId);
-  const line = formatWatchpartyToolMessage(phase, toolName, body);
+  const payload = buildWatchpartyToolPayload(action, toolName, body);
+  if (!payload) {
+    return;
+  }
+  const line = JSON.stringify(payload);
 
   let text = line;
   try {
@@ -214,8 +113,8 @@ export function emitWatchpartyToolsNotification(runtime, boardId, logId, phase, 
       kind: 'card_watchparty',
       cardId: sanitizedCardId,
       channel: 'agent-tools',
-      replace: true,
-      payload: { text },
+      replace: false,
+      payload,
       sentAtMs: Date.now(),
     });
   } catch {

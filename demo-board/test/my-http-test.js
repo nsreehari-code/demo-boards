@@ -15,6 +15,11 @@ import { loadFirebaseHostConfig } from '../server/hosted-board-runtime/firebase-
 import { createDynamicBoards } from '../server/hosted-board-runtime/boards-index/dynamic-boards.js';
 import { applyNotification, buildBoardState } from 'yaml-flow/board-state-reducer';
 import { runtimeNotificationsFromPayload } from 'yaml-flow/notification-consumer';
+import {
+  parseWatchpartyAgentToolPayload,
+  parseWatchpartyAgentToolPayloads,
+  WATCHPARTY_AGENT_TOOL_ACTIONS,
+} from '../../../shared/watchparty-agent-tools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -124,7 +129,7 @@ function normalizeChatState(chatSnapshot = null) {
 const EMPTY_OBJECT = Object.freeze({});
 const EMPTY_ARRAY = Object.freeze([]);
 const PROBE_PROGRESS_LINE = 'Probe progress: staging assistant reply';
-const STAGE_AI_RESPONSE_TOOL_LABEL = "Invoking 'Stage Ai Response And Any Attachments'";
+const STAGE_AI_RESPONSE_TOOL_NAME = 'liveboards.stage-ai-response-and-any-attachments';
 
 function createEmptyHostedSseSnapshot() {
   return {
@@ -169,6 +174,14 @@ function getLatestWatchPartyChannelText(snapshot, cardId, channel) {
     : EMPTY_ARRAY;
   const latestEvent = channelEvents.at(-1) ?? null;
   return String(latestEvent?.payload?.text ?? '');
+}
+
+function getWatchPartyChannelPayloads(snapshot, cardId, channel) {
+  const channelEvents = Array.isArray(snapshot?.boardState?.cardWatchParties?.[cardId]?.[channel])
+    ? snapshot.boardState.cardWatchParties[cardId][channel]
+    : EMPTY_ARRAY;
+  return channelEvents
+    .flatMap((event) => parseWatchpartyAgentToolPayloads(event?.payload));
 }
 
 function buildStatusCardIndex(statusSnapshot) {
@@ -1252,6 +1265,20 @@ async function main() {
     }, timeoutMs, label);
   }
 
+  async function waitForWatchPartyAgentToolPayload({ cardId, timeoutMs, label, predicate }) {
+    return await waitUntil(() => {
+      const payloads = getWatchPartyChannelPayloads(sseState.boardSnapshot, cardId, 'agent-tools');
+      if (payloads.length === 0) {
+        return false;
+      }
+      if (typeof predicate === 'function') {
+        const matched = payloads.find((payload) => predicate(payload));
+        return matched || false;
+      }
+      return payloads.at(-1) ?? false;
+    }, timeoutMs, label);
+  }
+
   async function pollChatMessages(cardId, turnId, attempts, gapMs, predicate, waitLabel) {
     let lastMessages = [];
     const progress = createPollProgress(waitLabel);
@@ -2011,14 +2038,13 @@ async function main() {
         assert(agentOutputText.includes(PROBE_PROGRESS_LINE), `TS agent-output watchparty missing probe progress line: ${jsonText(agentOutputText)}`);
 
         console.log(`[${formatTestId('TS')}] step 9/11: verifying reduced watchparty agent-tools invocation`);
-        const agentToolsText = await waitForWatchPartyText({
+        const agentToolPayload = await waitForWatchPartyAgentToolPayload({
           cardId: PORTFOLIO_CARD_ID,
-          channel: 'agent-tools',
           timeoutMs: 20_000,
           label: `TS agent-tools watchparty for turn ${turnId}`,
-          predicate: (text) => text.includes(STAGE_AI_RESPONSE_TOOL_LABEL),
+          predicate: (payload) => payload.tool === STAGE_AI_RESPONSE_TOOL_NAME && payload.action === WATCHPARTY_AGENT_TOOL_ACTIONS.INVOKING,
         });
-        assert(agentToolsText.includes(STAGE_AI_RESPONSE_TOOL_LABEL), `TS agent-tools watchparty missing stage-ai-response invocation: ${jsonText(agentToolsText)}`);
+        assert(agentToolPayload?.tool === STAGE_AI_RESPONSE_TOOL_NAME && agentToolPayload?.action === WATCHPARTY_AGENT_TOOL_ACTIONS.INVOKING, `TS agent-tools watchparty missing stage-ai-response invocation: ${jsonText(agentToolPayload)}`);
 
         console.log(`[${formatTestId('TS')}] step 10/11: verifying persisted turn contents`);
         const finalMessages = await readChatMessages(PORTFOLIO_CARD_ID, turnId);
