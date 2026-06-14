@@ -35,6 +35,11 @@ const SKILLS_DIR = path.join(CHAT_FLOW_DIR, 'skills');
 const EXPOSED_TOOL_PREFIXES_DEFAULT = ['liveboards.', 'lore.'];
 const STAGE_TOOL_NAME = 'liveboards.stage-ai-response-and-any-attachments';
 
+function shouldReuseFoundryThread(boardId) {
+  const normalizedBoardId = typeof boardId === 'string' ? boardId.trim().toLowerCase() : '';
+  return !normalizedBoardId.startsWith('live-test-');
+}
+
 async function importMcpClient() {
   const clientModule = await import('@modelcontextprotocol/sdk/client/index.js');
   let streamableModule;
@@ -62,6 +67,43 @@ function normalizeMcpToolResult(result) {
   if (chunks.length) return chunks.join('');
   if (result?.isError) return JSON.stringify({ error: 'tool returned isError with no text' });
   return '';
+}
+
+function parseJsonIfPossible(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {}
+  return null;
+}
+
+function hasExplicitToolError(candidate) {
+  if (!candidate || typeof candidate !== 'object') return false;
+  if (typeof candidate.error === 'string' && candidate.error.trim()) return true;
+  if (candidate.result && typeof candidate.result === 'object') {
+    return hasExplicitToolError(candidate.result);
+  }
+  return false;
+}
+
+function didMcpToolCallSucceed(result) {
+  if (result?.isError) return false;
+
+  const structured = result?.structuredContent;
+  if (structured !== undefined && structured !== null) {
+    if (hasExplicitToolError(structured)) return false;
+    return true;
+  }
+
+  const content = Array.isArray(result?.content) ? result.content : [];
+  const text = content
+    .map((entry) => (typeof entry?.text === 'string' ? entry.text : ''))
+    .join('')
+    .trim();
+  const parsed = parseJsonIfPossible(text);
+  if (parsed) return !hasExplicitToolError(parsed);
+  return true;
 }
 
 function mergeLiveboardsRuntimeHandles(toolName, fnArgs, { boardId, cardId, logId, turnId }) {
@@ -304,7 +346,9 @@ export async function invokeAssistant(context, config = {}) {
   fs.writeFileSync(outputFile, 'Reasoning...\n', 'utf-8');
 
   const existingFoundryPrivate = await getCardPrivateChatSection(context, 'foundry');
-  const existingThreadId = String(existingFoundryPrivate?.thread_id || '').trim();
+  const existingThreadId = shouldReuseFoundryThread(boardId)
+    ? String(existingFoundryPrivate?.thread_id || '').trim()
+    : '';
   const normalizedMcpServerUrl = streamableMcpServerUrl.trim() || mcpServerUrl;
 
   const promptChatMessages = await getEnhancedChatMessages(context);
@@ -413,14 +457,11 @@ export async function invokeAssistant(context, config = {}) {
         try {
           const result = await routeClientForTool(realName).callTool({ name: realName, arguments: mergedArgs });
           resultText = normalizeMcpToolResult(result);
+          if (realName === STAGE_TOOL_NAME) {
+            finalReplyStaged = didMcpToolCallSucceed(result);
+          }
         } catch (e) {
           resultText = JSON.stringify({ error: `${realName} failed: ${e?.message || e}` });
-        }
-        if (realName === STAGE_TOOL_NAME) {
-          try {
-            const parsed = JSON.parse(resultText);
-            if (parsed && typeof parsed === 'object' && parsed.status === 'success') finalReplyStaged = true;
-          } catch {}
         }
         return resultText;
       },

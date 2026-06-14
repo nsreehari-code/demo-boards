@@ -240,10 +240,13 @@ export async function runAgentToolLoop({
   shouldStop,
   onProgress,
   timeoutMs = 2100000,
-  maxIters = 64,
+  maxIters = null,
   fetchFinalText = false,
 }) {
   const emit = typeof onProgress === 'function' ? onProgress : () => {};
+  const maxIterations = Number.isFinite(maxIters) && maxIters > 0
+    ? Math.floor(maxIters)
+    : null;
 
   if (userPrompt) {
     await client.messages.create(threadId, 'user', userPrompt);
@@ -263,8 +266,8 @@ export async function runAgentToolLoop({
       throw new Error(`run ${run.id} exceeded timeoutMs=${timeoutMs}`);
     }
     iters += 1;
-    if (iters > maxIters) {
-      throw new Error(`run ${run.id} exceeded maxIters=${maxIters}`);
+    if (maxIterations !== null && iters > maxIterations) {
+      throw new Error(`run ${run.id} exceeded maxIters=${maxIterations}`);
     }
 
     if (run.status === 'queued' || run.status === 'in_progress') {
