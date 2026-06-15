@@ -558,6 +558,7 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
         boardId,
         boardRuntimeNeeds.taskExecutorExtra,
       ),
+      taskExecutorTimeoutMs: hostConfig.taskExecutorTimeoutMs,
       resolveConfigRelativePath,
     },
   );

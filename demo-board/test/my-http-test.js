@@ -2107,6 +2107,7 @@ async function main() {
       turnPrefix,
       assistantPattern,
       attachment,
+      responseTimeoutMs = NON_PROBE_RESPONSE_TIMEOUT_MS,
     }) {
       console.log(`\n=== ${formatTestId(testId)}: ${title} ===`);
 
@@ -2182,7 +2183,7 @@ async function main() {
       const assistantMessagesPoll = await pollChatMessages(
         cardId,
         turnId,
-        Math.max(12, Math.ceil(NON_PROBE_RESPONSE_TIMEOUT_MS / 1000)),
+        Math.max(12, Math.ceil(responseTimeoutMs / 1000)),
         1000,
         (messages) => messages.some((message) => message?.role === 'assistant' && assistantPattern.test(String(message?.text || ''))),
         `final assistant reply for turn ${turnId}`,
@@ -2204,7 +2205,7 @@ async function main() {
       const finalProcessingOffPoll = await pollChatProcessing(
         cardId,
         false,
-        Math.max(12, Math.ceil(NON_PROBE_RESPONSE_TIMEOUT_MS / 1000)),
+        Math.max(12, Math.ceil(responseTimeoutMs / 1000)),
         1000,
         `chat processing off for ${cardId}`,
       );
@@ -2261,6 +2262,7 @@ async function main() {
         probeFlavor: 'foundry',
         turnPrefix: 't9f',
         assistantPattern: /^9\b/,
+        responseTimeoutMs: 180_000,
         attachment: {
           fileName: 't9f-question.txt',
           text: 'What is two plus three plus four?',

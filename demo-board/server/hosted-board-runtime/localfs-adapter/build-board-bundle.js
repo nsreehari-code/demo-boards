@@ -108,6 +108,19 @@ export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, ru
   const boardAdapter = createFsBoardPlatformAdapter(baseRef, cliDir, adapterOpts);
   const nonCoreAdapter = createFsBoardNonCorePlatformAdapter(baseRef, cliDir, nonCoreAdapterOpts);
 
+  // The trial-run / preflight executor paths (probe-source-preflight, run-source-fetch)
+  // default to a hardcoded 60s timeout inside yaml-flow unless the adapter exposes
+  // `executorTimeouts`. Plumb the configured taskExecutorTimeoutMs through so that
+  // single-source trial runs honor the same long timeout as the queued executor.
+  const configuredExecutorTimeoutMs = Number(options.taskExecutorTimeoutMs);
+  if (Number.isFinite(configuredExecutorTimeoutMs) && configuredExecutorTimeoutMs > 0) {
+    nonCoreAdapter.executorTimeouts = {
+      ...(nonCoreAdapter.executorTimeouts || {}),
+      preflightMs: configuredExecutorTimeoutMs,
+      probeMs: configuredExecutorTimeoutMs,
+    };
+  }
+
   const requestProcessAccumulated = typeof runtimeHooks.requestProcessAccumulated === 'function'
     ? runtimeHooks.requestProcessAccumulated
     : () => {};
