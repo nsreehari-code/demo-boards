@@ -162,12 +162,16 @@
       ],
       "cardRendererRules": [
         {
-          "renderer": "protected",
-          "when": "meta.highconfidential = true or meta.confidential = true"
+          "renderer": "strategist",
+          "when": "meta.card_renderer = 'strategist'"
         },
         {
           "renderer": "ingest",
-          "when": "meta.ingest = true or meta.gandalf = true"
+          "when": "meta.card_renderer = 'ingest'"
+        },
+        {
+          "renderer": "postbox",
+          "when": "meta.card_renderer = 'postbox'"
         }
       ],
       "admin-cards": [
@@ -176,6 +180,7 @@
           "meta": {
             "title": "Evidence Intake",
             "gandalf": true,
+            "card_renderer": "ingest",
             "desc": "Board intake card for reviewing and managing incoming evidence."
           },
           "__private": {
@@ -208,21 +213,25 @@
       ],
       "cardRendererRules": [
         {
-          "renderer": "protected",
-          "when": "meta.highconfidential = true or meta.confidential = true"
+          "renderer": "strategist",
+          "when": "meta.card_renderer = 'strategist'"
         },
         {
           "renderer": "ingest",
-          "when": "meta.ingest = true or meta.gandalf = true"
+          "when": "meta.card_renderer = 'ingest'"
+        },
+        {
+          "renderer": "postbox",
+          "when": "meta.card_renderer = 'postbox'"
         }
       ],
       "admin-cards": [
         {
           "id": "gandalf-intake",
           "meta": {
-            "title": "Evidence Intake",
+            "title": "Board Instructions and Intake",
             "gandalf": true,
-            "desc": "Board intake card for reviewing and managing incoming evidence."
+            "card_renderer": "ingest"
           },
           "__private": {
             "chat": {"copilot": {"ws": "gandalf"}, "visible_controlplane_only": true }
@@ -240,10 +249,34 @@
           "card_data": {}
         },
         {
+          "id": "gandalf-postbox",
+          "meta": {
+            "title": "Postbox",
+            "desc": "Postbox card for ingesting documents into the board via Gandalf. Visible only in Control Plane.",
+            "card_renderer": "postbox",
+            "gandalf": true
+          },
+          "view": {
+            "elements": [
+                            {
+                "kind": "markdown",
+                "data": {
+                  "value": "Review and manage incoming evidence for this board."
+                }
+              }
+            ]
+          },
+          "card_data": {},
+          "__private": {
+            "visible_controlplane_only": true
+          }
+        },
+        {
           "id": "journey-strategist",
           "meta": {
             "title": "Journey Strategist",
             "gandalf": true,
+            "card_renderer": "strategist",
             "tags": ["strategist", "journey", "exploration"],
             "desc": "Board-level exploration strategist. Wakes on board topology change (sys_keys_board_state) or an edit to its objective notes, reads the current journey via board-inspection tools, and authors the next set of exploration cards to keep the investigative graph moving forward.",
             "presentation": {
