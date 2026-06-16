@@ -178,7 +178,7 @@
         {
           "id": "gandalf-intake",
           "meta": {
-            "title": "Evidence Intake",
+            "title": "Board Instructions and Intake",
             "gandalf": true,
             "card_renderer": "ingest",
             "desc": "Board intake card for reviewing and managing incoming evidence."
@@ -197,6 +197,29 @@
             ]
           },
           "card_data": {}
+        },
+                {
+          "id": "gandalf-postbox",
+          "meta": {
+            "title": "Postbox",
+            "desc": "Postbox card for ingesting documents into the board via Gandalf. Visible only in Control Plane.",
+            "card_renderer": "postbox",
+            "gandalf": true
+          },
+          "view": {
+            "elements": [
+                            {
+                "kind": "markdown",
+                "data": {
+                  "value": "Review and manage incoming evidence for this board."
+                }
+              }
+            ]
+          },
+          "card_data": {},
+          "__private": {
+            "visible_controlplane_only": true
+          }
         }
       ]
     },
@@ -248,29 +271,7 @@
           },
           "card_data": {}
         },
-        {
-          "id": "gandalf-postbox",
-          "meta": {
-            "title": "Postbox",
-            "desc": "Postbox card for ingesting documents into the board via Gandalf. Visible only in Control Plane.",
-            "card_renderer": "postbox",
-            "gandalf": true
-          },
-          "view": {
-            "elements": [
-                            {
-                "kind": "markdown",
-                "data": {
-                  "value": "Review and manage incoming evidence for this board."
-                }
-              }
-            ]
-          },
-          "card_data": {},
-          "__private": {
-            "visible_controlplane_only": true
-          }
-        },
+
         {
           "id": "journey-strategist",
           "meta": {

@@ -29,6 +29,14 @@
       "refsTemplate": "localfs-default",
       "uiTemplate": "default"
     },
+    "workiq": {
+      "label": "Work",
+      "ai": "copilot",
+      "aiWorkspaceTemplate": "default",
+      "cardsTemplate": "workiq-m365",
+      "refsTemplate": "localfs-default",
+      "uiTemplate": "default"
+    },
     "investigate": {
       "label": "Investigative Journey",
       "ai": "copilot",
