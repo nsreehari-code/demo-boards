@@ -24,7 +24,6 @@ import {
   functionTool,
   runAgentToolLoop,
 } from '../../../lib/foundry-agents.js';
-import { createWatchpartyEmitter } from '../../../shared/watchparty-notify.js';
 import { deriveLogIdFromCardId } from '../../../chat-flow/shared.js';
 
 const HANDLER_DIR = path.dirname(fileURLToPath(import.meta.url));

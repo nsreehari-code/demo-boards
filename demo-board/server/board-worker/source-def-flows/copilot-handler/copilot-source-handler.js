@@ -4,8 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runCopilot as spawnCopilot } from '../../../lib/copilot-cli.js';
-import { createWatchpartyEmitter } from '../../../shared/watchparty-notify.js';
-import { resolveCopilotWorkspaceDirByStem, deriveLogIdFromCardId } from '../../../chat-flow/shared.js';
+import { deriveLogIdFromCardId } from '../../../chat-flow/shared.js';
 
 // ---------------------------------------------------------------------------
 // Output processing — copilot decorates its output with tool-op and stats lines
