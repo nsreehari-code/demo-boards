@@ -88,7 +88,7 @@ export async function runLaneLease(lane, lease) {
 }
 
 export async function drainLaneToIdle(lane, maxPasses = 256) {
-  const visibilityMs = Math.max(1, Math.floor(lane.visibilityMs ?? 60000));
+  const visibilityMs = Math.max(1, Math.floor(lane.visibilityMs ?? 1_200_000));
   const concurrency = Math.max(1, Math.floor(lane.concurrency ?? 1));
   let total = 0;
   for (let pass = 0; pass < maxPasses; pass += 1) {
@@ -104,7 +104,7 @@ export async function drainLaneToIdle(lane, maxPasses = 256) {
 
 export function startLaneRunner(lane) {
   const pollIntervalMs = Math.max(1, Math.floor(lane.pollIntervalMs ?? 250));
-  const visibilityMs = Math.max(1, Math.floor(lane.visibilityMs ?? 60000));
+  const visibilityMs = Math.max(1, Math.floor(lane.visibilityMs ?? 1_200_000));
   const concurrency = Math.max(1, Math.floor(lane.concurrency ?? 1));
   let stopped = false;
   let leasing = false;

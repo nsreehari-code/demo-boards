@@ -259,6 +259,8 @@ export async function execute(context) {
       const response = await client.callTool({
         name: cfg.tool,
         arguments: toolArguments,
+      }, undefined, {
+        timeout: 1_200_000,
       });
       const rawValue = normalizeToolResult(response);
       const resultValue = cfg.responseShape

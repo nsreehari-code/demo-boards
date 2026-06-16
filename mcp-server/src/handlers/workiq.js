@@ -66,7 +66,7 @@ function runWorkiq(query, timeoutMs) {
 
 export async function askWorkiq(args) {
   const query = typeof args?.query === 'string' ? args.query.trim() : '';
-  const timeoutMs = Number.isFinite(args?.timeoutMs) ? Number(args.timeoutMs) : 60_000;
+  const timeoutMs = Number.isFinite(args?.timeoutMs) ? Number(args.timeoutMs) : 1_200_000;
 
   if (!query) {
     throw new Error('workiq.ask requires a non-empty query');
