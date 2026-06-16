@@ -11,7 +11,7 @@ import {
   deriveCardIdFromLogId,
   resolveBoardAgentToolsLogFilePath,
 } from '../../chat-flow/shared.js';
-import { buildWatchpartyAgentToolPayload } from '../../../../../shared/watchparty-agent-tools.js';
+import { buildWatchpartyAgentToolPayload } from '../../../shared/watchparty-agent-tools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

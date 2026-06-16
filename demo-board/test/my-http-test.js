@@ -19,7 +19,7 @@ import {
   parseWatchpartyAgentToolPayload,
   parseWatchpartyAgentToolPayloads,
   WATCHPARTY_AGENT_TOOL_ACTIONS,
-} from '../../../shared/watchparty-agent-tools.js';
+} from '../shared/watchparty-agent-tools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

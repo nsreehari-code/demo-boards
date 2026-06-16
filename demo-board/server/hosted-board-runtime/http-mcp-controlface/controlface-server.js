@@ -42,7 +42,7 @@ import {
   createControlfaceMcpSurface,
 } from './controlface-mcp-surface.js';
 import { createAgentMcpHandler, AGENT_MCP_PATHS } from './agentface-mcp.js';
-import { WATCHPARTY_AGENT_TOOL_ACTIONS } from '../../../../../shared/watchparty-agent-tools.js';
+import { WATCHPARTY_AGENT_TOOL_ACTIONS } from '../../../shared/watchparty-agent-tools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
