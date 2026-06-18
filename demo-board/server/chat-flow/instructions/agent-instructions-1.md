@@ -1,6 +1,6 @@
 # Agent Instructions — Working With Live Boards And Cards
 
-> Read [live-board-cards-soul.md](../skills/live-board-cards-soul.md) first.
+> Read [live-board-cards-soul.md](.github/skills/live-board-cards-soul.md) first.
 > Everything below assumes that framing.
 
 ## The Board Is A Substrate
@@ -224,9 +224,9 @@ Card authoring is workflow authoring, not just view authoring.
 ```
 
 Use `manage-cards-on-live-board` for the detailed authoring and editing
-playbooks. Use
-[agent-instructions-2-cardlayout.md](agent-instructions-2-cardlayout.md) for
-per-kind view data shapes, layout details, and chart configuration.
+playbooks. Use the
+[Card Design Principles & Layout Guide](#card-design-principles--layout-guide)
+section below for per-kind view data shapes, layout details, and chart configuration.
 
 ## Source Definitions
 
@@ -269,8 +269,8 @@ payloads returned by sources. LLM-backed sources may emit `_view` when the
 card should render dynamically, but `_view.kind` must stay inside the known
 set.
 
-See [agent-instructions-2-cardlayout.md](agent-instructions-2-cardlayout.md)
-for layout and rendering guidance.
+See the [Card Design Principles & Layout Guide](#card-design-principles--layout-guide)
+section below for layout and rendering guidance.
 
 ## Validation Is Mandatory
 
