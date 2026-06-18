@@ -98,7 +98,15 @@
           "agentsDirs": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/agents"],
           "agentsSkills": ["{{BOARD_ROOT}}/server/chat-flow/skills", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/skills"],
           "agentsHooks": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/hooks"],
-          "copyScripts": ["{{BOARD_ROOT}}/scripts/cli"]
+          "copyScripts": []
+        },
+        {
+          "copilot-root": "worker-default",
+          "instructionsDirs": ["{{BOARD_ROOT}}/server/chat-flow/instructions", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/instructions"],
+          "agentsDirs": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/agents"],
+          "agentsSkills": ["{{BOARD_ROOT}}/server/chat-flow/skills", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/skills"],
+          "agentsHooks": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/hooks"],
+          "copyScripts": []
         },
         {
           "copilot-root": "gandalf",

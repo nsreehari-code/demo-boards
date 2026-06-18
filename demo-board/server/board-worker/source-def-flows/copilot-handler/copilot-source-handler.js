@@ -173,8 +173,27 @@ function buildHandlesSection(extra) {
   return lines.join('\n');
 }
 
+function normalizeWorkspaceStem(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+// Resolve the copilot working directory for a source_def run. Mirrors the chat
+// handler: a source_def may target a specific copilot workspace stem via
+// `copilot.ws`, defaulting to the 'worker-default' stem for board-worker runs.
+// `extra.aiWorkspaceRoot` is the
+// workspace root (the chat-workspaces dir). If the resolved stem dir is not
+// materialized, fall back to the root so non-hosted callers keep working.
+function resolveCopilotCwd(extra, sourceDef) {
+  const root = typeof extra?.aiWorkspaceRoot === 'string' ? extra.aiWorkspaceRoot.trim() : '';
+  if (!root) return process.cwd();
+  const stem = normalizeWorkspaceStem(sourceDef?.copilot?.ws) || 'worker-default';
+  const stemDir = path.join(root, stem);
+  if (fs.existsSync(stemDir)) return stemDir;
+  return root;
+}
+
 async function runCopilot(prompt, sourceDef, executorDir, extra) {
-  const copilotCwd = extra?.aiWorkspaceRoot || process.cwd();
+  const copilotCwd = resolveCopilotCwd(extra, sourceDef);
   const bindTo = String(sourceDef?.bindTo || 'executor');
   const sessionId = getOrCreateSessionId(copilotCwd, bindTo);
 
