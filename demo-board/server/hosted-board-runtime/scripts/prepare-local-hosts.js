@@ -3,10 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadFirebaseHostConfig } from '../firebase-adapter/load-config.js';
+import { loadLocalFsHostConfig } from '../localfs-adapter/load-config.js';
 import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
-import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js';
 import {
   boardNeedsAiWorkspaceSetup,
   runSetupSingleAiWorkspaceScript,
@@ -32,11 +31,9 @@ function ensureBoardsIndexContainer(hostConfig) {
 }
 
 async function main() {
-  const hostConfig = loadFirebaseHostConfig(defaultConfigPath, process.argv.slice(2), TAG);
+  const hostConfig = loadLocalFsHostConfig(defaultConfigPath, process.argv.slice(2), TAG);
   ensureBoardsIndexContainer(hostConfig);
-  const adapterServices = hostConfig.storageAdapter === 'localfs'
-    ? await initializeLocalFsServices(hostConfig.localfs)
-    : await initializeFirebaseServices(hostConfig.firebase);
+  const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
   const boardConfigs = await dynamicBoards.list();
   const setupBoardIds = new Set(

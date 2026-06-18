@@ -1,4 +1,4 @@
-import { buildBoardConfig } from '../firebase-adapter/load-config.js';
+import { buildBoardConfig } from '../localfs-adapter/load-config.js';
 import { createBoardsIndexStore } from './boards-index-store.js';
 
 export function createDynamicBoards({ hostConfig, adapterServices }) {

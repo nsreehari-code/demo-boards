@@ -9,9 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
 import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
-import { buildBoardBundle as buildFirebaseBoardBundle } from '../firebase-adapter/build-board-bundle.js';
-import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js';
-import { loadFirebaseHostConfig, resolveConfigRelativePath } from '../firebase-adapter/load-config.js';
+import { loadLocalFsHostConfig, resolveConfigRelativePath } from '../localfs-adapter/load-config.js';
 import { createBoardLayoutsStore } from '../board-layouts/layout-store.js';
 import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
@@ -532,9 +530,7 @@ async function upsertBoardRuntimeEntry(boardRuntimes, boardId, nextEntry, proces
 }
 
 async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig, processLogger) {
-  const buildBoardBundle = hostConfig.storageAdapter === 'localfs'
-    ? buildLocalFsBoardBundle
-    : buildFirebaseBoardBundle;
+  const buildBoardBundle = buildLocalFsBoardBundle;
   const boardId = boardConfig.id;
   const callbackBaseUrl = `http://${hostConfig.host}:${hostConfig.port}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/mcp-webhooks`;
   const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
@@ -1182,10 +1178,8 @@ async function handleMcpExtrasRoute({ rawBody, res, controlfaceMcp }) {
 
 async function main() {
   const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
-  const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'controlface');
-  const adapterServices = hostConfig.storageAdapter === 'localfs'
-    ? await initializeLocalFsServices(hostConfig.localfs)
-    : await initializeFirebaseServices(hostConfig.firebase);
+  const hostConfig = loadLocalFsHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'controlface');
+  const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
   const boardLayouts = createBoardLayoutsStore({ registry: hostConfig.runtimeBoardsRegistry, adapterServices });
   const boardRuntimes = await buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards);

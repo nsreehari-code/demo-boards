@@ -7,11 +7,9 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { createFsQueueStorage, parseRef } from 'yaml-flow/board-live-cards-node';
-import { createFirestoreQueueStorage } from 'yaml-flow/firestore-storage';
 import { jsonata } from 'yaml-flow/step-machine-public';
-import { initializeFirebaseServices } from '../server/hosted-board-runtime/firebase-adapter/firebase-init.js';
 import { initializeLocalFsServices } from '../server/hosted-board-runtime/localfs-adapter/localfs-init.js';
-import { loadFirebaseHostConfig } from '../server/hosted-board-runtime/firebase-adapter/load-config.js';
+import { loadLocalFsHostConfig } from '../server/hosted-board-runtime/localfs-adapter/load-config.js';
 import { createDynamicBoards } from '../server/hosted-board-runtime/boards-index/dynamic-boards.js';
 import { applyNotification, buildBoardState } from 'yaml-flow/board-state-reducer';
 import { runtimeNotificationsFromPayload } from 'yaml-flow/notification-consumer';
@@ -33,6 +31,16 @@ function readCliOptionValue(args, optionName) {
   if (optionIndex === -1) return '';
   return String(args[optionIndex + 1] || '').trim();
 }
+
+// Tests listed in `--skip-tests` (comma-separated ids, e.g. "T9,T9F") are
+// removed from the default run. Explicitly requesting them via `--run-tests`
+// still overrides the skip list.
+const SKIPPED_TEST_SET = new Set(
+  String(readCliOptionValue(cliArgs, '--skip-tests') || '')
+    .split(',')
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean),
+);
 
 function parseMode(rawValue) {
   const normalized = typeof rawValue === 'string' ? rawValue.trim().toLowerCase() : '';
@@ -62,6 +70,9 @@ function isTestSelected(requestedTests, testId) {
   const normalizedTestId = String(testId || '').trim().toUpperCase();
   if (requestedTests) {
     return requestedTests.has(normalizedTestId);
+  }
+  if (SKIPPED_TEST_SET.has(normalizedTestId)) {
+    return false;
   }
   return DEFAULT_TEST_SET.has(normalizedTestId);
 }
@@ -454,13 +465,10 @@ let hostedRuntimeContextPromise = null;
 async function getHostedRuntimeContext() {
   if (!hostedRuntimeContextPromise) {
     hostedRuntimeContextPromise = (async () => {
-      const hostConfig = loadFirebaseHostConfig(QUEUE_RUNNER_CONFIG_PATH, [], 'queueRunner');
-      const adapterServices = hostConfig.storageAdapter === 'localfs'
-        ? await initializeLocalFsServices(hostConfig.localfs)
-        : await initializeFirebaseServices(hostConfig.firebase);
+      const hostConfig = loadLocalFsHostConfig(QUEUE_RUNNER_CONFIG_PATH, [], 'queueRunner');
+      const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
       const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
-      const firebaseServices = hostConfig.storageAdapter === 'firebase' ? adapterServices : null;
-      return { hostConfig, firebaseServices, dynamicBoards };
+      return { hostConfig, dynamicBoards };
     })();
   }
   return hostedRuntimeContextPromise;
@@ -471,10 +479,7 @@ async function cleanupHostedRuntimeContext() {
   const pending = hostedRuntimeContextPromise;
   hostedRuntimeContextPromise = null;
   try {
-    const context = await pending;
-    if (typeof context?.firebaseServices?.app?.delete === 'function') {
-      await context.firebaseServices.app.delete();
-    }
+    await pending;
   } catch {
   }
 }
@@ -526,32 +531,6 @@ function getLocalFsTaskExecutorQueueDir(hostConfig, boardConfigsById, boardId) {
   return path.join(parsed.value, 'task-executor');
 }
 
-function getFirebaseProcessQueueCollectionPath(hostConfig, boardConfigsById, boardId) {
-  const boardConfig = getHostedBoardConfig(boardConfigsById, boardId);
-  const queueStoreRef = boardConfig?.refs?.queueStoreRef;
-  if (!queueStoreRef) {
-    throw new Error(`Hosted config for board '${boardId}' is missing queueStoreRef`);
-  }
-  const parsed = parseRef(queueStoreRef);
-  if (parsed.kind !== 'firestore') {
-    throw new Error(`Firebase hosted config for board '${boardId}' must use a firestore queueStoreRef`);
-  }
-  return `${parsed.value}-process-accumulated`;
-}
-
-function getFirebaseTaskExecutorQueueCollectionPath(hostConfig, boardConfigsById, boardId) {
-  const boardConfig = getHostedBoardConfig(boardConfigsById, boardId);
-  const queueStoreRef = boardConfig?.refs?.queueStoreRef;
-  if (!queueStoreRef) {
-    throw new Error(`Hosted config for board '${boardId}' is missing queueStoreRef`);
-  }
-  const parsed = parseRef(queueStoreRef);
-  if (parsed.kind !== 'firestore') {
-    throw new Error(`Firebase hosted config for board '${boardId}' must use a firestore queueStoreRef`);
-  }
-  return `${parsed.value}-task-executor`;
-}
-
 function readJsonFileSafe(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -592,50 +571,26 @@ function readLocalFsQueueRecord(queueDir, id) {
 }
 
 async function enqueueProcessAccumulatedWakeup(boardId) {
-  const { hostConfig, firebaseServices, dynamicBoards } = await getHostedRuntimeContext();
+  const { hostConfig, dynamicBoards } = await getHostedRuntimeContext();
   const boardConfigsById = await loadBoardConfigsById(dynamicBoards);
-  if (hostConfig.storageAdapter === 'localfs') {
-    const queueDir = getLocalFsProcessQueueDir(hostConfig, boardConfigsById, boardId);
-    const queue = createFsQueueStorage(queueDir);
-    const dedupKey = `manual-process-accumulated:${makeQueueMessageId('dedup')}`;
-    const message = queue.enqueueIfAbsent
-      ? queue.enqueueIfAbsent({ boardRef: `manual:${boardId}` }, dedupKey)
-      : queue.enqueue({ boardRef: `manual:${boardId}` });
-    if (!message) throw new Error(`Failed to enqueue localfs process-accumulated wakeup for ${boardId}`);
-    return { id: message.id };
-  }
-
-  const id = makeQueueMessageId('process-accumulated-test');
-  const nowIso = new Date().toISOString();
-  const queueDoc = {
-    id,
-    body: { boardRef: `manual:${boardId}` },
-    dedupKey: `manual-process-accumulated:${id}`,
-    enqueuedAt: nowIso,
-    attempt: 0,
-    staged: false,
-    visibleAfter: nowIso,
-    leaseToken: null,
-    leaseExpiresAt: null,
-    dead: false,
-    deadReason: null,
-  };
-  await firebaseServices.firestore.collection(getFirebaseProcessQueueCollectionPath(hostConfig, boardConfigsById, boardId)).doc(id).set(queueDoc);
-  return { id };
+  const queueDir = getLocalFsProcessQueueDir(hostConfig, boardConfigsById, boardId);
+  const queue = createFsQueueStorage(queueDir);
+  const dedupKey = `manual-process-accumulated:${makeQueueMessageId('dedup')}`;
+  const message = queue.enqueueIfAbsent
+    ? queue.enqueueIfAbsent({ boardRef: `manual:${boardId}` }, dedupKey)
+    : queue.enqueue({ boardRef: `manual:${boardId}` });
+  if (!message) throw new Error(`Failed to enqueue localfs process-accumulated wakeup for ${boardId}`);
+  return { id: message.id };
 }
 
 async function readProcessAccumulatedWakeup(boardId, id) {
-  const { hostConfig, firebaseServices, dynamicBoards } = await getHostedRuntimeContext();
+  const { hostConfig, dynamicBoards } = await getHostedRuntimeContext();
   const boardConfigsById = await loadBoardConfigsById(dynamicBoards);
-  if (hostConfig.storageAdapter === 'localfs') {
-    return readLocalFsQueueRecord(getLocalFsProcessQueueDir(hostConfig, boardConfigsById, boardId), id);
-  }
-  const snap = await firebaseServices.firestore.collection(getFirebaseProcessQueueCollectionPath(hostConfig, boardConfigsById, boardId)).doc(id).get();
-  return snap.exists ? snap.data() ?? null : null;
+  return readLocalFsQueueRecord(getLocalFsProcessQueueDir(hostConfig, boardConfigsById, boardId), id);
 }
 
 async function enqueueDummyTaskExecutorRequest(boardId) {
-  const { hostConfig, firebaseServices, dynamicBoards } = await getHostedRuntimeContext();
+  const { hostConfig, dynamicBoards } = await getHostedRuntimeContext();
   const boardConfigsById = await loadBoardConfigsById(dynamicBoards);
   const marker = makeQueueMessageId('tt-dummy');
   const request = {
@@ -652,28 +607,16 @@ async function enqueueDummyTaskExecutorRequest(boardId) {
     },
   };
 
-  if (hostConfig.storageAdapter === 'localfs') {
-    const queue = createFsQueueStorage(getLocalFsTaskExecutorQueueDir(hostConfig, boardConfigsById, boardId));
-    const message = queue.enqueue(request);
-    if (!message) throw new Error(`Failed to enqueue localfs task-executor dummy request for ${boardId}`);
-    return { id: message.id, marker };
-  }
-
-  const queue = createFirestoreQueueStorage(
-    firebaseServices.firestore.collection(getFirebaseTaskExecutorQueueCollectionPath(hostConfig, boardConfigsById, boardId)),
-  );
-  const message = await queue.enqueue(request);
+  const queue = createFsQueueStorage(getLocalFsTaskExecutorQueueDir(hostConfig, boardConfigsById, boardId));
+  const message = queue.enqueue(request);
+  if (!message) throw new Error(`Failed to enqueue localfs task-executor dummy request for ${boardId}`);
   return { id: message.id, marker };
 }
 
 async function readDummyTaskExecutorRequest(boardId, id) {
-  const { hostConfig, firebaseServices, dynamicBoards } = await getHostedRuntimeContext();
+  const { hostConfig, dynamicBoards } = await getHostedRuntimeContext();
   const boardConfigsById = await loadBoardConfigsById(dynamicBoards);
-  if (hostConfig.storageAdapter === 'localfs') {
-    return readLocalFsQueueRecord(getLocalFsTaskExecutorQueueDir(hostConfig, boardConfigsById, boardId), id);
-  }
-  const snap = await firebaseServices.firestore.collection(getFirebaseTaskExecutorQueueCollectionPath(hostConfig, boardConfigsById, boardId)).doc(id).get();
-  return snap.exists ? snap.data() ?? null : null;
+  return readLocalFsQueueRecord(getLocalFsTaskExecutorQueueDir(hostConfig, boardConfigsById, boardId), id);
 }
 
 const portArg = readCliOptionValue(cliArgs, '--port');
@@ -750,7 +693,9 @@ async function main() {
   const formatTestId = (testId) => `${modePrefix}-${String(testId || '').trim().toUpperCase()}`;
   const printedTests = requestedTests
     ? Array.from(requestedTests).map((testId) => formatTestId(testId)).join(',')
-    : DEFAULT_TEST_IDS.map((testId) => formatTestId(testId)).join(',');
+    : DEFAULT_TEST_IDS
+      .filter((testId) => !SKIPPED_TEST_SET.has(String(testId).trim().toUpperCase()))
+      .map((testId) => formatTestId(testId)).join(',');
 
   console.log(`\n=== ${modeLabel} controlface MCP smoke test ===`);
   console.log(`target: ${API_BASE}`);

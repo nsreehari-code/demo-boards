@@ -8,8 +8,5 @@
     "start:queue-runner": "node ./queue-runner/queue-runner.js --config ./hosted-board-runtime.localfs.config.json",
     "start:controlface:localfs": "node ./http-mcp-controlface/controlface-server.js --config ./hosted-board-runtime.localfs.config.json",
     "start:queue-runner:localfs": "node ./queue-runner/queue-runner.js --config ./hosted-board-runtime.localfs.config.json"
-  },
-  "dependencies": {
-    "firebase": "^12.14.0"
   }
 }
