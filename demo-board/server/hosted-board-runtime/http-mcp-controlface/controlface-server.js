@@ -45,7 +45,7 @@ import { WATCHPARTY_AGENT_TOOL_ACTIONS } from '../../../shared/watchparty-agent-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load hosted-board-runtime/.env (if present) for local Firebase/Foundry overrides.
+// Load hosted-board-runtime/.env (if present) for local Foundry overrides.
 // See .env.template for supported variables. Real values stay local; .env is gitignored.
 if (typeof process.loadEnvFile === 'function') {
   try {

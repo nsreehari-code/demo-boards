@@ -45,7 +45,7 @@ const SKIPPED_TEST_SET = new Set(
 function parseMode(rawValue) {
   const normalized = typeof rawValue === 'string' ? rawValue.trim().toLowerCase() : '';
   if (!normalized || normalized === 'localfs' || normalized === 'local') return 'localfs';
-  throw new Error(`Unsupported --mode '${rawValue}'. Only 'localfs' is bundled; re-add the firebase hosted config to enable firebase mode.`);
+  throw new Error(`Unsupported --mode '${rawValue}'. Only 'localfs' is supported.`);
 }
 
 function defaultHostedConfigPathForMode() {
@@ -687,9 +687,8 @@ const trMarketPricesSeedCard = (() => {
 })();
 
 async function main() {
-  const { hostConfig } = await getHostedRuntimeContext();
-  const modePrefix = hostConfig.storageAdapter === 'localfs' ? 'L' : 'F';
-  const modeLabel = hostConfig.storageAdapter === 'localfs' ? 'localfs' : 'firebase';
+  const modePrefix = 'L';
+  const modeLabel = 'localfs';
   const formatTestId = (testId) => `${modePrefix}-${String(testId || '').trim().toUpperCase()}`;
   const printedTests = requestedTests
     ? Array.from(requestedTests).map((testId) => formatTestId(testId)).join(',')
