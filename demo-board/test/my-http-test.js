@@ -42,6 +42,14 @@ const SKIPPED_TEST_SET = new Set(
     .filter(Boolean),
 );
 
+// When `--capture-sse-frames <path>` (or env CAPTURE_SSE_FRAMES) is set, every raw
+// board `/sse` payload received during the run is recorded and written to <path>
+// on success. This produces a deterministic frame fixture for offline golden tests
+// of the platform-free board-state reducer. No effect when the flag is unset.
+const CAPTURE_SSE_FRAMES_PATH =
+  readCliOptionValue(cliArgs, '--capture-sse-frames') || String(process.env.CAPTURE_SSE_FRAMES || '').trim();
+const capturedSseFrames = [];
+
 function parseMode(rawValue) {
   const normalized = typeof rawValue === 'string' ? rawValue.trim().toLowerCase() : '';
   if (!normalized || normalized === 'localfs' || normalized === 'local') return 'localfs';
@@ -939,6 +947,13 @@ async function main() {
   }
 
   function applySseFrame(payload, cardId) {
+    if (CAPTURE_SSE_FRAMES_PATH && payload) {
+      try {
+        capturedSseFrames.push(JSON.parse(JSON.stringify(payload)));
+      } catch {
+        // Skip non-serializable frames (should not occur for `/sse` payloads).
+      }
+    }
     sseState.boardSnapshot = applyHostedSseFrame(sseState.boardSnapshot, payload, () => sseState.latestPayload);
     sseState.boardState = sseState.boardSnapshot?.boardState ?? null;
 
@@ -2365,6 +2380,12 @@ async function main() {
     }
 
     console.log('\n=== Selected tests passed ===\n');
+
+    if (CAPTURE_SSE_FRAMES_PATH) {
+      fs.mkdirSync(path.dirname(CAPTURE_SSE_FRAMES_PATH), { recursive: true });
+      fs.writeFileSync(CAPTURE_SSE_FRAMES_PATH, JSON.stringify(capturedSseFrames, null, 2));
+      console.log(`[capture] wrote ${capturedSseFrames.length} SSE frames -> ${CAPTURE_SSE_FRAMES_PATH}`);
+    }
   } finally {
     if (chatSseClientId) {
       try {
