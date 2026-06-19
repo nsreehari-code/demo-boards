@@ -142,9 +142,14 @@ async function emitRegistrationUpdate(registration, text, onWarn) {
 
   registration.lastText = normalizedText;
   registration.lastHadValue = nextHasValue;
+  const notifications = [buildWatchpartyNotification(registration, normalizedText)];
 
   try {
-    await postNotifications(registration.notifyUrl, [buildWatchpartyNotification(registration, normalizedText)]);
+    if (typeof registration.publishNotifications === 'function') {
+      await registration.publishNotifications(notifications);
+    } else {
+      await postNotifications(registration.notifyUrl, notifications);
+    }
   } catch (error) {
     emitWarning(onWarn, `[watchparty] notify failed for ${registration.filePath}`, error);
   }
@@ -177,10 +182,13 @@ export function createWatchpartyFileRegistry(options = {}) {
   async function registerWatchpartyFile(descriptor = {}) {
     const filePath = typeof descriptor.filePath === 'string' ? descriptor.filePath.trim() : '';
     const notifyUrl = typeof descriptor.notifyUrl === 'string' ? descriptor.notifyUrl.trim() : '';
+    const publishNotifications = typeof descriptor.publishNotifications === 'function'
+      ? descriptor.publishNotifications
+      : null;
     const cardId = typeof descriptor.cardId === 'string' ? descriptor.cardId.trim() : '';
     const channel = typeof descriptor.channel === 'string' ? descriptor.channel.trim() : '';
 
-    if (!filePath || !notifyUrl || !cardId || !channel) {
+    if (!filePath || (!notifyUrl && !publishNotifications) || !cardId || !channel) {
       return noop;
     }
 
@@ -189,6 +197,7 @@ export function createWatchpartyFileRegistry(options = {}) {
       id: randomUUID(),
       filePath,
       notifyUrl,
+      publishNotifications,
       cardId,
       channel,
       replace: descriptor.replace !== false,

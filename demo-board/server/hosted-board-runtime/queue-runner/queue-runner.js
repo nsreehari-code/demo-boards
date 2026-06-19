@@ -385,11 +385,12 @@ async function postMcp(url, tool, args = {}) {
   return payload;
 }
 
-function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, serverUrl, notifyServerUrl, notifyUrl, mcpServerUrl, apiBasePrefix, watchpartyFileRegistry }) {
+function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, serverUrl, notifyServerUrl, notifyUrl, watchpartyPublishNotifications, mcpServerUrl, apiBasePrefix, watchpartyFileRegistry }) {
   const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
     serverUrl,
     notifyServerUrl,
     notifyUrl,
+    watchpartyPublishNotifications,
     mcpServerUrl,
     apiBasePrefix,
     configDir: runtime.configDir,
@@ -445,7 +446,31 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
   });
 }
 
-export async function startQueueRunner() {
+function createEmbeddedNotificationPublisher(boardId, controlfaceBoardRuntimes, processLogger) {
+  return async (notifications) => {
+    if (!Array.isArray(notifications) || notifications.length === 0) {
+      return;
+    }
+    const entry = controlfaceBoardRuntimes?.get(boardId);
+    const runtime = entry?.runtime;
+    if (!runtime || typeof runtime.emitNotification !== 'function') {
+      throw new Error(`embedded emitNotification target missing for board ${boardId}`);
+    }
+    try {
+      await runtime.emitNotification({
+        kind: 'notification-batch',
+        notifications,
+      });
+    } catch (error) {
+      processLogger?.error?.(
+        `[queue-runner] embedded notify failed for ${boardId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  };
+}
+
+export async function startQueueRunner(options = {}) {
   const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadLocalFsHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'queueRunner');
   const queueLaneTuning = buildHostedQueueLaneTuning(hostConfig);
@@ -455,6 +480,9 @@ export async function startQueueRunner() {
   );
   const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
+  const controlfaceBoardRuntimes = options && typeof options === 'object' && options.boardRuntimes instanceof Map
+    ? options.boardRuntimes
+    : null;
   const stopSubscriptions = [];
   const watchedBoards = new Map();
   let keepAliveTimer = null;
@@ -496,6 +524,9 @@ export async function startQueueRunner() {
       serverUrl: callbackServerOrigin,
       notifyServerUrl: callbackServerOrigin,
       notifyUrl: `${apiBaseUrl}/notify-q`,
+      watchpartyPublishNotifications: isEmbeddedHost() && controlfaceBoardRuntimes
+        ? createEmbeddedNotificationPublisher(boardId, controlfaceBoardRuntimes, processLogger)
+        : null,
       mcpServerUrl: hostConfig.mcpServerUrl,
       apiBasePrefix: hostConfig.apiBasePrefix,
       configDir: hostConfig.configDir,
@@ -510,7 +541,15 @@ export async function startQueueRunner() {
       boardId,
       boardConfig,
       adapterServices,
-      {},
+      isEmbeddedHost() && controlfaceBoardRuntimes
+        ? {
+            publishBoardChangeNotifications: createEmbeddedNotificationPublisher(
+              boardId,
+              controlfaceBoardRuntimes,
+              processLogger,
+            ),
+          }
+        : {},
       {
         callbackTransport: isEmbeddedHost()
           ? createInProcessBoardCallbackTransport(boardSourceFetchCallbackKey(boardId))
@@ -555,6 +594,9 @@ export async function startQueueRunner() {
       serverUrl: callbackServerOrigin,
       notifyServerUrl: callbackServerOrigin,
       notifyUrl: `${apiBaseUrl}/notify-q`,
+      watchpartyPublishNotifications: isEmbeddedHost() && controlfaceBoardRuntimes
+        ? createEmbeddedNotificationPublisher(boardId, controlfaceBoardRuntimes, processLogger)
+        : null,
       mcpServerUrl: hostConfig.mcpServerUrl,
       apiBasePrefix: hostConfig.apiBasePrefix,
       watchpartyFileRegistry: adapterServices?.watchpartyFileRegistry,

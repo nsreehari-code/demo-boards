@@ -101,6 +101,9 @@ export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) 
     boardId,
     serverUrl: hostRuntime.serverUrl,
     notifyUrl: resolveNotifyUrl(hostRuntime, apiBasePath),
+    watchpartyPublishNotifications: typeof hostRuntime?.watchpartyPublishNotifications === 'function'
+      ? hostRuntime.watchpartyPublishNotifications
+      : null,
     mcpServerUrl: resolveMcpServerUrl(hostRuntime, apiBasePath),
     agentFaceMcp: resolveAgentFaceMcpPath(hostRuntime),
     apiBasePath,
@@ -232,6 +235,9 @@ export async function executeChatAgentRequest(request, boardId, boardRuntimeNeed
   const assistantName = normalizeChatAssistant(extra.chatAssistant);
   const watchpartyFileRegistry = boardRuntimeNeeds?.chatAgentHandlerNeeds?.watchpartyFileRegistry;
   const notifyUrl = normalizeString(boardRuntimeNeeds?.chatAgentHandlerNeeds?.notifyUrl);
+  const watchpartyPublishNotifications = typeof boardRuntimeNeeds?.chatAgentHandlerNeeds?.watchpartyPublishNotifications === 'function'
+    ? boardRuntimeNeeds.chatAgentHandlerNeeds.watchpartyPublishNotifications
+    : null;
   const assistantTimeoutMs = normalizePositiveInt(extra.chatCopilotTimeoutMs, 2100000) ?? 2100000;
   let processingCleared = false;
   const replyVisibleMonitorState = { stopped: false };
@@ -268,6 +274,7 @@ export async function executeChatAgentRequest(request, boardId, boardRuntimeNeed
       ? await watchpartyFileRegistry.registerWatchpartyFile({
           filePath: path.join(context.watchPartyDir, AGENT_OUTPUT_FILE_STEM),
           notifyUrl,
+          publishNotifications: watchpartyPublishNotifications,
           cardId,
           channel: 'agent-output',
           clearOnRegister: true,

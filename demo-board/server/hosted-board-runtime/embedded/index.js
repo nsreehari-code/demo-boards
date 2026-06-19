@@ -42,7 +42,7 @@ async function main() {
   // The queue-runner registers its own SIGINT/SIGTERM shutdown (drains lanes,
   // then process.exit) which tears down the whole process, including the
   // controlface listener.
-  const queue = await startQueueRunner();
+  const queue = await startQueueRunner({ boardRuntimes: controlface.boardRuntimes });
   logger.info('[embedded] queue-runner lanes started; embedded host ready');
 
   return { controlface, queue };
