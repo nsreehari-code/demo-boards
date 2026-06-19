@@ -4,9 +4,9 @@ import http from 'node:http';
 import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHostedBoardQueueLaneRegistry, createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
-import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
+import { createHttpBoardCallbackTransport, createInProcessBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
 import { loadLocalFsHostConfig, resolveConfigRelativePath } from '../localfs-adapter/load-config.js';
 import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
@@ -18,6 +18,10 @@ import {
   loadTaskExecutorModule,
 } from '../host-shared/worker-modules/task-executor-module.js';
 import { createWakeTrigger, queueCollectionPath, startLaneRunners } from '../host-shared/lanes/runtime.js';
+import {
+  boardSourceFetchCallbackKey,
+  isEmbeddedHost,
+} from '../host-shared/in-process-source-fetch-callback.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -441,7 +445,7 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
   });
 }
 
-async function main() {
+export async function startQueueRunner() {
   const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadLocalFsHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'queueRunner');
   const queueLaneTuning = buildHostedQueueLaneTuning(hostConfig);
@@ -508,7 +512,9 @@ async function main() {
       adapterServices,
       {},
       {
-        callbackTransport: createHttpBoardCallbackTransport(webhooksUrl),
+        callbackTransport: isEmbeddedHost()
+          ? createInProcessBoardCallbackTransport(boardSourceFetchCallbackKey(boardId))
+          : createHttpBoardCallbackTransport(webhooksUrl),
         configDir: hostConfig.configDir,
         taskExecutorRef: createHostedImmediateTaskExecutorRef(boardId, boardRuntimeNeeds.taskExecutorExtra),
         resolveConfigRelativePath,
@@ -641,10 +647,17 @@ async function main() {
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  return { shutdown };
 }
 
-main().catch((error) => {
-  const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
-  processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+const isQueueRunnerEntrypoint = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+if (isQueueRunnerEntrypoint) {
+  startQueueRunner().catch((error) => {
+    const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
+    processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

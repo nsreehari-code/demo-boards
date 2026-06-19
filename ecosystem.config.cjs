@@ -2,8 +2,9 @@
 //
 // Services:
 // - MCP server on 7801
-// - hosted runtime controlface on 7799
-// - hosted runtime queue-runner
+// - hosted runtime embedded host on 7799 (controlface HTTP + queue-runner lanes
+//   in a single process; replaces the former two-process controlface +
+//   queue-runner split)
 //
 // Usage:
 //   npm i -g pm2                 # one-time, global install
@@ -33,30 +34,16 @@ module.exports = {
       time: true,
     },
     {
-      name: 'demo-boards-controlface',
-      script: path.join(RUNTIME_DIR, 'http-mcp-controlface', 'controlface-server.js'),
+      name: 'demo-boards-embedded',
+      script: path.join(RUNTIME_DIR, 'embedded', 'index.js'),
       args: '--config ./hosted-board-runtime.localfs.config.json',
       cwd: RUNTIME_DIR,
       autorestart: true,
       max_restarts: 10,
       restart_delay: 2000,
       kill_timeout: 3000,
-      out_file: path.join(ROOT, 'demo-board', 'logs', 'pm2-controlface-out.log'),
-      error_file: path.join(ROOT, 'demo-board', 'logs', 'pm2-controlface-error.log'),
-      merge_logs: true,
-      time: true,
-    },
-    {
-      name: 'demo-boards-queue-runner',
-      script: path.join(RUNTIME_DIR, 'queue-runner', 'queue-runner.js'),
-      args: '--config ./hosted-board-runtime.localfs.config.json',
-      cwd: RUNTIME_DIR,
-      autorestart: true,
-      max_restarts: 10,
-      restart_delay: 2000,
-      kill_timeout: 3000,
-      out_file: path.join(ROOT, 'demo-board', 'logs', 'pm2-queue-runner-out.log'),
-      error_file: path.join(ROOT, 'demo-board', 'logs', 'pm2-queue-runner-error.log'),
+      out_file: path.join(ROOT, 'demo-board', 'logs', 'pm2-embedded-out.log'),
+      error_file: path.join(ROOT, 'demo-board', 'logs', 'pm2-embedded-error.log'),
       merge_logs: true,
       time: true,
     },

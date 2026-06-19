@@ -5,7 +5,7 @@ import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
 import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
@@ -27,6 +27,10 @@ import {
   createHostedImmediateTaskExecutorRef,
   loadTaskExecutorModule,
 } from '../host-shared/worker-modules/task-executor-module.js';
+import {
+  isEmbeddedHost,
+  registerBoardSourceFetchInProcessCallback,
+} from '../host-shared/in-process-source-fetch-callback.js';
 import {
   getSampleTemplateEnvelope,
   listSampleTemplateEntries,
@@ -581,15 +585,31 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
     logger: processLogger.child(`${boardId}:controlface`),
     notificationTransport,
   });
-  return {
+  let unregisterSourceFetchCallback;
+  const entry = {
     runtime,
     boardRuntimeNeeds,
     async close() {
+      if (typeof unregisterSourceFetchCallback === 'function') {
+        unregisterSourceFetchCallback();
+      }
       if (typeof notificationTransport.closeAll === 'function') {
         await notificationTransport.closeAll();
       }
     },
   };
+  // In the embedded single-process host, the in-process task executor reports
+  // source-fetch completion through the in-process callback transport rather
+  // than a spawnSync HTTP POST (which would self-deadlock). controlface owns
+  // the authoritative board runtime, so it registers the handler and forwards
+  // the webhook to its own runtime exactly as the inbound HTTP POST would.
+  if (isEmbeddedHost()) {
+    unregisterSourceFetchCallback = registerBoardSourceFetchInProcessCallback(
+      boardId,
+      (body) => invokeBoardRuntimeJson(entry, hostConfig, boardId, 'mcp-webhooks', body),
+    );
+  }
+  return entry;
 }
 
 async function buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards) {
@@ -1176,7 +1196,7 @@ async function handleMcpExtrasRoute({ rawBody, res, controlfaceMcp }) {
   sendJson(res, 200, controlfaceMcp.executeExtrasHttp(body));
 }
 
-async function main() {
+export async function startControlface() {
   const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadLocalFsHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'controlface');
   const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
@@ -1413,21 +1433,30 @@ async function main() {
     }
   });
 
-  server.listen(hostConfig.port, hostConfig.host, () => {
-    processLogger.info(`Listening on http://${hostConfig.host}:${hostConfig.port}`);
-    void bootstrapConfiguredBoards({ dynamicBoards, hostConfig, adapterServices, boardRuntimes, processLogger })
-      .then(() => {
-        processLogger.info(`Boards: ${Array.from(boardRuntimes.keys()).join(', ')}`);
-      })
-      .catch((error) => {
-        processLogger.error(`Bootstrap failed: ${error instanceof Error ? error.message : String(error)}`);
-        server.close(() => process.exit(1));
-      });
+  return await new Promise((resolve, reject) => {
+    server.listen(hostConfig.port, hostConfig.host, () => {
+      processLogger.info(`Listening on http://${hostConfig.host}:${hostConfig.port}`);
+      void bootstrapConfiguredBoards({ dynamicBoards, hostConfig, adapterServices, boardRuntimes, processLogger })
+        .then(() => {
+          processLogger.info(`Boards: ${Array.from(boardRuntimes.keys()).join(', ')}`);
+          resolve({ server, boardRuntimes, hostConfig, adapterServices, dynamicBoards, processLogger });
+        })
+        .catch((error) => {
+          processLogger.error(`Bootstrap failed: ${error instanceof Error ? error.message : String(error)}`);
+          server.close(() => process.exit(1));
+          reject(error);
+        });
+    });
   });
 }
 
-main().catch((error) => {
-  const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
-  processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+const isControlfaceEntrypoint = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+if (isControlfaceEntrypoint) {
+  startControlface().catch((error) => {
+    const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
+    processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}
