@@ -41,48 +41,6 @@
         "kind": "fs-path",
         "value": "{{BOARD_ROOT}}/workspaces/{{boardId}}/fetched-sources"
       }
-    },
-    "firestore-default": {
-      "baseRef": {
-        "kind": "firestore-board",
-        "value": "boards/{{boardId}}"
-      },
-      "boardRuntimeStoreRef": {
-        "kind": "firestore",
-        "value": "boards/{{boardId}}/runtime-board"
-      },
-      "cardStoreRef": {
-        "kind": "firestore",
-        "value": "boards/{{boardId}}/cards"
-      },
-      "outputsStoreRef": {
-        "kind": "firestore",
-        "value": "boards/{{boardId}}/runtime-out"
-      },
-      "queueStoreRef": {
-        "kind": "firestore",
-        "value": "boards/{{boardId}}/runtime"
-      },
-      "scratchStoreRef": {
-        "kind": "firestore",
-        "value": "boards/{{boardId}}/scratch"
-      },
-      "archiveStoreRef": {
-        "kind": "firestore-board",
-        "value": "archive-{{boardId}}"
-      },
-      "chatStoreRef": {
-        "kind": "firestore",
-        "value": "boards/{{boardId}}/cards-chats"
-      },
-      "artifactsStoreRef": {
-        "kind": "firestore",
-        "value": "boards/{{boardId}}/files"
-      },
-      "fetchedSourcesStoreRef": {
-        "kind": "firestore",
-        "value": "boards/{{boardId}}/sources"
-      }
     }
   },
   "aiWorkspaceTemplates": {
@@ -147,17 +105,6 @@
         "kind": "fs-path",
         "value": "{{BOARD_ROOT}}/workspaces/_deprecated"
       }
-    },
-    "firebase": {
-      "boards-index": {
-        "kind": "firestore",
-        "value": "boards-index"
-      },
-      "boards-layout": {
-        "kind": "firestore",
-        "value": "boards-layout"
-      },
-      "deprecatedContainer": null
     }
   },
   "sampleTemplateCatalog": {

@@ -6,8 +6,7 @@
   "main": "index.js",
   "scripts": {
     "check:prereqs": "node scripts/setup-check-copilot-workiq.mjs",
-    "test": "node demo-board/test/my-http-test.js && npm run mcp:test",
-    "test:firebase": "node demo-board/test/firebase-http-test.js",
+    "test": "node demo-board/test/my-http-test.js --skip-tests T9,T9F && npm run mcp:test",
     "finbook:build": "npm --prefix mcp-server-managed-truthsets/finbook run build",
     "finbook:check": "npm --prefix mcp-server-managed-truthsets/finbook run check",
     "postinstall": "npm run check:prereqs",

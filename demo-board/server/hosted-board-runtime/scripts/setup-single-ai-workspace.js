@@ -5,10 +5,9 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { deriveBoardRootFromModuleUrl } from '../../shared/board-root.js';
-import { loadFirebaseHostConfig } from '../firebase-adapter/load-config.js';
+import { loadLocalFsHostConfig } from '../localfs-adapter/load-config.js';
 import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
-import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js';
 
 const TAG = 'setup-single-ai-workspace';
 const __filename = fileURLToPath(import.meta.url);
@@ -25,13 +24,11 @@ if (!boardIdArg) {
 }
 const cliArgs = rawArgs.filter((arg) => arg !== boardIdArg);
 
-const hostConfig = loadFirebaseHostConfig(defaultConfigPath, cliArgs, TAG);
+const hostConfig = loadLocalFsHostConfig(defaultConfigPath, cliArgs, TAG);
 const configuredBoardRoot = typeof hostConfig.boardRoot === 'string' && hostConfig.boardRoot.trim()
   ? path.normalize(hostConfig.boardRoot)
   : BOARD_ROOT;
-const adapterServices = hostConfig.storageAdapter === 'localfs'
-  ? await initializeLocalFsServices(hostConfig.localfs)
-  : await initializeFirebaseServices(hostConfig.firebase);
+const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
 const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
 const boardConfig = await dynamicBoards.get(boardIdArg);
 if (!boardConfig) {

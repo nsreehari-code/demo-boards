@@ -7,9 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHostedBoardQueueLaneRegistry, createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
 import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
-import { buildBoardBundle as buildFirebaseBoardBundle } from '../firebase-adapter/build-board-bundle.js';
-import { initializeFirebaseServices } from '../firebase-adapter/firebase-init.js';
-import { loadFirebaseHostConfig, resolveConfigRelativePath } from '../firebase-adapter/load-config.js';
+import { loadLocalFsHostConfig, resolveConfigRelativePath } from '../localfs-adapter/load-config.js';
 import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
 import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
@@ -24,7 +22,7 @@ import { createWakeTrigger, queueCollectionPath, startLaneRunners } from '../hos
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load hosted-board-runtime/.env (if present) for local Firebase/Foundry overrides.
+// Load hosted-board-runtime/.env (if present) for local Foundry overrides.
 // See .env.template for supported variables. Real values stay local; .env is gitignored.
 if (typeof process.loadEnvFile === 'function') {
   try {
@@ -445,23 +443,19 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
 
 async function main() {
   const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
-  const hostConfig = loadFirebaseHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'queueRunner');
+  const hostConfig = loadLocalFsHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'queueRunner');
   const queueLaneTuning = buildHostedQueueLaneTuning(hostConfig);
   const boardRefreshIntervalMs = readPositiveInt(
     process.env.DEMO_BOARDS_QUEUE_BOARD_REFRESH_MS,
     readPositiveInt(hostConfig?.queueBoardRefreshMs, 5000),
   );
-  const adapterServices = hostConfig.storageAdapter === 'localfs'
-    ? await initializeLocalFsServices(hostConfig.localfs)
-    : await initializeFirebaseServices(hostConfig.firebase);
+  const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
   const stopSubscriptions = [];
   const watchedBoards = new Map();
   let keepAliveTimer = null;
   let refreshTimer = null;
-  const buildBoardBundle = hostConfig.storageAdapter === 'localfs'
-    ? buildLocalFsBoardBundle
-    : buildFirebaseBoardBundle;
+  const buildBoardBundle = buildLocalFsBoardBundle;
 
   function stopWatchedBoard(boardId) {
     const watched = watchedBoards.get(boardId);
