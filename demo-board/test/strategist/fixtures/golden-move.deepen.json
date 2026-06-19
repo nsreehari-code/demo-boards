@@ -1,0 +1,17 @@
+{
+  "status": "advancing",
+  "move": "deepen",
+  "rationale": "The seed asks which sign-ins in the last 7 days look anomalous; deepening on a Kusto drilldown of recent sign-ins surfaces the first concrete leads.",
+  "created_cards": [
+    {
+      "card_id": "anomalous-signins-7d",
+      "purpose": "Kusto drilldown of sign-ins in the last 7 days, ranked by anomaly signal.",
+      "parent": "card-journey-seed"
+    }
+  ],
+  "updated_cards": [],
+  "next_candidates": [
+    "pivot on the top anomalous identities",
+    "pivot on source IPs / ASNs once leads exist"
+  ]
+}

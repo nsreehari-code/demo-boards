@@ -44,6 +44,14 @@
       "cardsTemplate": "journey-seed",
       "refsTemplate": "localfs-default",
       "uiTemplate": "journeys"
+    },
+    "trip": {
+      "label": "Trip Planning Journey",
+      "ai": "copilot",
+      "aiWorkspaceTemplate": "default",
+      "cardsTemplate": "journey-seed",
+      "refsTemplate": "localfs-default",
+      "uiTemplate": "journeys"
     }
   }
 }

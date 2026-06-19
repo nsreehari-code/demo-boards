@@ -20,12 +20,19 @@ import {
   parseWatchpartyAgentToolPayloads,
   WATCHPARTY_AGENT_TOOL_ACTIONS,
 } from '../shared/watchparty-agent-tools.js';
+import {
+  ADMIN_CARD_IDS,
+  behavioralChecks,
+  createdCardIds as moveCreatedCardIds,
+  moveFromComputed,
+  validateMove,
+} from './strategist/lib/strategist-harness-lib.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
 const cliArgs = process.argv.slice(2);
-const DEFAULT_TEST_IDS = ['MB1', 'TE', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F', 'TR'];
+const DEFAULT_TEST_IDS = ['MB1', 'TE', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F', 'TR', 'S1'];
 const DEFAULT_TEST_SET = new Set(DEFAULT_TEST_IDS);
 
 function readCliOptionValue(args, optionName) {
@@ -331,6 +338,47 @@ function startSseClient(sseUrl, onPayload) {
       }
     },
   };
+}
+
+// Fetch a single fully-reduced board snapshot via the controlface one-shot SSE
+// endpoint. Returns { boardState, payload } where boardState is produced by the
+// same yaml-flow reducer the live UI uses, and payload is the raw frame (so the
+// caller can read ADMIN-card runtime/computed values that are not part of the
+// reduced cardIds set). Pure backend — imports nothing from the frontend.
+function fetchBoardStateOnce(apiBase, timeoutMs = 15_000) {
+  return new Promise((resolve, reject) => {
+    const sseUrl = `${apiBase}/sse?one-shot`;
+    let buffer = '';
+    let settled = false;
+    let timer = null;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      try { request.destroy(); } catch { /* best-effort */ }
+      fn(value);
+    };
+    const request = http.get(sseUrl, (response) => {
+      response.setEncoding('utf-8');
+      response.on('data', (chunk) => {
+        if (settled) return;
+        buffer = normalizeSseChunkBuffer(buffer, chunk);
+        const parsed = parseSseBlocks(buffer);
+        buffer = parsed.remainder;
+        const payload = parsed.payloads.find((entry) => Array.isArray(entry?.cardDefinitions));
+        if (payload) {
+          const snapshot = applyHostedSseFrame(createEmptyHostedSseSnapshot(), payload, () => payload);
+          finish(resolve, { boardState: snapshot.boardState ?? null, payload });
+        }
+      });
+      response.on('end', () => finish(resolve, { boardState: null, payload: null }));
+    });
+    timer = setTimeout(
+      () => finish(reject, new Error(`one-shot board state timed out after ${timeoutMs}ms for ${sseUrl}`)),
+      timeoutMs,
+    );
+    request.on('error', (error) => finish(reject, error instanceof Error ? error : new Error(String(error))));
+  });
 }
 
 async function probeHealthz(serverUrl) {
@@ -697,6 +745,20 @@ const TR_MARKET_PRICES_CARD_ID = 'market-prices-tr-9201';
 const TR_QUOTES_TOKEN = 'quotes_tr2_9201';
 const PROBE_ENVELOPE = '__probe__echo__probe__';
 const NON_PROBE_RESPONSE_TIMEOUT_MS = 120_000;
+
+// --- S1 strategist live-cycle constants -------------------------------------
+// A throwaway journeys board exercised end-to-end against the real copilot CLI.
+const STRATEGIST_BOARD_ID = 'live-test-journey-backend';
+const STRATEGIST_API_BASE = `${BOARD_SERVER_URL}/api/boards/${encodeURIComponent(STRATEGIST_BOARD_ID)}`;
+const STRATEGIST_CARD_ID = 'journey-strategist';
+const STRATEGIST_SEED_CARD_ID = 'card-journey-seed';
+const STRATEGIST_SEED_TEMPLATE_PATH = path.resolve(
+  __dirname,
+  '../server/hosted-board-runtime/sample-card-templates/journey-seed.json',
+);
+const STRATEGIST_INTENT = 'Investigate why API p99 latency for the payments service regressed ~40% after the last deploy, concentrated in EU traffic';
+const STRATEGIST_POLICY = { maxNewCardsPerCycle: 2, maxDepth: 6, maxBreadth: 4 };
+const STRATEGIST_CYCLE_TIMEOUT_MS = 600_000;
 
 function buildProbeChatText(promptText, assistantStem = '') {
   const normalizedPromptText = String(promptText || '');
@@ -2384,6 +2446,170 @@ async function main() {
       } finally {
         if (trSseConnected) {
           await closeBoardSseConnection({ clearChatEvents: true });
+        }
+      }
+    }
+
+    if (isTestSelected(requestedTests, 'S1')) {
+      console.log(`\n=== ${formatTestId('S1')}: journey-strategist live cycle (advance + validate move contract over controlface APIs) ===`);
+
+      const strategistManageUrl = `${BOARD_SERVER_URL}/manage-boards`;
+      const callStrategistMcp = (tool, args) => httpJson('POST', `${STRATEGIST_API_BASE}/mcp`, { tool, args });
+      const callStrategistAction = (tool, cardId, payload = {}) => httpJson('POST', `${STRATEGIST_API_BASE}/mcp-actions`, {
+        tool,
+        args: { card_id: cardId, payload },
+      });
+      const readStrategistModel = (payload) => selectLiveCardModelFromPayload(payload, STRATEGIST_CARD_ID);
+
+      let strategistRegistered = false;
+      try {
+        // step 1: register a throwaway journeys board. add-board materializes the
+        // admin cards (gandalf-intake, journey-strategist) and the strategist AI
+        // workspace, but does NOT bootstrap the cardsTemplate seed card.
+        console.log(`[${formatTestId('S1')}] step 1/6: registering journeys board '${STRATEGIST_BOARD_ID}'`);
+        const addResult = await httpJson('POST', strategistManageUrl, {
+          subcommand: 'add-board',
+          args: {
+            boardId: STRATEGIST_BOARD_ID,
+            record: {
+              label: 'Live Test Journey (backend)',
+              ai: 'copilot',
+              aiWorkspaceTemplate: 'default',
+              refsTemplate: 'localfs-default',
+              uiTemplate: 'journeys',
+              cardsTemplate: 'journey-seed',
+            },
+          },
+        });
+        assert(
+          addResult.status === 200 && addResult.data?.status === 'success',
+          `S1 add-board failed: HTTP ${addResult.status} ${jsonText(addResult.data)}`,
+        );
+        strategistRegistered = true;
+
+        // step 2: upsert the journey-seed card carrying the test intent.
+        console.log(`[${formatTestId('S1')}] step 2/6: upserting ${STRATEGIST_SEED_CARD_ID} with the test intent`);
+        const seedTemplate = JSON.parse(fs.readFileSync(STRATEGIST_SEED_TEMPLATE_PATH, 'utf-8'));
+        const seedCard = (Array.isArray(seedTemplate?.cards) ? seedTemplate.cards : []).find(
+          (entry) => entry?.id === STRATEGIST_SEED_CARD_ID,
+        );
+        assert(seedCard, `S1 journey-seed template missing ${STRATEGIST_SEED_CARD_ID}`);
+        seedCard.card_data = { ...(seedCard.card_data || {}), intent: STRATEGIST_INTENT };
+        expectMcpSuccess(
+          await callStrategistMcp('manage.upsert-card', {
+            card_id: STRATEGIST_SEED_CARD_ID,
+            candidate_card_content: seedCard,
+          }),
+          'S1 manage.upsert-card journey-seed',
+        );
+
+        // step 3: snapshot the strategist's pre-run attempt count.
+        console.log(`[${formatTestId('S1')}] step 3/6: reading pre-run strategist state`);
+        const before = await fetchBoardStateOnce(STRATEGIST_API_BASE);
+        assert(before?.payload, 'S1 could not read board state before the run');
+        const prevAttempt = Number(readStrategistModel(before.payload).runtime_state.runtime?.attempt_count ?? 0);
+
+        // step 4: wake the strategist.
+        console.log(`[${formatTestId('S1')}] step 4/6: waking ${STRATEGIST_CARD_ID}`);
+        const wakeResult = await callStrategistAction('retrigger-card', STRATEGIST_CARD_ID);
+        assert(
+          wakeResult.status === 200 && wakeResult.data?.status === 'success',
+          `S1 retrigger-card failed: HTTP ${wakeResult.status} ${jsonText(wakeResult.data)}`,
+        );
+
+        // step 5: poll one-shot board reads until the strategist finishes a fresh
+        // cycle. The strategist is an ADMIN card, so its work is NOT reflected in
+        // the board summary.running count — watch its own status lifecycle
+        // (idle -> running -> completed) AND a bumped attempt_count.
+        console.log(`[${formatTestId('S1')}] step 5/6: waiting for ${STRATEGIST_CARD_ID} to complete a fresh cycle (real copilot CLI, may take minutes)`);
+        const deadline = Date.now() + STRATEGIST_CYCLE_TIMEOUT_MS;
+        let sawBusy = false;
+        let after = null;
+        while (Date.now() < deadline) {
+          await sleep(5_000);
+          let snapshot;
+          try {
+            snapshot = await fetchBoardStateOnce(STRATEGIST_API_BASE);
+          } catch {
+            continue;
+          }
+          if (!snapshot?.payload) continue;
+          const rt = readStrategistModel(snapshot.payload).runtime_state;
+          const status = String(rt.task_status || '');
+          if (status === 'running' || status === 'in-progress') sawBusy = true;
+          const attempt = Number(rt.runtime?.attempt_count ?? 0);
+          if (sawBusy && status === 'completed' && attempt > prevAttempt) {
+            after = snapshot;
+            break;
+          }
+        }
+        assert(after, `S1 strategist did not complete a fresh cycle within ${STRATEGIST_CYCLE_TIMEOUT_MS}ms`);
+
+        // step 6: validate the emitted move (contract + behavioral) over reduced state.
+        console.log(`[${formatTestId('S1')}] step 6/6: validating the strategist move`);
+        // Settle window: the move is published to computed_values slightly ahead
+        // of the board materializing the move's last created card (read-after-write
+        // lag), so wait until every claimed created/updated id is present.
+        let move = moveFromComputed(readStrategistModel(after.payload).computed_values || {});
+        const claimedIds = [
+          ...moveCreatedCardIds(move),
+          ...(Array.isArray(move.updated_cards) ? move.updated_cards : []).map((u) => u?.card_id).filter(Boolean),
+        ];
+        if (claimedIds.length > 0) {
+          const settleDeadline = Date.now() + 30_000;
+          while (Date.now() < settleDeadline) {
+            const ids = new Set(after.boardState?.cardIds ?? []);
+            if (claimedIds.every((id) => ids.has(id))) break;
+            await sleep(3_000);
+            try {
+              after = (await fetchBoardStateOnce(STRATEGIST_API_BASE)) ?? after;
+            } catch {
+              // keep the last good snapshot
+            }
+          }
+          move = moveFromComputed(readStrategistModel(after.payload).computed_values || {});
+        }
+
+        const journeyCardIds = (after.boardState?.cardIds ?? []).filter((id) => !ADMIN_CARD_IDS.has(id));
+        // Cards created by THIS move must not already be on the board for the
+        // collision check; exclude them when validating against prior state.
+        const createdThisMove = new Set(moveCreatedCardIds(move));
+        const contractBoardState = {
+          cardIds: journeyCardIds.filter((id) => !createdThisMove.has(id)),
+          policy: STRATEGIST_POLICY,
+        };
+        const contract = validateMove(move, contractBoardState);
+        const summary = summarizeBoardState(after.boardState);
+        const behavior = behavioralChecks(move, journeyCardIds, summary);
+
+        console.log(
+          `[${formatTestId('S1')}] move: status=${move.status ?? '(n/a)'} move=${move.move ?? '(n/a)'} `
+          + `created=${(move.created_cards || []).length} updated=${(move.updated_cards || []).length}`,
+        );
+        for (const warning of contract.warnings) {
+          console.log(`[${formatTestId('S1')}] warning (contract): ${warning}`);
+        }
+        assert(contract.ok, `S1 move violates the strategist contract: ${jsonText(contract.errors)}`);
+        for (const [label, ok] of behavior.checks) {
+          assert(ok, `S1 behavioral check failed: ${label}`);
+          console.log(`[${formatTestId('S1')}] behavior PASS: ${label}`);
+        }
+        console.log(`[${formatTestId('S1')}] journey-strategist live cycle verified (${journeyCardIds.length} journey card(s) on board)`);
+      } finally {
+        if (strategistRegistered) {
+          try {
+            const deprecateResult = await httpJson('POST', strategistManageUrl, {
+              subcommand: 'deprecate-board',
+              args: { boardId: STRATEGIST_BOARD_ID },
+            });
+            if (deprecateResult.status === 200 && deprecateResult.data?.status === 'success') {
+              console.log(`[cleanup] deprecated strategist board ${STRATEGIST_BOARD_ID}`);
+            } else {
+              console.error(`[cleanup] deprecate strategist board failed: ${jsonText(deprecateResult.data)}`);
+            }
+          } catch (error) {
+            console.error(`[cleanup] deprecate strategist board errored: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
       }
     }

@@ -1,0 +1,10 @@
+{
+  "_comment": "Layer B fixture: the board shape the strategist sees on the investigate board at seed time. cardIds excludes the strategist's own card by convention (the prompt says so), but including it is harmless for collision checks.",
+  "boardId": "investigate",
+  "cardIds": ["card-journey-seed"],
+  "policy": {
+    "maxNewCardsPerCycle": 2,
+    "maxDepth": 6,
+    "maxBreadth": 4
+  }
+}
