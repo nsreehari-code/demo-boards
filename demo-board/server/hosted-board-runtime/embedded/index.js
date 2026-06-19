@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * Embedded single-process host.
+ * Single-process runtime core.
  *
  * Runs the controlface HTTP server and the queue-runner lanes in ONE process,
- * replacing the two-process (controlface + queue-runner) PM2 split. The two
+ * replacing the two-process (controlface + queue-runner) PM2 split. Hosted
+ * mode and embedded mode now share this same runtime core; hosted mode only
+ * adds the external controlface HTTP surface. The two
  * halves still coordinate over the existing 127.0.0.1 loopback channels
  * (notify-q / mcp-webhooks / sse-q) — this first increment is a faithful
  * collapse with no behavioural change. A later increment swaps the loopback

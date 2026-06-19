@@ -2,9 +2,8 @@
 //
 // Services:
 // - MCP server on 7801
-// - hosted runtime embedded host on 7799 (controlface HTTP + queue-runner lanes
-//   in a single process; replaces the former two-process controlface +
-//   queue-runner split)
+// - single-process runtime core on 7799 (hosted mode layers controlface HTTP on
+//   top of the same runtime core used by embedded mode)
 //
 // Usage:
 //   npm i -g pm2                 # one-time, global install
@@ -34,7 +33,7 @@ module.exports = {
       time: true,
     },
     {
-      name: 'demo-boards-embedded',
+      name: 'demo-boards-runtime',
       script: path.join(RUNTIME_DIR, 'embedded', 'index.js'),
       args: '--config ./hosted-board-runtime.localfs.config.json',
       cwd: RUNTIME_DIR,
@@ -42,8 +41,8 @@ module.exports = {
       max_restarts: 10,
       restart_delay: 2000,
       kill_timeout: 3000,
-      out_file: path.join(ROOT, 'demo-board', 'logs', 'pm2-embedded-out.log'),
-      error_file: path.join(ROOT, 'demo-board', 'logs', 'pm2-embedded-error.log'),
+      out_file: path.join(ROOT, 'demo-board', 'logs', 'pm2-runtime-out.log'),
+      error_file: path.join(ROOT, 'demo-board', 'logs', 'pm2-runtime-error.log'),
       merge_logs: true,
       time: true,
     },
