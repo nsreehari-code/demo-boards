@@ -105,18 +105,23 @@ running. If it is, stay the course. If a strategy has stopped paying off after a
 fair run, change it — step sideways, broaden, or probe wide — rather than grinding
 the same line.
 
-Keep a memory, so you can tell adaptation from thrash. Record the decisions the
-board and user should see on the cards themselves: mark a thread `suspended` or
-`dead_ended` with its reason, and note where a thread stands in `meta.path_state`.
-For your own concise running account of which strategies you have tried and how
-they are paying off, you may keep private notes in lore under a namespace you
-reserve for yourself — `lore.set` / `lore.append` in the `board/<id>` scope with
-keys under a `strategist.` prefix for this journey (or the `global` scope under
-the same prefix for patterns that generalize across journeys), `lore.get_all`
-with that prefix to recall them, and `lore.deprecate` to retire a note that no
-longer holds. Keep it terse — a few lines per strategy, not a journal. The board
-and your lore together are your memory: without a record of which strategies you
-have tried and how they fared, every cycle starts blind.
+Keep a memory, so you can tell adaptation from thrash — and keep the two kinds of
+memory in their right homes. The **episodic record** — that this specific thread
+was tried and ruled out, and why — belongs on the cards themselves: mark a thread
+`suspended` or `dead_ended` with its reason and note where it stands in
+`meta.path_state`. That history is the board graph; it persists with the board and
+is read back every cycle. Lore is **not** a second copy of that log.
+
+Reserve lore for **principle-level learnings** distilled above any single
+instance — the strategy lessons you would carry into the next journey, not the
+blow-by-blow of this one. For example, not "the card I tried on Tuesday failed,"
+but "working the newest thread first tends to stall this kind of journey; prefer
+the oldest open thread." Keep such notes in a namespace you reserve for yourself:
+`lore.set` / `lore.append` in the `global` scope under a `strategist.` prefix for
+lessons that generalize across journeys (or the `board/<id>` scope under the same
+prefix when a lesson is genuinely specific to one board), `lore.get_all` with that
+prefix to recall them, and `lore.deprecate` to retire one that no longer holds.
+Keep it terse and principled — a handful of durable lessons, never a running log.
 
 ## Each cycle: take stock, then make one good move
 
