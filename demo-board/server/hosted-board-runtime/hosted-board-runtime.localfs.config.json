@@ -52,6 +52,14 @@
       "cardsTemplate": "journey-seed",
       "refsTemplate": "localfs-default",
       "uiTemplate": "journeys"
+    },
+    "profile": {
+      "label": "Profile Investigation Journey",
+      "ai": "copilot",
+      "aiWorkspaceTemplate": "default",
+      "cardsTemplate": "journey-seed",
+      "refsTemplate": "localfs-default",
+      "uiTemplate": "journeys"
     }
   }
 }

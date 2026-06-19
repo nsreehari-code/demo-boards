@@ -450,7 +450,7 @@
           "card_data": {
             "steering": "",
             "scope": "",
-            "interaction_policy": "Proceed autonomously on clear pivots; surface a decision card before opening a major new line of inquiry.",
+            "interaction_policy": "Follow this board's journey domain for how autonomous to be. Where the domain says the brief is sufficient and to proceed, proceed and keep the journey advancing; surface a decision or clarification card only when the domain calls for the user's judgement or for an input it cannot supply itself.",
             "max_new_cards_per_cycle": 2,
             "max_depth": 6,
             "max_breadth": 4
