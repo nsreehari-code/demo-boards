@@ -3,10 +3,10 @@
 /**
  * Single-process runtime core.
  *
- * Runs the controlface HTTP server and the queue-runner lanes in ONE process,
- * replacing the two-process (controlface + queue-runner) PM2 split. Hosted
- * mode and embedded mode now share this same runtime core; hosted mode only
- * adds the external controlface HTTP surface. The two
+ * Runs the board HTTP runtime surface and the queue-runner lanes in ONE
+ * process, replacing the two-process HTTP-surface + queue-runner PM2 split.
+ * Hosted mode and embedded mode now share this same runtime core; hosted mode
+ * only adds the external controlface HTTP surface. The two
  * halves still coordinate over the existing 127.0.0.1 loopback channels
  * (notify-q / mcp-webhooks / sse-q) — this first increment is a faithful
  * collapse with no behavioural change. A later increment swaps the loopback
@@ -33,8 +33,8 @@ import { EMBEDDED_ENV_FLAG } from '../host-shared/in-process-source-fetch-callba
 process.env[EMBEDDED_ENV_FLAG] = '1';
 
 async function main() {
-  const logger = createLogger('embedded', { filePath: HOSTED_SERVER_LOG_PATH });
-  logger.info('[embedded] starting controlface + queue-runner in a single process');
+  const logger = createLogger('runtime-core', { filePath: HOSTED_SERVER_LOG_PATH });
+  logger.info('[runtime-core] starting board HTTP runtime + queue-runner in a single process');
   const boardSyncState = { reconcileBoards: null };
   const readinessState = { ready: false };
 
@@ -48,7 +48,7 @@ async function main() {
       }
     },
   });
-  logger.info('[embedded] controlface ready; starting queue-runner lanes');
+  logger.info('[runtime-core] board HTTP runtime ready; starting queue-runner lanes');
 
   // The queue-runner registers its own SIGINT/SIGTERM shutdown (drains lanes,
   // then process.exit) which tears down the whole process, including the
@@ -56,13 +56,13 @@ async function main() {
   const queue = await startQueueRunner({ boardRuntimes: controlface.boardRuntimes });
   boardSyncState.reconcileBoards = queue.reconcileBoards;
   readinessState.ready = true;
-  logger.info('[embedded] queue-runner lanes started; embedded host ready');
+  logger.info('[runtime-core] queue-runner lanes started; runtime core ready');
 
   return { controlface, queue };
 }
 
 main().catch((error) => {
-  const logger = createLogger('embedded', { filePath: HOSTED_SERVER_LOG_PATH });
-  logger.error(`[embedded] failed to start: ${error instanceof Error ? error.message : String(error)}`);
+  const logger = createLogger('runtime-core', { filePath: HOSTED_SERVER_LOG_PATH });
+  logger.error(`[runtime-core] failed to start: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });

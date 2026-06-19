@@ -42,14 +42,17 @@ function listPm2ProcessNames() {
 
 function main() {
   const names = listPm2ProcessNames();
-  if (!names.has(LEGACY_APP_NAME)) {
+  const staleAppNames = [LEGACY_APP_NAME, CURRENT_APP_NAME].filter((name) => names.has(name));
+  if (staleAppNames.length === 0) {
     return;
   }
 
-  process.stdout.write(`[pm2:runtime:migrate] deleting legacy app '${LEGACY_APP_NAME}' before using '${CURRENT_APP_NAME}'\n`);
-  const result = runPm2(['delete', LEGACY_APP_NAME], { inherit: true });
-  if (result.status !== 0) {
-    process.exit(result.status || 1);
+  for (const appName of staleAppNames) {
+    process.stdout.write(`[pm2:runtime:migrate] deleting app '${appName}' before using '${CURRENT_APP_NAME}'\n`);
+    const result = runPm2(['delete', appName], { inherit: true });
+    if (result.status !== 0) {
+      process.exit(result.status || 1);
+    }
   }
 }
 

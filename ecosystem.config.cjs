@@ -34,7 +34,7 @@ module.exports = {
     },
     {
       name: 'demo-boards-runtime',
-      script: path.join(RUNTIME_DIR, 'embedded', 'index.js'),
+      script: path.join(RUNTIME_DIR, 'runtime-core', 'index.js'),
       args: '--config ./hosted-board-runtime.localfs.config.json',
       cwd: RUNTIME_DIR,
       autorestart: true,

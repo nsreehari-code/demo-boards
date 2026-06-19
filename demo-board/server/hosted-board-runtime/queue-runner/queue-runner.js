@@ -449,15 +449,15 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
   });
 }
 
-function createEmbeddedNotificationPublisher(boardId, controlfaceBoardRuntimes, processLogger) {
+function createInProcessNotificationPublisher(boardId, runtimeBoardRegistry, processLogger) {
   return async (notifications) => {
     if (!Array.isArray(notifications) || notifications.length === 0) {
       return;
     }
-    const entry = controlfaceBoardRuntimes?.get(boardId);
+    const entry = runtimeBoardRegistry?.get(boardId);
     const runtime = entry?.runtime;
     if (!runtime || typeof runtime.emitNotification !== 'function') {
-      throw new Error(`embedded emitNotification target missing for board ${boardId}`);
+      throw new Error(`in-process emitNotification target missing for board ${boardId}`);
     }
     try {
       await runtime.emitNotification({
@@ -466,18 +466,18 @@ function createEmbeddedNotificationPublisher(boardId, controlfaceBoardRuntimes, 
       });
     } catch (error) {
       processLogger?.error?.(
-        `[queue-runner] embedded notify failed for ${boardId}: ${error instanceof Error ? error.message : String(error)}`,
+        `[queue-runner] in-process notify failed for ${boardId}: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
   };
 }
 
-function createEmbeddedBoardToolInvoker(boardId, controlfaceBoardRuntimes) {
+function createInProcessBoardToolInvoker(boardId, runtimeBoardRegistry) {
   return async (tool, args = {}, options = {}) => {
-    const entry = controlfaceBoardRuntimes?.get(boardId);
+    const entry = runtimeBoardRegistry?.get(boardId);
     if (!entry) {
-      throw new Error(`embedded board runtime missing for board ${boardId}`);
+      throw new Error(`in-process board runtime missing for board ${boardId}`);
     }
     return entry.runtime.handleRuntimeApi
       ? (await import('../http-mcp-controlface/controlface-mcp-surface.js')).invokeBoardRuntimeJson(
@@ -501,7 +501,7 @@ export async function startQueueRunner(options = {}) {
   );
   const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
-  const controlfaceBoardRuntimes = options && typeof options === 'object' && options.boardRuntimes instanceof Map
+  const runtimeBoardRegistry = options && typeof options === 'object' && options.boardRuntimes instanceof Map
     ? options.boardRuntimes
     : null;
   const stopSubscriptions = [];
@@ -543,13 +543,13 @@ export async function startQueueRunner(options = {}) {
     // workspace and on boardId to scope liveboards.* tool calls to this board.
     const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
       serverUrl: callbackServerOrigin,
-      boardToolInvoker: isEmbeddedHost() && controlfaceBoardRuntimes
-        ? createEmbeddedBoardToolInvoker(boardId, controlfaceBoardRuntimes)
+      boardToolInvoker: isEmbeddedHost() && runtimeBoardRegistry
+        ? createInProcessBoardToolInvoker(boardId, runtimeBoardRegistry)
         : null,
       notifyServerUrl: callbackServerOrigin,
       notifyUrl: `${apiBaseUrl}/notify-q`,
-      watchpartyPublishNotifications: isEmbeddedHost() && controlfaceBoardRuntimes
-        ? createEmbeddedNotificationPublisher(boardId, controlfaceBoardRuntimes, processLogger)
+      watchpartyPublishNotifications: isEmbeddedHost() && runtimeBoardRegistry
+        ? createInProcessNotificationPublisher(boardId, runtimeBoardRegistry, processLogger)
         : null,
       mcpServerUrl: hostConfig.mcpServerUrl,
       apiBasePrefix: hostConfig.apiBasePrefix,
@@ -565,11 +565,11 @@ export async function startQueueRunner(options = {}) {
       boardId,
       boardConfig,
       adapterServices,
-      isEmbeddedHost() && controlfaceBoardRuntimes
+      isEmbeddedHost() && runtimeBoardRegistry
         ? {
-            publishBoardChangeNotifications: createEmbeddedNotificationPublisher(
+            publishBoardChangeNotifications: createInProcessNotificationPublisher(
               boardId,
-              controlfaceBoardRuntimes,
+              runtimeBoardRegistry,
               processLogger,
             ),
           }
@@ -606,8 +606,8 @@ export async function startQueueRunner(options = {}) {
       bundle,
       runtime: {
         ...runtime,
-        boardToolInvoker: isEmbeddedHost() && controlfaceBoardRuntimes
-          ? createEmbeddedBoardToolInvoker(boardId, controlfaceBoardRuntimes)
+        boardToolInvoker: isEmbeddedHost() && runtimeBoardRegistry
+          ? createInProcessBoardToolInvoker(boardId, runtimeBoardRegistry)
           : null,
         configDir: hostConfig.configDir,
         foundryAgents: hostConfig.foundryAgents,
@@ -621,8 +621,8 @@ export async function startQueueRunner(options = {}) {
       serverUrl: callbackServerOrigin,
       notifyServerUrl: callbackServerOrigin,
       notifyUrl: `${apiBaseUrl}/notify-q`,
-      watchpartyPublishNotifications: isEmbeddedHost() && controlfaceBoardRuntimes
-        ? createEmbeddedNotificationPublisher(boardId, controlfaceBoardRuntimes, processLogger)
+      watchpartyPublishNotifications: isEmbeddedHost() && runtimeBoardRegistry
+        ? createInProcessNotificationPublisher(boardId, runtimeBoardRegistry, processLogger)
         : null,
       mcpServerUrl: hostConfig.mcpServerUrl,
       apiBasePrefix: hostConfig.apiBasePrefix,

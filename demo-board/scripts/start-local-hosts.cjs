@@ -10,15 +10,16 @@ const hostedServerLogPath = path.join(boardDir, 'logs', 'hosted-server.log');
 const prepareHostsEntry = path.join(runtimeDir, 'scripts', 'prepare-local-hosts.js');
 const controlfaceEntry = path.join(runtimeDir, 'http-mcp-controlface', 'controlface-server.js');
 const queueRunnerEntry = path.join(runtimeDir, 'queue-runner', 'queue-runner.js');
-const embeddedEntry = path.join(runtimeDir, 'embedded', 'index.js');
+const runtimeCoreEntry = path.join(runtimeDir, 'runtime-core', 'index.js');
 const localfsConfigArgv = ['--config', './hosted-board-runtime.localfs.config.json'];
 
-// Opt-in single-process host: runs controlface + queue-runner in one process.
-// Default (unset) keeps the two-process launch unchanged.
+// Opt-in single-process runtime core: runs the HTTP runtime surface plus the
+// queue-runner in one process. Default (unset) keeps the legacy two-process
+// launch unchanged.
 const useEmbedded = process.argv.includes('--embedded') || process.env.DEMO_BOARDS_EMBEDDED === '1';
 
 const requiredEntries = useEmbedded
-  ? [prepareHostsEntry, embeddedEntry]
+  ? [prepareHostsEntry, runtimeCoreEntry]
   : [prepareHostsEntry, controlfaceEntry, queueRunnerEntry];
 
 for (const entryPath of requiredEntries) {
@@ -79,8 +80,8 @@ function prepareHosts() {
       process.exit(code ?? 1);
     }
     if (useEmbedded) {
-      const embedded = startRuntime(embeddedEntry, 'embedded');
-      runtimeChildren = [embedded];
+      const runtimeCore = startRuntime(runtimeCoreEntry, 'runtime-core');
+      runtimeChildren = [runtimeCore];
     } else {
       const controlface = startRuntime(controlfaceEntry, 'controlface');
       const queueRunner = startRuntime(queueRunnerEntry, 'queue-runner');
