@@ -537,8 +537,16 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
   const buildBoardBundle = buildLocalFsBoardBundle;
   const boardId = boardConfig.id;
   const callbackBaseUrl = `http://${hostConfig.host}:${hostConfig.port}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/mcp-webhooks`;
+  let entry;
   const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
     serverUrl: `http://${hostConfig.host}:${hostConfig.port}`,
+    boardToolInvoker: async (tool, args = {}, options = {}) => invokeBoardRuntimeJson(
+      entry,
+      hostConfig,
+      boardId,
+      options?.controlplane ? 'mcp-controlplane' : 'mcp',
+      { tool, args },
+    ),
     mcpServerUrl: hostConfig.mcpServerUrl,
     apiBasePrefix: hostConfig.apiBasePrefix,
     foundryAgents: hostConfig.foundryAgents,
@@ -586,7 +594,7 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
     notificationTransport,
   });
   let unregisterSourceFetchCallback;
-  const entry = {
+  entry = {
     runtime,
     boardRuntimeNeeds,
     async close() {
@@ -899,6 +907,7 @@ async function handleManageBoardsRoute({
   adapterServices,
   boardRuntimes,
   processLogger,
+  onBoardsChanged,
 }) {
   const rawBody = await readRawRequestBody(req);
   const body = parseJsonObjectOrEmpty(rawBody);
@@ -951,6 +960,9 @@ async function handleManageBoardsRoute({
     const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
     await upsertBoardRuntimeEntry(boardRuntimes, id, runtimePair, processLogger);
     await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
+    if (typeof onBoardsChanged === 'function') {
+      await onBoardsChanged();
+    }
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;
   }
@@ -1032,6 +1044,9 @@ async function handleManageBoardsRoute({
     const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
     await upsertBoardRuntimeEntry(boardRuntimes, id, runtimePair, processLogger);
     await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
+    if (typeof onBoardsChanged === 'function') {
+      await onBoardsChanged();
+    }
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;
   }
@@ -1093,6 +1108,9 @@ async function handleManageBoardsRoute({
         archiveWorkspaceDir: archived.archiveWorkspaceDir,
       },
     });
+      if (typeof onBoardsChanged === 'function') {
+        await onBoardsChanged();
+      }
     return;
   }
 
@@ -1196,7 +1214,7 @@ async function handleMcpExtrasRoute({ rawBody, res, controlfaceMcp }) {
   sendJson(res, 200, controlfaceMcp.executeExtrasHttp(body));
 }
 
-export async function startControlface() {
+export async function startControlface(options = {}) {
   const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadLocalFsHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'controlface');
   const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
@@ -1283,8 +1301,10 @@ export async function startControlface() {
       requestLogger.info(formatControlfacePickupMessage(req, parsedUrl, requestDetails));
       res.once('finish', logCompletionOnce);
       res.once('close', logCompletionOnce);
-      sendJson(res, 200, {
-        ok: true,
+      const ready = typeof options?.isReady === 'function' ? options.isReady() !== false : true;
+      sendJson(res, ready ? 200 : 503, {
+        ok: ready,
+        ready,
         boards: Array.from(boardRuntimes.keys()),
       });
       return;
@@ -1306,6 +1326,7 @@ export async function startControlface() {
           adapterServices,
           boardRuntimes,
           processLogger,
+          onBoardsChanged: typeof options?.onBoardsChanged === 'function' ? options.onBoardsChanged : null,
         });
       } catch (err) {
         const statusCode = Number.isInteger(err?.statusCode) && err.statusCode >= 400 ? err.statusCode : 500;

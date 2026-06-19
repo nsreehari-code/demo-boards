@@ -7,6 +7,7 @@ import {
   buildContext,
   deriveLogIdFromCardId,
   isAssistantMessageInTurn,
+  invokeBoardTool,
   resolveBoardWatchpartyCardDir,
 } from '../../../chat-flow/shared.js';
 import { deriveBoardRootFromModuleUrl } from '../../../shared/board-root.js';
@@ -101,6 +102,9 @@ export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) 
     boardId,
     serverUrl: hostRuntime.serverUrl,
     notifyUrl: resolveNotifyUrl(hostRuntime, apiBasePath),
+    boardToolInvoker: typeof hostRuntime?.boardToolInvoker === 'function'
+      ? hostRuntime.boardToolInvoker
+      : null,
     watchpartyPublishNotifications: typeof hostRuntime?.watchpartyPublishNotifications === 'function'
       ? hostRuntime.watchpartyPublishNotifications
       : null,
@@ -157,16 +161,13 @@ function deriveTurnId(requestArgs) {
   return directTurnId || `hosted-turn-${randomUUID()}`;
 }
 
-async function setChatProcessingState(serverUrl, boardId, cardId, state) {
+async function setChatProcessingState(context, boardId, cardId, state) {
   const tool = state === 'started' ? 'setstate.chat-processing-started' : 'setstate.chat-processing-done';
-  const url = `${serverUrl.replace(/\/$/, '')}/api/boards/${encodeURIComponent(boardId)}/mcp-controlplane`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tool, args: { board_id: boardId, card_id: cardId } }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload?.status === 'fail' || payload?.status === 'error') {
+  const payload = await invokeBoardTool(context, tool, {
+    board_id: boardId,
+    card_id: cardId,
+  }, { controlplane: true });
+  if (payload?.status === 'fail' || payload?.status === 'error') {
     const message = typeof payload?.error === 'string' && payload.error.trim()
       ? payload.error.trim()
       : `Failed to set chat processing state to ${state}`;
@@ -174,7 +175,7 @@ async function setChatProcessingState(serverUrl, boardId, cardId, state) {
   }
 }
 
-async function waitForAssistantReplyVisible(serverUrl, boardId, cardId, turnId, options = {}) {
+async function waitForAssistantReplyVisible(context, boardId, cardId, turnId, options = {}) {
   const {
     stopSignal = null,
     pollMs = 500,
@@ -187,7 +188,7 @@ async function waitForAssistantReplyVisible(serverUrl, boardId, cardId, turnId, 
       return false;
     }
     try {
-      if (await isAssistantMessageInTurn({ serverUrl, boardId, cardId, turnId })) {
+      if (await isAssistantMessageInTurn({ ...context, boardId, cardId, turnId })) {
         return true;
       }
     } catch {
@@ -241,17 +242,23 @@ export async function executeChatAgentRequest(request, boardId, boardRuntimeNeed
   const assistantTimeoutMs = normalizePositiveInt(extra.chatCopilotTimeoutMs, 2100000) ?? 2100000;
   let processingCleared = false;
   const replyVisibleMonitorState = { stopped: false };
+  const boardContext = {
+    ...boardRuntimeNeeds.chatAgentHandlerNeeds,
+    boardId,
+    cardId,
+    turnId,
+  };
 
   async function clearChatProcessing() {
     if (processingCleared) {
       return;
     }
-    await setChatProcessingState(serverUrl, boardId, cardId, 'done');
+    await setChatProcessingState(boardContext, boardId, cardId, 'done');
     processingCleared = true;
   }
 
-  await setChatProcessingState(serverUrl, boardId, cardId, 'started');
-  const replyVisibleMonitorPromise = waitForAssistantReplyVisible(serverUrl, boardId, cardId, turnId, {
+  await setChatProcessingState(boardContext, boardId, cardId, 'started');
+  const replyVisibleMonitorPromise = waitForAssistantReplyVisible(boardContext, boardId, cardId, turnId, {
     stopSignal: replyVisibleMonitorState,
     timeoutMs: assistantTimeoutMs,
   }).then(async (replyVisible) => {

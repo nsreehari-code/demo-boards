@@ -33,16 +33,27 @@ process.env[EMBEDDED_ENV_FLAG] = '1';
 async function main() {
   const logger = createLogger('embedded', { filePath: HOSTED_SERVER_LOG_PATH });
   logger.info('[embedded] starting controlface + queue-runner in a single process');
+  const boardSyncState = { reconcileBoards: null };
+  const readinessState = { ready: false };
 
   // Start controlface first and wait until it is listening (and sample boards
   // are bootstrapped) so the queue-runner's loopback clients can connect.
-  const controlface = await startControlface();
+  const controlface = await startControlface({
+    isReady: () => readinessState.ready,
+    onBoardsChanged: async () => {
+      if (typeof boardSyncState.reconcileBoards === 'function') {
+        await boardSyncState.reconcileBoards();
+      }
+    },
+  });
   logger.info('[embedded] controlface ready; starting queue-runner lanes');
 
   // The queue-runner registers its own SIGINT/SIGTERM shutdown (drains lanes,
   // then process.exit) which tears down the whole process, including the
   // controlface listener.
   const queue = await startQueueRunner({ boardRuntimes: controlface.boardRuntimes });
+  boardSyncState.reconcileBoards = queue.reconcileBoards;
+  readinessState.ready = true;
   logger.info('[embedded] queue-runner lanes started; embedded host ready');
 
   return { controlface, queue };

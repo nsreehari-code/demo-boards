@@ -388,6 +388,9 @@ async function postMcp(url, tool, args = {}) {
 function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, serverUrl, notifyServerUrl, notifyUrl, watchpartyPublishNotifications, mcpServerUrl, apiBasePrefix, watchpartyFileRegistry }) {
   const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
     serverUrl,
+    boardToolInvoker: typeof runtime?.boardToolInvoker === 'function'
+      ? runtime.boardToolInvoker
+      : null,
     notifyServerUrl,
     notifyUrl,
     watchpartyPublishNotifications,
@@ -470,6 +473,24 @@ function createEmbeddedNotificationPublisher(boardId, controlfaceBoardRuntimes, 
   };
 }
 
+function createEmbeddedBoardToolInvoker(boardId, controlfaceBoardRuntimes) {
+  return async (tool, args = {}, options = {}) => {
+    const entry = controlfaceBoardRuntimes?.get(boardId);
+    if (!entry) {
+      throw new Error(`embedded board runtime missing for board ${boardId}`);
+    }
+    return entry.runtime.handleRuntimeApi
+      ? (await import('../http-mcp-controlface/controlface-mcp-surface.js')).invokeBoardRuntimeJson(
+          entry,
+          { apiBasePrefix: '/api/boards', host: '127.0.0.1', port: 7799 },
+          boardId,
+          options?.controlplane ? 'mcp-controlplane' : 'mcp',
+          { tool, args },
+        )
+      : null;
+  };
+}
+
 export async function startQueueRunner(options = {}) {
   const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadLocalFsHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'queueRunner');
@@ -522,6 +543,9 @@ export async function startQueueRunner(options = {}) {
     // workspace and on boardId to scope liveboards.* tool calls to this board.
     const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
       serverUrl: callbackServerOrigin,
+      boardToolInvoker: isEmbeddedHost() && controlfaceBoardRuntimes
+        ? createEmbeddedBoardToolInvoker(boardId, controlfaceBoardRuntimes)
+        : null,
       notifyServerUrl: callbackServerOrigin,
       notifyUrl: `${apiBaseUrl}/notify-q`,
       watchpartyPublishNotifications: isEmbeddedHost() && controlfaceBoardRuntimes
@@ -582,6 +606,9 @@ export async function startQueueRunner(options = {}) {
       bundle,
       runtime: {
         ...runtime,
+        boardToolInvoker: isEmbeddedHost() && controlfaceBoardRuntimes
+          ? createEmbeddedBoardToolInvoker(boardId, controlfaceBoardRuntimes)
+          : null,
         configDir: hostConfig.configDir,
         foundryAgents: hostConfig.foundryAgents,
         chatFlowTimeoutMs: hostConfig.chatFlowTimeoutMs,
@@ -690,7 +717,7 @@ export async function startQueueRunner(options = {}) {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  return { shutdown };
+  return { shutdown, reconcileBoards };
 }
 
 const isQueueRunnerEntrypoint = process.argv[1]
