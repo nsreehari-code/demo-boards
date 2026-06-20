@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "mkdir -p logs && now=$(date -u +%Y-%m-%dT%H:%M:%SZ) && ms=$(date +%s%3N) && echo \"$ms\" > logs/.strategist-session-start && printf '{\"event\":\"sessionStart\",\"at\":\"%s\",\"epoch_ms\":%s}\\n' \"$now\" \"$ms\" >> logs/strategist-sessions.jsonl",
+        "powershell": "New-Item -ItemType Directory -Force -Path logs | Out-Null; $now=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $ms=[int64]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()); Set-Content -Path logs/.strategist-session-start -Value $ms; Add-Content -Path logs/strategist-sessions.jsonl -Value ('{\"event\":\"sessionStart\",\"at\":\"'+$now+'\",\"epoch_ms\":'+$ms+'}')",
+        "cwd": ".",
+        "timeoutSec": 10
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "now=$(date -u +%Y-%m-%dT%H:%M:%SZ) && end=$(date +%s%3N) && start=$(cat logs/.strategist-session-start 2>/dev/null || echo \"\") && dur=null && if [ -n \"$start\" ]; then dur=$((end-start)); fi && printf '{\"event\":\"sessionEnd\",\"at\":\"%s\",\"epoch_ms\":%s,\"duration_ms\":%s}\\n' \"$now\" \"$end\" \"$dur\" >> logs/strategist-sessions.jsonl",
+        "powershell": "$now=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $end=[int64]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()); $start=(Get-Content -Path logs/.strategist-session-start -ErrorAction SilentlyContinue); if ($start) { $dur=$end-[int64]$start } else { $dur='null' }; Add-Content -Path logs/strategist-sessions.jsonl -Value ('{\"event\":\"sessionEnd\",\"at\":\"'+$now+'\",\"epoch_ms\":'+$end+',\"duration_ms\":'+$dur+'}')",
+        "cwd": ".",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

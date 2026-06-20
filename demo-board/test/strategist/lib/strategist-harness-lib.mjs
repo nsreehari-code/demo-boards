@@ -246,7 +246,7 @@ export function validateMove(move, boardState = {}) {
 }
 
 // Admin cards that drive the journey but are not themselves journey nodes.
-export const ADMIN_CARD_IDS = new Set(['gandalf-intake', 'journey-strategist']);
+export const ADMIN_CARD_IDS = new Set(['gandalf-intake', 'journey-strategist', 'card-journey-observatory']);
 
 // Normalize the strategist's emitted move out of its computed values. The move
 // is published as the `move` computed object (current contract) or the `plan`

@@ -79,7 +79,7 @@
           "instructionsDirs": ["{{BOARD_ROOT}}/server/chat-flow/instructions", "{{BOARD_ROOT}}/server/chat-flow/instructions-strategist", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/instructions"],
           "agentsDirs": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/agents"],
           "agentsSkills": ["{{BOARD_ROOT}}/server/chat-flow/skills", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/skills"],
-          "agentsHooks": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/hooks"],
+          "agentsHooks": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks", "{{BOARD_ROOT}}/server/chat-flow/hooks-strategist", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/hooks"],
           "copyScripts": []
         }
       ],
@@ -242,7 +242,7 @@
             "gandalf": true,
             "card_renderer": "strategist",
             "tags": ["strategist", "journey", "exploration"],
-            "desc": "Board-level journey strategist. Wakes on board topology change (sys_keys_board_state) or an edit to its steering, reads the current journey via board-inspection tools, and authors the next move — new or updated cards — to keep the journey advancing toward the seed intent.",
+            "desc": "Board-level journey strategist. Wakes on question edits or compact observatory updates, reads the current journey via board-inspection tools, and authors the next move — new or updated cards — to keep the journey advancing toward the seed intent.",
             "presentation": {
               "footprint": "wide"
             }
@@ -251,8 +251,9 @@
             "chat": {"copilot": {"ws": "gandalf"}, "visible_controlplane_only": true }
           },
           "requires": [
-            "sys_keys_board_state",
-            "nl_intent"
+            "nl_intent",
+            "journey_observables",
+            "board_observables"
           ],
           "source_defs": [
             {
@@ -263,8 +264,17 @@
                 "steering": "card_data.steering",
                 "scope": "card_data.scope",
                 "interaction_policy": "card_data.interaction_policy",
-                "board_card_ids": "requires.sys_keys_board_state.card_ids",
-                "board_token_keys": "requires.sys_keys_board_state.data_object_keys",
+                "journey_observables": "requires.journey_observables",
+                "board_observables": "requires.board_observables",
+                "journey_card_count": "requires.journey_observables.signals.card_count",
+                "journey_completed_count": "requires.journey_observables.signals.completed_count",
+                "journey_in_progress_count": "requires.journey_observables.signals.in_progress_count",
+                "journey_blocked_count": "requires.journey_observables.signals.blocked_count",
+                "journey_failed_count": "requires.journey_observables.signals.failed_count",
+                "journey_cards_fully_satisfied": "requires.journey_observables.signals.cards_fully_satisfied",
+                "journey_settled": "requires.journey_observables.signals.settled",
+                "journey_value": "requires.journey_observables.gauge.journey_value",
+                "journey_value_band": "requires.journey_observables.gauge.journey_value_band",
                 "max_new_cards_per_cycle": "card_data.max_new_cards_per_cycle",
                 "max_depth": "card_data.max_depth",
                 "max_breadth": "card_data.max_breadth"
@@ -279,7 +289,7 @@
                   "updated_cards": null,
                   "next_candidates": null
                 },
-                "prompt_template": "You are the Journey Strategist on the \"{{boardId}}\" journey board. Your workspace instructions (copilot-instructions.md) and skills define the board substrate, the card-authoring contract, the Journey Strategist engine, and this board's journey domain — follow them. This is only your task brief for this cycle.\n\nRUNTIME HANDLES (use exactly): board_id is \"{{boardId}}\". On every liveboards.* tool call that takes a board_id (or board) argument, pass this exact board_id, and pass the provided log_id unchanged.\n\nTHE INTENT (what this journey is pursuing — the single source of truth, editable on the Journey Seed card):\n{{question}}\n\nSTEERING (optional analyst guardrails or priorities; may be empty):\n{{steering}}\n\nSCOPE (optional in-scope data domains, time window, sensitivity; may be empty):\n{{scope}}\n\nINTERACTION POLICY (how autonomous to be; when to surface a decision):\n{{interaction_policy}}\n\nYou were woken because the board or the question changed. Current board shape (your own card and tokens already excluded):\n- card ids: {{board_card_ids}}\n- published token keys: {{board_token_keys}}\n\nThis cycle: sense the board first, then make the single move that most advances the journey and its alignment — deepen, broaden, clarify, offer a decision, reconcile, or hold steady, per your Journey Strategist engine doctrine. Pace: about {{max_new_cards_per_cycle}} authoring move(s), within ~{{max_depth}} steps of the seed and ~{{max_breadth}} parallel threads. Build on existing tokens; never re-query what a token already holds.\n\nRespond with a single JSON object and nothing else, beginning with { and ending with }:\n\n{\n  \"status\": \"advancing | waiting | aligned\",\n  \"move\": \"deepen | broaden | clarify | decide | reconcile | hold\",\n  \"rationale\": \"<a sentence or two grounded in what you actually read>\",\n  \"created_cards\": [ { \"card_id\": \"<id>\", \"purpose\": \"<short>\", \"parent\": \"<parent card id or null>\", \"shape\": \"kusto | copilot | interactive | compute\" } ],\n  \"updated_cards\": [ { \"card_id\": \"<id>\", \"change\": \"<short, e.g. path_state=dead_ended>\" } ],\n  \"next_candidates\": [ \"<a branch you noticed but chose to defer>\" ]\n}"
+                "prompt_template": "You are the Journey Strategist on the \"{{boardId}}\" journey board. Your workspace instructions (copilot-instructions.md) and skills define the board substrate, the card-authoring contract, the Journey Strategist engine, and this board's journey domain — follow them. This is only your task brief for this cycle.\n\nRUNTIME HANDLES (use exactly): board_id is \"{{boardId}}\". On every liveboards.* tool call that takes a board_id (or board) argument, pass this exact board_id, and pass the provided log_id unchanged.\n\nTHE INTENT (what this journey is pursuing — the single source of truth, editable on the Journey Seed card):\n{{question}}\n\nSTEERING (optional analyst guardrails or priorities; may be empty):\n{{steering}}\n\nSCOPE (optional in-scope data domains, time window, sensitivity; may be empty):\n{{scope}}\n\nINTERACTION POLICY (how autonomous to be; when to surface a decision):\n{{interaction_policy}}\n\nYou were woken because the board or the question changed.\n\nOBSERVATORY SIGNALS (deterministic evidence about the current work graph — facts, not judgments):\n- journey cards: {{journey_card_count}} (completed {{journey_completed_count}}, in progress {{journey_in_progress_count}})\n- blocked: {{journey_blocked_count}}, failed: {{journey_failed_count}}\n- cards fully satisfied: {{journey_cards_fully_satisfied}}; settled: {{journey_settled}}\n\nOBSERVATORY GAUGE (a cheap heuristic the observatory computes for the UI dashboard — a hint, NOT a verdict): value {{journey_value}}, band {{journey_value_band}}.\n\nYou are the semantic judge of journey health, not the gauge. Read the signals above and sense the board yourself with liveboards.* tools, then form your own assessment of coverage and alignment against the intent. Do not treat the gauge as ground truth — it is a coarse arithmetic proxy that cannot understand the intent the way you can.\n\nThis cycle: sense the board first, then make the single move that most advances the journey and its alignment — deepen, broaden, clarify, offer a decision, reconcile, or hold steady, per your Journey Strategist engine doctrine. Pace: about {{max_new_cards_per_cycle}} authoring move(s), within ~{{max_depth}} steps of the seed and ~{{max_breadth}} parallel threads. Build on existing tokens; never re-query what a token already holds.\n\nRespond with a single JSON object and nothing else, beginning with { and ending with }:\n\n{\n  \"status\": \"advancing | waiting | aligned\",\n  \"move\": \"deepen | broaden | clarify | decide | reconcile | hold\",\n  \"rationale\": \"<a sentence or two grounded in what you actually read, including whether the observatory signal says value is rising, stalled, or impaired>\",\n  \"created_cards\": [ { \"card_id\": \"<id>\", \"purpose\": \"<short>\", \"parent\": \"<parent card id or null>\", \"shape\": \"kusto | copilot | interactive | compute\" } ],\n  \"updated_cards\": [ { \"card_id\": \"<id>\", \"change\": \"<short, e.g. path_state=dead_ended>\" } ],\n  \"next_candidates\": [ \"<a branch you noticed but chose to defer>\" ]\n}"
               }
             }
           ],
@@ -294,7 +304,7 @@
             },
             {
               "bindTo": "journey_size",
-              "expr": "requires.sys_keys_board_state.card_ids ? $count(requires.sys_keys_board_state.card_ids) : 0"
+              "expr": "requires.journey_observables.signals.card_count ? requires.journey_observables.signals.card_count : 0"
             },
             {
               "bindTo": "rationale",
@@ -402,6 +412,106 @@
             "max_depth": 6,
             "max_breadth": 4
           }
+        },
+        {
+          "id": "card-journey-observatory",
+          "meta": {
+            "title": "Journey Observatory",
+            "tags": ["observatory", "journey", "observables"],
+            "desc": "Reads the board's own runtime status whenever the journey graph changes and publishes a compact observatory object plus UI metrics for the strategist. Deterministic observation only — it never authors cards.",
+            "presentation": {
+              "footprint": "wide"
+            }
+          },
+          "__private": {
+            "visible_controlplane_only": true
+          },
+          "requires": [
+            "sys_keys_board_state"
+          ],
+          "source_defs": [
+            {
+              "bindTo": "observations",
+              "outputFile": "journey-observatory-observations.json",
+              "observables": {
+                "scope": "board-runtime",
+                "excludeCardIds": ["journey-strategist", "card-journey-observatory"]
+              }
+            }
+          ],
+          "compute": [
+            { "bindTo": "obs_card_count", "expr": "fetched_sources.observations.card_count ? fetched_sources.observations.card_count : 0" },
+            { "bindTo": "obs_completed_count", "expr": "fetched_sources.observations.completed_count ? fetched_sources.observations.completed_count : 0" },
+            { "bindTo": "obs_failed_count", "expr": "fetched_sources.observations.failed_count ? fetched_sources.observations.failed_count : 0" },
+            { "bindTo": "obs_blocked_count", "expr": "fetched_sources.observations.blocked_count ? fetched_sources.observations.blocked_count : 0" },
+            { "bindTo": "obs_in_progress_count", "expr": "fetched_sources.observations.in_progress_count ? fetched_sources.observations.in_progress_count : 0" },
+            { "bindTo": "obs_settled", "expr": "fetched_sources.observations.settled = true" },
+            { "bindTo": "obs_satisfied_ratio", "expr": "fetched_sources.observations.card_count > 0 ? (fetched_sources.observations.cards_fully_satisfied / fetched_sources.observations.card_count) : 0" },
+            { "bindTo": "obs_progress_ratio", "expr": "$min([1, (fetched_sources.observations.completed_count / 5)])" },
+            {
+              "bindTo": "journey_value",
+              "expr": "fetched_sources.observations.card_count > 0 ? $round($max([0, $min([100, computed_values.obs_progress_ratio * (70 + computed_values.obs_satisfied_ratio * 20 + (computed_values.obs_settled ? 10 : 0)) - fetched_sources.observations.failed_count * 25 - fetched_sources.observations.blocked_count * 15])])) : 0"
+            },
+            {
+              "bindTo": "journey_value_band",
+              "expr": "fetched_sources.observations.card_count = 0 ? 'empty' : (computed_values.journey_value >= 85 ? 'healthy' : (computed_values.journey_value >= 55 ? 'building' : 'low'))"
+            },
+            {
+              "bindTo": "journey_observables",
+              "expr": "{'signals': {'card_count': computed_values.obs_card_count, 'completed_count': computed_values.obs_completed_count, 'in_progress_count': computed_values.obs_in_progress_count, 'blocked_count': computed_values.obs_blocked_count, 'failed_count': computed_values.obs_failed_count, 'blocked_card_ids': fetched_sources.observations.blocked_card_ids, 'failed_card_ids': fetched_sources.observations.failed_card_ids, 'in_progress_card_ids': fetched_sources.observations.in_progress_card_ids, 'cards_fully_satisfied': fetched_sources.observations.cards_fully_satisfied, 'cards_with_missing_requires': fetched_sources.observations.cards_with_missing_requires, 'settled': computed_values.obs_settled}, 'gauge': {'journey_value': computed_values.journey_value, 'journey_value_band': computed_values.journey_value_band}}"
+            },
+            {
+              "bindTo": "board_observables",
+              "expr": "requires.sys_keys_board_state"
+            }
+          ],
+          "provides": [
+            { "bindTo": "journey_observables", "ref": "computed_values.journey_observables" },
+            { "bindTo": "board_observables", "ref": "computed_values.board_observables" }
+          ],
+          "view": {
+            "elements": [
+              {
+                "kind": "metric",
+                "label": "Journey Value",
+                "data": { "bind": "computed_values.journey_value" }
+              },
+              {
+                "kind": "badge",
+                "label": "Value Band",
+                "data": {
+                  "bind": "computed_values.journey_value_band",
+                  "colorMap": {
+                    "healthy": "success",
+                    "building": "warning",
+                    "low": "secondary",
+                    "empty": "secondary"
+                  }
+                }
+              },
+              {
+                "kind": "metric",
+                "label": "Cards (work graph)",
+                "data": { "bind": "computed_values.obs_card_count" }
+              },
+              {
+                "kind": "metric",
+                "label": "Completed",
+                "data": { "bind": "computed_values.obs_completed_count" }
+              },
+              {
+                "kind": "metric",
+                "label": "Blocked",
+                "data": { "bind": "computed_values.obs_blocked_count" }
+              },
+              {
+                "kind": "metric",
+                "label": "Failed",
+                "data": { "bind": "computed_values.obs_failed_count" }
+              }
+            ]
+          },
+          "card_data": {}
         }
       ]
     }

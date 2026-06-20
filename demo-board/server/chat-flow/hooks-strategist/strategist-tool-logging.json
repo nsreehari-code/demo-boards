@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "INPUT=$(cat); t=$(printf '%s' \"$INPUT\" | grep -o '\"toolName\":\"[^\"]*\"' | head -1 | sed 's/\"toolName\":\"//; s/\"$//'); mkdir -p logs; ms=$(date +%s%3N); now=$(date -u +%Y-%m-%dT%H:%M:%SZ); printf '%s\\t%s' \"$ms\" \"$t\" > logs/.strategist-tool-start; printf '{\"event\":\"toolStart\",\"at\":\"%s\",\"epoch_ms\":%s,\"tool\":\"%s\"}\\n' \"$now\" \"$ms\" \"$t\" >> logs/strategist-tools.jsonl; exit 0",
+        "powershell": "try { $in=[Console]::In.ReadToEnd(); $o=$in | ConvertFrom-Json; $t=[string]$o.toolName; New-Item -ItemType Directory -Force -Path logs | Out-Null; $ms=[int64]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()); $now=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); Set-Content -Path logs/.strategist-tool-start -Value (\"$ms`t$t\"); Add-Content -Path logs/strategist-tools.jsonl -Value ('{\"event\":\"toolStart\",\"at\":\"'+$now+'\",\"epoch_ms\":'+$ms+',\"tool\":\"'+$t+'\"}') } catch {}; exit 0",
+        "cwd": ".",
+        "timeoutSec": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "INPUT=$(cat); t=$(printf '%s' \"$INPUT\" | grep -o '\"toolName\":\"[^\"]*\"' | head -1 | sed 's/\"toolName\":\"//; s/\"$//'); end=$(date +%s%3N); now=$(date -u +%Y-%m-%dT%H:%M:%SZ); start=$(cut -f1 logs/.strategist-tool-start 2>/dev/null || echo \"\"); dur=null; if [ -n \"$start\" ]; then dur=$((end-start)); fi; printf '{\"event\":\"toolEnd\",\"at\":\"%s\",\"epoch_ms\":%s,\"tool\":\"%s\",\"duration_ms\":%s,\"result\":\"success\"}\\n' \"$now\" \"$end\" \"$t\" \"$dur\" >> logs/strategist-tools.jsonl; exit 0",
+        "powershell": "try { $in=[Console]::In.ReadToEnd(); $o=$in | ConvertFrom-Json; $t=[string]$o.toolName } catch { $t='' }; $end=[int64]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()); $now=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $line=(Get-Content -Path logs/.strategist-tool-start -ErrorAction SilentlyContinue | Select-Object -First 1); if ($line) { $dur=$end-[int64](($line -split \"`t\")[0]) } else { $dur='null' }; Add-Content -Path logs/strategist-tools.jsonl -Value ('{\"event\":\"toolEnd\",\"at\":\"'+$now+'\",\"epoch_ms\":'+$end+',\"tool\":\"'+$t+'\",\"duration_ms\":'+$dur+',\"result\":\"success\"}'); exit 0",
+        "cwd": ".",
+        "timeoutSec": 10
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "type": "command",
+        "bash": "INPUT=$(cat); t=$(printf '%s' \"$INPUT\" | grep -o '\"toolName\":\"[^\"]*\"' | head -1 | sed 's/\"toolName\":\"//; s/\"$//'); end=$(date +%s%3N); now=$(date -u +%Y-%m-%dT%H:%M:%SZ); start=$(cut -f1 logs/.strategist-tool-start 2>/dev/null || echo \"\"); dur=null; if [ -n \"$start\" ]; then dur=$((end-start)); fi; printf '{\"event\":\"toolEnd\",\"at\":\"%s\",\"epoch_ms\":%s,\"tool\":\"%s\",\"duration_ms\":%s,\"result\":\"failure\"}\\n' \"$now\" \"$end\" \"$t\" \"$dur\" >> logs/strategist-tools.jsonl; exit 0",
+        "powershell": "try { $in=[Console]::In.ReadToEnd(); $o=$in | ConvertFrom-Json; $t=[string]$o.toolName } catch { $t='' }; $end=[int64]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()); $now=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $line=(Get-Content -Path logs/.strategist-tool-start -ErrorAction SilentlyContinue | Select-Object -First 1); if ($line) { $dur=$end-[int64](($line -split \"`t\")[0]) } else { $dur='null' }; Add-Content -Path logs/strategist-tools.jsonl -Value ('{\"event\":\"toolEnd\",\"at\":\"'+$now+'\",\"epoch_ms\":'+$end+',\"tool\":\"'+$t+'\",\"duration_ms\":'+$dur+',\"result\":\"failure\"}'); exit 0",
+        "cwd": ".",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}
