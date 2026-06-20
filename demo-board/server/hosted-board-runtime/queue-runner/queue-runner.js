@@ -427,7 +427,14 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
                 ...(request.output ? { output: request.output } : {}),
                 ...(request.diagnostics ? { diagnostics: request.diagnostics } : {}),
                 ...(request.callback ? { callback: request.callback } : {}),
-                ...(request.extra ? { extra: request.extra } : {}),
+                extra: {
+                  ...(boardRuntimeNeeds?.taskExecutorExtra && typeof boardRuntimeNeeds.taskExecutorExtra === 'object' && !Array.isArray(boardRuntimeNeeds.taskExecutorExtra)
+                    ? boardRuntimeNeeds.taskExecutorExtra
+                    : {}),
+                  ...(request.extra && typeof request.extra === 'object' && !Array.isArray(request.extra)
+                    ? request.extra
+                    : {}),
+                },
               }
             : request;
           const quoteUrls = executorRequest?.source_def?._projections?.quote_urls;

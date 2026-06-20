@@ -137,6 +137,9 @@ export function buildHostedBoardRuntimeNeeds(boardId, boardConfig, hostRuntime) 
     taskExecutorExtra: {
       boardId,
       aiWorkspaceRoot,
+      serverUrl: hostRuntime.serverUrl,
+      agentFaceMcp: resolveAgentFaceMcpPath(hostRuntime),
+      apiBasePath,
       foundryEndpoint: typeof foundryAgents.endpoint === 'string' ? foundryAgents.endpoint.trim() : '',
       foundryTaskExecutorAgentId: typeof foundryAgents.taskExecutorAgentId === 'string' ? foundryAgents.taskExecutorAgentId.trim() : '',
       taskExecutorTimeoutMs: normalizePositiveInt(hostRuntime?.taskExecutorTimeoutMs, null)
