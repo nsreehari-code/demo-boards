@@ -60,6 +60,10 @@
         "type": "string",
         "description": "Base URL of the hosting server (e.g. http://127.0.0.1:7799). Used by source kinds that call server-side endpoints."
       },
+      "agentFaceMcp": {
+        "type": "string",
+        "description": "Agentface MCP path used for liveboards.* tools (for example /agent/mcp). Combined with serverUrl by source kinds that call the same liveboards MCP surface agents use."
+      },
       "boardLiveCardsCliJs": {
         "type": "string",
         "description": "Absolute path to board-live-cards-cli.js when configured by the runtime."
@@ -467,6 +471,66 @@
           }
         }
       }
+    },
+    "observables": {
+      "detect": {
+        "field": "observables"
+      },
+      "flow": "./source-def-flows/observables.flow.json",
+      "supports": {
+        "boardStatusRead": true,
+        "serverSideCompute": true,
+        "deterministicReducer": true
+      },
+      "validate": [
+        {
+          "field": "observables",
+          "type": "object",
+          "message": "observables must be an object."
+        }
+      ],
+      "probe": {
+        "strategy": "none"
+      },
+      "manifest": {
+        "description": "Observe the hosting board's own runtime status through the liveboards agentface MCP surface and return a deterministic observation reading.",
+        "semanticManifest": {
+          "kind": "observables",
+          "purpose": "Read the hosting board's live runtime status (per-card states, requires/provides wiring, completion counts) through the same liveboards agentface MCP surface agents use, and reduce it into a compact deterministic observation that downstream jsonata compute can band, flag, and publish as tokens.",
+          "bestFor": [
+            "board-level health, coverage, and progress signals",
+            "feeding a strategist or dashboard a quantized value/health reading",
+            "observations that must be computed server-side from board state not available as tokens"
+          ],
+          "expects": [
+            "an observables config object selecting which observation to compute"
+          ],
+          "returns": "A deterministic observation object: per-status counts, blocked/failed/in-progress tallies and id lists, requires/provides coverage totals, and a settled flag."
+        },
+        "inputSchema": {
+          "observables": {
+            "type": "object",
+            "required": true,
+            "properties": {
+              "scope": {
+                "type": "string",
+                "required": false,
+                "description": "Which observation to compute. Default \"board-runtime\" reads inspect.board-runtime-status for the hosting board."
+              },
+              "excludeCardIds": {
+                "type": "string|array",
+                "required": false,
+                "description": "Card ids (array) or a projection key (string resolving to an array) to exclude from the observation, e.g. the observatory's own card and the strategist, so the reading reflects only the work graph."
+              },
+              "timeout": {
+                "type": "number",
+                "required": false,
+                "description": "Read timeout in milliseconds for the board status call."
+              }
+            }
+          }
+        }
+      }
     }
   },
   "resolveOrder": [
@@ -475,6 +539,7 @@
     "mcp",
     "foundry",
     "sqlite",
+    "observables",
     "mock"
   ]
 }

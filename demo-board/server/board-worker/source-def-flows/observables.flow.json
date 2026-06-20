@@ -1,0 +1,33 @@
+{
+  "id": "demo-source-observables",
+  "settings": {
+    "start_step": "execute",
+    "max_total_steps": 5,
+    "timeout_ms": 30000
+  },
+  "steps": {
+    "execute": {
+      "description": "Read board runtime status and reduce it to a deterministic observation",
+      "handler": {
+        "type": "ref",
+        "howToRun": "demo-local-module",
+        "whatToRun": { "kind": "fs-path", "value": "./source-def-flows/observables-handler/observables-source-handler.js" }
+      },
+      "transitions": {
+        "success": "completed",
+        "failure": "failed"
+      }
+    }
+  },
+  "terminal_states": {
+    "completed": {
+      "description": "Observation computed",
+      "return_intent": "success",
+      "return_artifacts": ["resultValue", "wroteOutputDirectly"]
+    },
+    "failed": {
+      "description": "Observation failed",
+      "return_intent": "failure"
+    }
+  }
+}
