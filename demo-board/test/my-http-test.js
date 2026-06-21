@@ -23,7 +23,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SSE_WORKER_SCRIPT = path.join(__dirname, 'sse-worker.js');
 const cliArgs = process.argv.slice(2);
-const DEFAULT_TEST_IDS = ['MB1', 'TE', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F', 'TR'];
+const DEFAULT_TEST_IDS = ['MB1', 'MB2', 'MB3', 'TE', 'T0', 'T1', 'TQ', 'TT', 'T2', 'T3', 'T4', 'TS', 'T8', 'T9', 'T8F', 'T9F', 'TR'];
 const DEFAULT_TEST_SET = new Set(DEFAULT_TEST_IDS);
 
 function readCliOptionValue(args, optionName) {
@@ -865,6 +865,84 @@ async function main() {
     `${formatTestId('MB1')} expected __private.visible_controlplane_only=true for ${adminTemplateCardId}: ${jsonText(adminReadCard)}`,
   );
   console.log(`[${formatTestId('MB1')}] verified ${adminTemplateCardId} is control-plane-only and stores __private.visible_controlplane_only=true`);
+
+  if (isTestSelected(requestedTests, 'MB2')) {
+    console.log(`\n=== ${formatTestId('MB2')}: save-meta persists merged board metadata ===`);
+    const metadataKey = `smoke_mb2_${Date.now()}`;
+    const metadataValue = `value_${Date.now()}`;
+    const saveMetaResult = await httpJson('POST', manageBoardsUrl, {
+      subcommand: 'save-meta',
+      args: {
+        boardId: BOARD_ID,
+        metadata: {
+          [metadataKey]: metadataValue,
+        },
+      },
+    });
+    assert(
+      saveMetaResult.status === 200 && saveMetaResult.data?.status === 'success',
+      `${formatTestId('MB2')} save-meta failed: HTTP ${saveMetaResult.status} ${jsonText(saveMetaResult.data)}`,
+    );
+    const savedBoard = saveMetaResult.data?.data?.board ?? null;
+    assert(savedBoard && savedBoard.metadata?.[metadataKey] === metadataValue,
+      `${formatTestId('MB2')} save-meta response missing metadata marker: ${jsonText(saveMetaResult.data)}`);
+
+    const getBoardResult = await httpJson('POST', manageBoardsUrl, {
+      subcommand: 'get-board',
+      args: { boardId: BOARD_ID },
+    });
+    assert(
+      getBoardResult.status === 200 && getBoardResult.data?.status === 'success',
+      `${formatTestId('MB2')} get-board failed: HTTP ${getBoardResult.status} ${jsonText(getBoardResult.data)}`,
+    );
+    const fetchedBoard = getBoardResult.data?.data?.board ?? null;
+    assert(fetchedBoard && fetchedBoard.metadata?.[metadataKey] === metadataValue,
+      `${formatTestId('MB2')} get-board missing persisted metadata marker: ${jsonText(getBoardResult.data)}`);
+    console.log(`[${formatTestId('MB2')}] metadata marker persisted: ${metadataKey}=${metadataValue}`);
+  }
+
+  if (isTestSelected(requestedTests, 'MB3')) {
+    console.log(`\n=== ${formatTestId('MB3')}: save-layout persists updated board layout ===`);
+    const getLayoutResult = await httpJson('POST', manageBoardsUrl, {
+      subcommand: 'get-layout',
+      args: { boardId: BOARD_ID },
+    });
+    assert(
+      getLayoutResult.status === 200 && getLayoutResult.data?.status === 'success',
+      `${formatTestId('MB3')} get-layout failed: HTTP ${getLayoutResult.status} ${jsonText(getLayoutResult.data)}`,
+    );
+    const layoutMarker = `mb3-${Date.now()}`;
+    const originalLayout = getLayoutResult.data?.data?.layout;
+    const nextLayout = originalLayout && typeof originalLayout === 'object' && !Array.isArray(originalLayout)
+      ? deepCloneJson(originalLayout)
+      : { canvas: {} };
+    nextLayout.__smokeMarker = layoutMarker;
+    const saveLayoutResult = await httpJson('POST', manageBoardsUrl, {
+      subcommand: 'save-layout',
+      args: {
+        boardId: BOARD_ID,
+        layout: nextLayout,
+      },
+    });
+    assert(
+      saveLayoutResult.status === 200 && saveLayoutResult.data?.status === 'success',
+      `${formatTestId('MB3')} save-layout failed: HTTP ${saveLayoutResult.status} ${jsonText(saveLayoutResult.data)}`,
+    );
+    assert(saveLayoutResult.data?.data?.layout?.__smokeMarker === layoutMarker,
+      `${formatTestId('MB3')} save-layout response missing marker: ${jsonText(saveLayoutResult.data)}`);
+
+    const reReadLayoutResult = await httpJson('POST', manageBoardsUrl, {
+      subcommand: 'get-layout',
+      args: { boardId: BOARD_ID },
+    });
+    assert(
+      reReadLayoutResult.status === 200 && reReadLayoutResult.data?.status === 'success',
+      `${formatTestId('MB3')} re-read get-layout failed: HTTP ${reReadLayoutResult.status} ${jsonText(reReadLayoutResult.data)}`,
+    );
+    assert(reReadLayoutResult.data?.data?.layout?.__smokeMarker === layoutMarker,
+      `${formatTestId('MB3')} re-read layout missing marker: ${jsonText(reReadLayoutResult.data)}`);
+    console.log(`[${formatTestId('MB3')}] layout marker persisted: ${layoutMarker}`);
+  }
 
   async function readChatMessages(cardId, turnId = '') {
     const payload = expectMcpSuccess(
