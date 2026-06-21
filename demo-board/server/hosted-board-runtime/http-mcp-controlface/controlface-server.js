@@ -10,7 +10,6 @@ import { spawn } from 'node:child_process';
 import { createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
 import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
 import { loadLocalFsHostConfig, resolveConfigRelativePath } from '../localfs-adapter/load-config.js';
-import { createBoardLayoutsStore } from '../board-layouts/layout-store.js';
 import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
 import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
@@ -998,7 +997,7 @@ async function handleManageBoardsRoute({
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
     }
-    const layout = await boardLayouts.get(id);
+    const layout = await dynamicBoards.getLayout(id);
     sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(layout) } });
     return;
   }
@@ -1019,7 +1018,7 @@ async function handleManageBoardsRoute({
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
     }
-    await boardLayouts.set(id, layout);
+    await dynamicBoards.saveLayout(id, layout);
     sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(layout) } });
     return;
   }
@@ -1097,7 +1096,6 @@ async function handleManageBoardsRoute({
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
     }
-    await boardLayouts.remove(id);
     boardRuntimes.delete(id);
     sendJson(res, 200, {
       status: 'success',
@@ -1219,7 +1217,6 @@ export async function startControlface(options = {}) {
   const hostConfig = loadLocalFsHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'controlface');
   const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
-  const boardLayouts = createBoardLayoutsStore({ registry: hostConfig.runtimeBoardsRegistry, adapterServices });
   const boardRuntimes = await buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards);
 
   const controlfaceMcp = createControlfaceMcpSurface({ hostConfig, boardRuntimes });
@@ -1321,7 +1318,6 @@ export async function startControlface(options = {}) {
           req,
           res,
           dynamicBoards,
-          boardLayouts,
           hostConfig,
           adapterServices,
           boardRuntimes,
