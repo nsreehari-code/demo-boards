@@ -50,7 +50,7 @@
     "better-sqlite3": "^12.9.0",
     "node-sse": "^0.0.2",
     "pdf-parse": "^2.4.5",
-    "yaml-flow": "^8.11.5"
+    "yaml-flow": "^8.11.7"
   },
   "devDependencies": {
     "pm2": "^7.0.1"
