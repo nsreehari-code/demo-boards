@@ -631,6 +631,7 @@ const STRATEGIST_TRIP_BOARD_ID = 'trip';
 const STRATEGIST_TRIP_INTENT = 'Plan a 10-day late-October trip to Japan for two, balancing a few days in Tokyo, a traditional ryokan onsen stay near Hakone, and temple-focused time in Kyoto, on a mid-range budget';
 const PROFILE_PLANT_TIMEOUT_MS = 120_000;
 const MAX_STRATEGIST_SCENARIO_CYCLES = 6;
+const PROFILE_SCAFFOLD_MAX_CYCLES = 8;
 const PROFILE_FACETS = [
   { key: 'background', label: 'Professional Background / Education', match: /linkedin|professional background|career|work experience|education/i },
   { key: 'social', label: 'Social Media Handles', match: /social|handle|online presence/i },
@@ -782,6 +783,67 @@ async function resetBoardToFreshRuntime({ boardId, testId, formatTestId, expecte
   assert(false, `${testId} reset-board did not restore the expected admin cards within 60000ms`);
 }
 
+function buildBoardRecordForRecreate(board) {
+  const record = {
+    label: typeof board?.label === 'string' && board.label.trim() ? board.label.trim() : String(board?.id || '').trim(),
+    ai: typeof board?.ai === 'string' && board.ai.trim() ? board.ai.trim() : 'copilot',
+  };
+  if (typeof board?.aiWorkspaceTemplate === 'string' && board.aiWorkspaceTemplate.trim()) {
+    record.aiWorkspaceTemplate = board.aiWorkspaceTemplate.trim();
+  }
+  if (typeof board?.refsTemplate === 'string' && board.refsTemplate.trim()) {
+    record.refsTemplate = board.refsTemplate.trim();
+  }
+  if (typeof board?.uiTemplate === 'string' && board.uiTemplate.trim()) {
+    record.uiTemplate = board.uiTemplate.trim();
+  }
+  if (typeof board?.cardsTemplate === 'string' && board.cardsTemplate.trim()) {
+    record.cardsTemplate = board.cardsTemplate.trim();
+  }
+  if (board?.metadata && typeof board.metadata === 'object' && !Array.isArray(board.metadata)) {
+    record.metadata = board.metadata;
+  }
+  if (board?.chat && typeof board.chat === 'object' && !Array.isArray(board.chat) && Object.keys(board.chat).length > 0) {
+    record.chat = board.chat;
+  }
+  if (board?.queueWakeup && typeof board.queueWakeup === 'object' && !Array.isArray(board.queueWakeup) && Object.keys(board.queueWakeup).length > 0) {
+    record.queueWakeup = board.queueWakeup;
+  }
+  return record;
+}
+
+async function recreateBoardToFreshRuntime({ boardId, testId, formatTestId, expectedCardIds }) {
+  const tag = formatTestId(testId);
+  const manageUrl = `${BOARD_SERVER_URL}/manage-boards`;
+  const existing = await httpJson('POST', manageUrl, {
+    subcommand: 'get-board',
+    args: { boardId },
+  });
+  assert(
+    existing.status === 200 && existing.data?.status === 'success' && existing.data?.data?.board,
+    `${testId} get-board failed before recreate: HTTP ${existing.status} ${JSON.stringify(existing.data)}`,
+  );
+  const record = buildBoardRecordForRecreate(existing.data.data.board);
+  const deprecated = await httpJson('POST', manageUrl, {
+    subcommand: 'deprecate-board',
+    args: { boardId },
+  });
+  assert(
+    deprecated.status === 200 && deprecated.data?.status === 'success',
+    `${testId} deprecate-board failed: HTTP ${deprecated.status} ${JSON.stringify(deprecated.data)}`,
+  );
+  const added = await httpJson('POST', manageUrl, {
+    subcommand: 'add-board',
+    args: { boardId, record },
+  });
+  assert(
+    added.status === 200 && added.data?.status === 'success',
+    `${testId} add-board recreate failed: HTTP ${added.status} ${JSON.stringify(added.data)}`,
+  );
+  console.log(`[${tag}] recreated '${boardId}' from its stored board record for a clean workspace`);
+  return await resetBoardToFreshRuntime({ boardId, testId, formatTestId, expectedCardIds });
+}
+
 async function runStrategistBasicValidation({ testId, formatTestId }) {
   const tag = formatTestId(testId);
   const manageUrl = `${BOARD_SERVER_URL}/manage-boards`;
@@ -906,8 +968,8 @@ async function runProfileScaffoldAcceptance({ testId, boardId, intent, formatTes
     && existingBoards.data.data.boards.some((entry) => String(entry?.id ?? '') === boardId);
   assert(boardExists, `${testId} expected bootstrapped board '${boardId}' to exist (register it in hosted-board-runtime.localfs.config.json)`);
 
-  console.log(`[${tag}] step 2/5: resetting '${boardId}' to seed-only`);
-  await resetBoardToFreshRuntime({
+  console.log(`[${tag}] step 2/5: recreating '${boardId}' to guarantee a clean board/workspace`);
+  await recreateBoardToFreshRuntime({
     boardId,
     testId,
     formatTestId,
@@ -994,7 +1056,7 @@ async function runStrategistLiveCycle({ testId, boardId, intent, formatTestId })
     const boardPreexisted = Array.isArray(existingBoards.data?.data?.boards)
       && existingBoards.data.data.boards.some((entry) => String(entry?.id ?? '') === boardId);
     if (boardPreexisted) {
-      console.log(`[${tag}] step 1/6: reusing existing journeys board '${boardId}'`);
+      console.log(`[${tag}] step 1/6: recreating existing journeys board '${boardId}' from its stored record`);
     } else {
       console.log(`[${tag}] step 1/6: registering journeys board '${boardId}'`);
       const addResult = await httpJson('POST', manageUrl, {
@@ -1019,7 +1081,7 @@ async function runStrategistLiveCycle({ testId, boardId, intent, formatTestId })
     }
 
     if (boardPreexisted) {
-      await resetBoardToFreshRuntime({
+      await recreateBoardToFreshRuntime({
         boardId,
         testId,
         formatTestId,
@@ -1290,8 +1352,8 @@ async function runStrategistValueCampaign({ testId, boardId, intent, formatTestI
     && existingBoards.data.data.boards.some((entry) => String(entry?.id ?? '') === boardId);
   assert(boardExists, `${testId} expected bootstrapped board '${boardId}' to exist`);
 
-  console.log(`[${tag}] step 2/6: resetting '${boardId}' to seed-only`);
-  await resetBoardToFreshRuntime({
+  console.log(`[${tag}] step 2/6: recreating '${boardId}' to guarantee a clean board/workspace`);
+  await recreateBoardToFreshRuntime({
     boardId,
     testId,
     formatTestId,
@@ -1450,8 +1512,8 @@ async function runStrategistToTargetState({ testId, boardId, intent, formatTestI
     && existingBoards.data.data.boards.some((entry) => String(entry?.id ?? '') === boardId);
   assert(boardExists, `${testId} expected bootstrapped board '${boardId}' to exist (register it in hosted-board-runtime.localfs.config.json)`);
 
-  console.log(`[${tag}] step 2/5: resetting '${boardId}' to seed-only`);
-  await resetBoardToFreshRuntime({
+  console.log(`[${tag}] step 2/5: recreating '${boardId}' to guarantee a clean board/workspace`);
+  await recreateBoardToFreshRuntime({
     boardId,
     testId,
     formatTestId,
@@ -1473,10 +1535,10 @@ async function runStrategistToTargetState({ testId, boardId, intent, formatTestI
     `${testId} manage.upsert-card journey-seed`,
   );
 
-  console.log(`[${tag}] step 4/5: driving up to ${MAX_STRATEGIST_SCENARIO_CYCLES} strategist cycles until the investigation scaffold is visible`);
+  console.log(`[${tag}] step 4/5: driving up to ${PROFILE_SCAFFOLD_MAX_CYCLES} strategist cycles until the investigation scaffold is visible`);
   let after = null;
   let latestMove = null;
-  for (let cycle = 1; cycle <= MAX_STRATEGIST_SCENARIO_CYCLES; cycle += 1) {
+  for (let cycle = 1; cycle <= PROFILE_SCAFFOLD_MAX_CYCLES; cycle += 1) {
     const before = await fetchBoardStateOnce(apiBase);
     assert(before?.payload, `${testId} could not read board state before scaffold cycle ${cycle}`);
     const prevAttempt = Number(readModel(before.payload).runtime_state.runtime?.attempt_count ?? 0);
