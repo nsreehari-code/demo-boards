@@ -659,6 +659,50 @@ function summarizeBoardForList(board) {
   };
 }
 
+function removePathWithRetries(targetPath) {
+  if (!targetPath || !fs.existsSync(targetPath)) return;
+  const maxAttempts = 10;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      fs.rmSync(targetPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = error && typeof error === 'object' ? error.code : '';
+      const transient = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES' || code === 'ENOTEMPTY';
+      if (!transient || attempt === maxAttempts) {
+        throw error;
+      }
+      const waitUntil = Date.now() + (100 * attempt);
+      while (Date.now() < waitUntil) { /* spin-wait */ }
+    }
+  }
+}
+
+function clearDirectoryContentsWithRetries(targetDir) {
+  if (!targetDir || !fs.existsSync(targetDir)) return;
+  for (const name of fs.readdirSync(targetDir)) {
+    const childPath = path.join(targetDir, name);
+    let stat = null;
+    try {
+      stat = fs.statSync(childPath);
+    } catch {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      clearDirectoryContentsWithRetries(childPath);
+      try {
+        removePathWithRetries(childPath);
+      } catch (error) {
+        const code = error && typeof error === 'object' ? error.code : '';
+        const transient = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES' || code === 'ENOTEMPTY';
+        if (!transient) throw error;
+      }
+      continue;
+    }
+    removePathWithRetries(childPath);
+  }
+}
+
 function summarizeBoardLayout(layout) {
   return layout && typeof layout === 'object' && !Array.isArray(layout) ? layout : null;
 }
@@ -1033,6 +1077,36 @@ async function handleManageBoardsRoute({
       sendJson(res, 409, { status: 'error', error: `board runtime for '${id}' is not active` });
       return;
     }
+    await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
+    sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
+    return;
+  }
+
+  if (subcommand === 'reset-board') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const board = await dynamicBoards.get(id);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    const runtimeEntry = boardRuntimes.get(id);
+    if (runtimeEntry) {
+      await disposeBoardRuntimeEntry(runtimeEntry, processLogger, id);
+      boardRuntimes.delete(id);
+    }
+    const workspaceDir = board?.refs?.baseRef?.kind === 'fs-path' && typeof board.refs.baseRef.value === 'string'
+      ? path.normalize(board.refs.baseRef.value)
+      : '';
+    if (workspaceDir) {
+      clearDirectoryContentsWithRetries(workspaceDir);
+    }
+    await ensureBoardAiWorkspaceReady(board, hostConfig);
+    const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
+    await upsertBoardRuntimeEntry(boardRuntimes, id, runtimePair, processLogger);
     await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;

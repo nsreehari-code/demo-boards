@@ -97,8 +97,10 @@ function shapeSkeleton(shapeKeys) {
   return '{}';
 }
 
-// Persist a stable session id per agent so copilot's native --session-id can
-// resume multi-turn context across runs.
+// Persist a stable session id per agent when a source_def explicitly opts into
+// session reuse. Fresh-by-default is safer for board-worker source_defs because
+// the board state itself is the durable context; reusing native Copilot session
+// history can leak stale turns into a new cycle.
 function getOrCreateSessionId(aiWorkspaceRoot, bindTo) {
   const sessionDir = path.join(
     aiWorkspaceRoot,
@@ -192,10 +194,32 @@ function resolveCopilotCwd(extra, sourceDef) {
   return root;
 }
 
+function resolveSessionOptions(sourceDef, copilotCwd) {
+  const cfg = sourceDef?.copilot && typeof sourceDef.copilot === 'object' ? sourceDef.copilot : {};
+  const mode = typeof cfg.session_mode === 'string' ? cfg.session_mode.trim().toLowerCase() : '';
+  const continueSession = cfg.continue_session === true;
+  const reuseSession = mode === 'continue' || mode === 'sticky' || continueSession;
+  if (!reuseSession) {
+    return { sessionId: undefined, continueSession: false };
+  }
+  return {
+    sessionId: getOrCreateSessionId(copilotCwd, sourceDef?.bindTo || 'executor'),
+    continueSession,
+  };
+}
+
 async function runCopilot(prompt, sourceDef, executorDir, extra) {
   const copilotCwd = resolveCopilotCwd(extra, sourceDef);
-  const bindTo = String(sourceDef?.bindTo || 'executor');
-  const sessionId = getOrCreateSessionId(copilotCwd, bindTo);
+  const { sessionId, continueSession } = resolveSessionOptions(sourceDef, copilotCwd);
+  const configuredTimeoutMs = [
+    sourceDef?.copilot?.timeout_ms,
+    sourceDef?.timeout_ms,
+    extra?.taskExecutorTimeoutMs,
+    extra?.chatCopilotTimeoutMs,
+  ]
+    .map((value) => Number(value))
+    .find((value) => Number.isFinite(value) && value > 0);
+  const timeoutMs = configuredTimeoutMs ?? 2_100_000;
 
   const shape = sourceDef?.copilot?.result_shape ?? sourceDef?.result_shape;
   const shapeKeys = shape && typeof shape === 'object' && !Array.isArray(shape)
@@ -207,6 +231,8 @@ async function runCopilot(prompt, sourceDef, executorDir, extra) {
       prompt: text,
       workingDir: copilotCwd,
       sessionId,
+      continueSession,
+      timeoutMs,
     });
     return cleanOutput(stderr ? `${stdout}\n${stderr}` : stdout);
   };

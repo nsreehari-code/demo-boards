@@ -255,8 +255,12 @@ export function buildBoardConfig(boardId, source, { configDir, boardRoot = deriv
     label: typeof record.label === 'string' && record.label.trim() ? record.label.trim() : normalizedBoardId,
     ai: typeof record.ai === 'string' && record.ai.trim() ? record.ai.trim() : '',
     aiWorkspaceTemplate: aiWorkspaceTemplateName,
+    cardsTemplate: typeof record.cardsTemplate === 'string' && record.cardsTemplate.trim()
+      ? record.cardsTemplate.trim()
+      : '',
     aiWorkspaceRoot,
     scratchStore,
+    refsTemplate: refsTemplateName,
     uiTemplate: uiTemplateName,
     ui,
     refs: resolveBoardRefs(normalizedBoardId, refsSource, tokens),
