@@ -163,6 +163,123 @@
     removeIds.sort(function (left, right) { return left.id.localeCompare(right.id); });
     return { replaceIds: replaceIds, addIds: addIds, removeIds: removeIds };
   }
+  function createManagedBoardLifecycle(deps) {
+    if (!deps || typeof deps !== 'object') {
+      throw new Error('createManagedBoardLifecycle requires deps');
+    }
+    var storage = deps.storage && typeof deps.storage === 'object' ? deps.storage : null;
+    if (!storage
+      || typeof storage.list !== 'function'
+      || typeof storage.get !== 'function'
+      || typeof storage.has !== 'function'
+      || typeof storage.put !== 'function'
+      || typeof storage.set !== 'function'
+      || typeof storage.archive !== 'function') {
+      throw new Error('createManagedBoardLifecycle requires storage list/get/has/put/set/archive functions');
+    }
+
+    function cloneRecord(record, boardId) {
+      var next = record && typeof record === 'object' && !Array.isArray(record) ? cloneJsonValue(record) : {};
+      next.id = normalizeOptionalString(next.id) || normalizeRequiredBoardId(boardId);
+      return next;
+    }
+
+    async function getRecord(boardId) {
+      var normalizedBoardId = normalizeRequiredBoardId(boardId);
+      var record = await Promise.resolve(storage.get(normalizedBoardId));
+      if (!record || typeof record !== 'object' || Array.isArray(record)) {
+        return null;
+      }
+      return cloneRecord(record, normalizedBoardId);
+    }
+
+    return {
+      async list() {
+        var items = await Promise.resolve(storage.list());
+        var list = Array.isArray(items) ? items : [];
+        return list.map(function (entry) {
+          if (entry && typeof entry === 'object' && !Array.isArray(entry) && entry.record && typeof entry.record === 'object' && !Array.isArray(entry.record)) {
+            var entryBoardId = normalizeOptionalString(entry.id) || normalizeOptionalString(entry.record.id);
+            return cloneRecord(entry.record, entryBoardId || 'unknown-board');
+          }
+          var boardId = normalizeOptionalString(entry && entry.id);
+          return cloneRecord(entry, boardId || 'unknown-board');
+        });
+      },
+      get(boardId) {
+        return getRecord(boardId);
+      },
+      has(boardId) {
+        return Promise.resolve(storage.has(normalizeRequiredBoardId(boardId)));
+      },
+      async provision(boardId, record, options) {
+        var normalizedBoardId = normalizeRequiredBoardId(boardId);
+        var nextRecord = cloneRecord(record, normalizedBoardId);
+        await Promise.resolve(storage.put(normalizedBoardId, nextRecord));
+        if (options && Object.prototype.hasOwnProperty.call(options, 'layout') && typeof storage.setLayout === 'function') {
+          if (options.layout == null) {
+            if (typeof storage.removeLayout === 'function') {
+              await Promise.resolve(storage.removeLayout(normalizedBoardId));
+            }
+          } else {
+            await Promise.resolve(storage.setLayout(normalizedBoardId, cloneJsonValue(options.layout)));
+          }
+        }
+        return getRecord(normalizedBoardId);
+      },
+      async saveMeta(boardId, metadata) {
+        var normalizedBoardId = normalizeRequiredBoardId(boardId);
+        var existing = await getRecord(normalizedBoardId);
+        if (!existing) {
+          return null;
+        }
+        var nextMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? cloneJsonValue(metadata) : {};
+        existing.metadata = Object.assign({}, existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata) ? cloneJsonValue(existing.metadata) : {}, nextMetadata);
+        await Promise.resolve(storage.set(normalizedBoardId, existing));
+        return getRecord(normalizedBoardId);
+      },
+      async saveRecord(boardId, record) {
+        var normalizedBoardId = normalizeRequiredBoardId(boardId);
+        var nextRecord = cloneRecord(record, normalizedBoardId);
+        await Promise.resolve(storage.set(normalizedBoardId, nextRecord));
+        return getRecord(normalizedBoardId);
+      },
+      getLayout(boardId) {
+        if (typeof storage.getLayout !== 'function') {
+          return null;
+        }
+        return Promise.resolve(storage.getLayout(normalizeRequiredBoardId(boardId)));
+      },
+      saveLayout(boardId, layout) {
+        if (typeof storage.setLayout !== 'function') {
+          return null;
+        }
+        return Promise.resolve(storage.setLayout(normalizeRequiredBoardId(boardId), cloneJsonValue(layout)));
+      },
+      removeLayout(boardId) {
+        if (typeof storage.removeLayout !== 'function') {
+          return null;
+        }
+        return Promise.resolve(storage.removeLayout(normalizeRequiredBoardId(boardId)));
+      },
+      async deprecate(boardId) {
+        var normalizedBoardId = normalizeRequiredBoardId(boardId);
+        var archived = await Promise.resolve(storage.archive(normalizedBoardId));
+        if (!archived || typeof archived !== 'object' || Array.isArray(archived)) {
+          return null;
+        }
+        return {
+          board: archived.record && typeof archived.record === 'object' && !Array.isArray(archived.record)
+            ? cloneRecord(archived.record, normalizedBoardId)
+            : null,
+          layout: archived.layout == null ? null : cloneJsonValue(archived.layout),
+          archiveId: normalizeOptionalString(archived.archiveId),
+          archiveRecordPath: normalizeOptionalString(archived.archiveRecordPath),
+          archiveWorkspaceDir: normalizeOptionalString(archived.archiveWorkspaceDir),
+        };
+      },
+    };
+  }
 
   function createManagedBoardsApi(deps) {
     if (!deps || typeof deps !== 'object') {
@@ -654,6 +771,7 @@
   }
 
   global.ControlfaceEmbeddedShared = {
+    createManagedBoardLifecycle: createManagedBoardLifecycle,
     createManagedBoardsApi: createManagedBoardsApi,
     createSampleTemplateCatalogApi: createSampleTemplateCatalogApi,
     summarizeBoardForList: summarizeBoardForList,
