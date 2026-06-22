@@ -812,6 +812,25 @@ function buildBoardRecordForRecreate(board) {
   return record;
 }
 
+// Production strategist source_defs run with session_mode "continue" so the
+// strategist resumes its own reasoning thread across cycles. For deterministic
+// test runs we clear that persisted native session once per scenario (at
+// recreate time), so the strategist still accumulates memory across cycles
+// within a scenario but never resumes a prior run's session.
+function clearStrategistSession(boardId) {
+  const sessionDir = path.resolve(
+    __dirname,
+    '../workspaces',
+    String(boardId),
+    'chat-workspaces/strategist/copilot-sessions',
+  );
+  try {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  } catch {
+    // best-effort: a missing or locked session dir is fine for a fresh runtime
+  }
+}
+
 async function recreateBoardToFreshRuntime({ boardId, testId, formatTestId, expectedCardIds }) {
   const tag = formatTestId(testId);
   const manageUrl = `${BOARD_SERVER_URL}/manage-boards`;
@@ -841,6 +860,7 @@ async function recreateBoardToFreshRuntime({ boardId, testId, formatTestId, expe
     `${testId} add-board recreate failed: HTTP ${added.status} ${JSON.stringify(added.data)}`,
   );
   console.log(`[${tag}] recreated '${boardId}' from its stored board record for a clean workspace`);
+  clearStrategistSession(boardId);
   return await resetBoardToFreshRuntime({ boardId, testId, formatTestId, expectedCardIds });
 }
 
