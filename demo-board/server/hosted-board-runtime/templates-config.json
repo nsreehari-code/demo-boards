@@ -133,6 +133,10 @@
           "when": "meta.card_renderer = 'ingest'"
         },
         {
+          "renderer": "postbox-universal",
+          "when": "meta.card_renderer = 'postbox-universal'"
+        },
+        {
           "renderer": "postbox",
           "when": "meta.card_renderer = 'postbox'"
         }
@@ -205,6 +209,10 @@
         {
           "renderer": "ingest",
           "when": "meta.card_renderer = 'ingest'"
+        },
+        {
+          "renderer": "postbox-universal",
+          "when": "meta.card_renderer = 'postbox-universal'"
         },
         {
           "renderer": "postbox",
