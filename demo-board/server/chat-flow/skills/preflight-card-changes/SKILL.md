@@ -35,6 +35,8 @@ not needed.
   `requires.<key>` or `$lookup(requires, 'my-key')` for hyphenated names.
 - LLM behavior belongs in `source_defs[]`; avoid parallel non-source mechanisms.
 - `projections` on a source may read only from `card_data` and `requires`.
+- `skip_when` on a source may read only from `card_data` and `requires`; if
+  truthy, that source is skipped for that run.
 
 ## Validator Expectations
 
@@ -45,6 +47,8 @@ not needed.
 - Each `compute[]` entry has string `bindTo` and `expr` fields.
 - Each `source_defs[]` entry has string `bindTo` and `outputFile`, unique
   within the card.
+- `source_defs[].skip_when`, when present, must be a valid JSONata expression
+  over `card_data` and `requires` only.
 - `view.elements` exists and each element kind is valid.
 
 ## MCP Surface

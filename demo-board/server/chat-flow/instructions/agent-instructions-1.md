@@ -188,6 +188,8 @@ source_defs[] → fetched_sources.* → compute[] → computed_values.* → view
   consumers may run again
 - adding or removing a card changes the live graph itself, not just stored
   JSON
+- `source_defs[].skip_when` is an early JSONata gate over `card_data` and
+  `requires`; if it is truthy, that source is skipped for the current run
 - a card is complete when all non-optional `source_defs[]` have been fetched
 
 Cards may form chains, fan-out trees, or UI-to-compute feedback loops, and
