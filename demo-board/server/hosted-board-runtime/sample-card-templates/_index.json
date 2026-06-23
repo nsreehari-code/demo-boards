@@ -29,6 +29,12 @@
       "label": "Journey Seed (1 card)",
       "description": "Single natural-language intent card to begin a strategist-led exploration",
       "fileName": "journey-seed.json"
+    },
+    {
+      "key": "investigate-person-seed",
+      "label": "Investigate Person (7 cards)",
+      "description": "Person background-investigation scaffold: query + document seeds, an identity hub, and self-muting LinkedIn/news/social lenses",
+      "fileName": "investigate-person-seed.json"
     }
   ]
 }

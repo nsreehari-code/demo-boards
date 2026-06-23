@@ -1,0 +1,226 @@
+{
+  "boardLabel": "Person Investigation Journey",
+  "boardSubtitle": "Seed a person (query and/or documents); an identity hub harvests, and self-muting lenses present each channel",
+  "cards": [
+    {
+      "id": "card-investigate-query",
+      "meta": {
+        "title": "Who are we investigating?",
+        "tags": ["investigate", "seed", "intent"],
+        "desc": "Describe the person and why you are investigating them — a name, plus any context (role, company, city) that helps pin the right individual. This sets the frame for the whole board; edit it any time to re-point the investigation.",
+        "presentation": { "footprint": "standard" }
+      },
+      "provides": [
+        { "bindTo": "subject_query", "ref": "card_data.query" }
+      ],
+      "compute": [],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "data": { "value": "Name the person to investigate and why — for example: _Alex Rivera, senior backend engineer, applying for a staff role; verify background and public footprint._ Add any city, employer, or handle you already know." }
+          },
+          {
+            "kind": "notes",
+            "label": "Subject and purpose",
+            "data": { "bind": "card_data.query", "writeTo": "card_data.query" }
+          }
+        ]
+      },
+      "card_data": {
+        "query": ""
+      }
+    },
+    {
+      "id": "card-investigate-intake",
+      "meta": {
+        "title": "Documents & Evidence",
+        "tags": ["investigate", "seed", "intake"],
+        "desc": "Drop a resume, dossier, or any supporting document here — or write a note, or both. The identity hub reads whatever you provide before searching the open web.",
+        "card_renderer": "postbox-universal",
+        "presentation": { "footprint": "standard" }
+      },
+      "provides": [
+        { "bindTo": "subject_files", "ref": "card_data.files" }
+      ],
+      "compute": [],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "data": { "value": "Attach documents, write a message, or both. The identity hub reads these first." }
+          }
+        ]
+      },
+      "card_data": { "files": [] }
+    },
+    {
+      "id": "card-identity-hub",
+      "meta": {
+        "title": "Identity Hub",
+        "tags": ["investigate", "hub", "disambiguation"],
+        "desc": "Reads the uploaded documents and the query, then searches the web to disambiguate the person and harvest their public footprint in a single pass. Publishes the candidates and the subject profile every lens builds on.",
+        "presentation": { "footprint": "wide" }
+      },
+      "requires": ["subject_query", "subject_files"],
+      "source_defs": [
+        {
+          "bindTo": "harvest",
+          "outputFile": "identity-harvest.json",
+          "projections": {
+            "query": "requires.subject_query",
+            "files": "requires.subject_files"
+          },
+          "skip_when": "$trim(requires.subject_query & '') = '' and $count(requires.subject_files) = 0",
+          "copilot": {
+            "prompt_template": "You are an identity-research and background-investigation agent. Your job is to (1) disambiguate WHO the subject is and (2) harvest their public professional footprint, in ONE pass.\n\nSUBJECT QUERY (the investigator's intent and any known facts):\n{{query}}\n\nUPLOADED DOCUMENTS (metadata for files the user attached; read each file's contents with your available file-reading tools before anything else):\n{{files}}\n\nMETHOD:\n1. Read every uploaded document first and extract the person's identity and history from it.\n2. Then use web search to confirm identity, resolve ambiguity (people who share the name), and fill gaps the documents do not cover.\n3. Prefer primary, verifiable sources. Do not invent facts. If a channel has nothing, return it empty rather than guessing.\n4. List every distinct real person who plausibly matches as a candidate, most-confident first. The most-confident candidate is a fair working assumption for the rest of the profile.\n5. Surface anything genuinely notable or adverse (litigation, criminal record, sanctions, major controversy) in notable_signals — only when there is real evidence.\n\nOUTPUT RULES:\n- Return ONLY a valid JSON object. No markdown, no code fences, no preamble, no trailing text.\n- Start with { and end with }.\n- Use EXACTLY this shape (omit array entries you have no evidence for; never fabricate):\n{\n  \"candidates\": [\n    { \"name\": \"string\", \"headline\": \"string\", \"confidence\": 0.0, \"distinguishers\": \"short string: what sets this person apart\" }\n  ],\n  \"subject_profile\": {\n    \"identity\": { \"name\": \"string\", \"profession\": \"string\", \"confidence\": 0.0, \"summary\": \"2-3 sentence professional summary\" },\n    \"linkedin\": {\n      \"headline\": \"string\",\n      \"roles\": [ { \"title\": \"string\", \"company\": \"string\", \"start\": \"YYYY or YYYY-MM\", \"end\": \"YYYY, YYYY-MM, or Present\" } ],\n      \"education\": [ { \"school\": \"string\", \"degree\": \"string\", \"year\": \"YYYY\" } ],\n      \"skills\": [ \"string\" ]\n    },\n    \"social\": {\n      \"handles\": [ { \"platform\": \"string\", \"handle\": \"string\", \"url\": \"string\" } ],\n      \"themes\": [ \"string\" ]\n    },\n    \"news\": {\n      \"items\": [ { \"date\": \"YYYY-MM-DD\", \"title\": \"string\", \"source\": \"string\", \"url\": \"string\", \"sentiment\": \"positive|neutral|negative\" } ]\n    },\n    \"notable_signals\": [ { \"type\": \"string\", \"severity\": \"low|medium|high\", \"summary\": \"string\", \"url\": \"string\" } ]\n  }\n}\n\nEXAMPLE (shape only — replace with real findings):\n{\n  \"candidates\": [ { \"name\": \"Alex Rivera\", \"headline\": \"Senior Backend Engineer at Northwind\", \"confidence\": 0.82, \"distinguishers\": \"Seattle-based, ex-Contoso, Go/distributed systems\" } ],\n  \"subject_profile\": {\n    \"identity\": { \"name\": \"Alex Rivera\", \"profession\": \"Software Engineer\", \"confidence\": 0.82, \"summary\": \"Backend engineer with ten years in distributed systems, currently at Northwind.\" },\n    \"linkedin\": { \"headline\": \"Senior Backend Engineer\", \"roles\": [ { \"title\": \"Senior Backend Engineer\", \"company\": \"Northwind\", \"start\": \"2021\", \"end\": \"Present\" } ], \"education\": [ { \"school\": \"UW\", \"degree\": \"BS CS\", \"year\": \"2014\" } ], \"skills\": [ \"Go\", \"Kafka\" ] },\n    \"social\": { \"handles\": [ { \"platform\": \"GitHub\", \"handle\": \"arivera\", \"url\": \"https://github.com/arivera\" } ], \"themes\": [ \"open source\" ] },\n    \"news\": { \"items\": [] },\n    \"notable_signals\": []\n  }\n}"
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "identity_md",
+          "expr": "($id := fetched_sources.harvest.subject_profile.identity; $exists($id) ? (\"### \" & ($id.name ? $id.name : \"Unknown subject\") & \"\\n\\n**Profession:** \" & ($id.profession ? $id.profession : \"\\u2014\") & \"  \\n**Confidence:** \" & ($exists($id.confidence) ? $string($id.confidence) : \"\\u2014\") & \"\\n\\n\" & ($id.summary ? $id.summary : \"\")) : \"_Harvesting identity\\u2026 add a name or purpose above, or upload a document, and this hub will disambiguate and gather the public footprint._\")"
+        }
+      ],
+      "provides": [
+        { "bindTo": "candidates", "ref": "fetched_sources.harvest.candidates" },
+        { "bindTo": "subject_profile", "ref": "fetched_sources.harvest.subject_profile" }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "label": "Working identity",
+            "data": { "bind": "computed_values.identity_md" }
+          }
+        ]
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-identity-candidates",
+      "meta": {
+        "title": "Identity Disambiguation",
+        "tags": ["investigate", "disambiguation", "decision"],
+        "desc": "The people who plausibly match this name. When more than one matches, confirm which one the investigation is about; with a single confident match, no decision is needed.",
+        "presentation": { "footprint": "standard" }
+      },
+      "requires": ["candidates"],
+      "compute": [
+        {
+          "bindTo": "candidates_view",
+          "expr": "($count(requires.candidates) > 1) ? { \"kind\": \"table\" } : { \"kind\": \"markdown\", \"data\": { \"value\": ($count(requires.candidates) = 1 ? (\"_Single confident match: \" & requires.candidates[0].name & \". No disambiguation needed._\") : \"_Awaiting identity harvest\\u2026_\") } }"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "ref",
+            "label": "Candidates",
+            "data": {
+              "bind": "requires.candidates",
+              "viewBind": "computed_values.candidates_view",
+              "fallbackKind": "markdown",
+              "columns": ["name", "headline", "confidence", "distinguishers"]
+            }
+          }
+        ]
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-lens-linkedin",
+      "meta": {
+        "title": "Professional Background",
+        "tags": ["investigate", "linkedin", "lens"],
+        "desc": "Career history from the subject profile. Presents roles when present; mutes itself when the subject has no professional record on file.",
+        "presentation": { "footprint": "standard" }
+      },
+      "requires": ["subject_profile"],
+      "compute": [
+        {
+          "bindTo": "linkedin_view",
+          "expr": "($count(requires.subject_profile.linkedin.roles) > 0) ? { \"kind\": \"table\" } : { \"kind\": \"markdown\", \"data\": { \"value\": \"_No professional background found for this subject yet._\" } }"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "ref",
+            "label": "Roles",
+            "data": {
+              "bind": "requires.subject_profile.linkedin.roles",
+              "viewBind": "computed_values.linkedin_view",
+              "fallbackKind": "markdown",
+              "columns": ["title", "company", "start", "end"]
+            }
+          }
+        ]
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-lens-news",
+      "meta": {
+        "title": "News & Press",
+        "tags": ["investigate", "news", "lens"],
+        "desc": "Recent press and public mentions. Presents items when present; mutes itself when there is no coverage.",
+        "presentation": { "footprint": "standard" }
+      },
+      "requires": ["subject_profile"],
+      "compute": [
+        {
+          "bindTo": "news_view",
+          "expr": "($count(requires.subject_profile.news.items) > 0) ? { \"kind\": \"table\" } : { \"kind\": \"markdown\", \"data\": { \"value\": \"_No recent news or press mentions found._\" } }"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "ref",
+            "label": "Mentions",
+            "data": {
+              "bind": "requires.subject_profile.news.items",
+              "viewBind": "computed_values.news_view",
+              "fallbackKind": "markdown",
+              "columns": ["date", "title", "source", "sentiment"]
+            }
+          }
+        ]
+      },
+      "card_data": {}
+    },
+    {
+      "id": "card-lens-social",
+      "meta": {
+        "title": "Social Presence",
+        "tags": ["investigate", "social", "lens"],
+        "desc": "Public social and professional handles. Presents handles when present; mutes itself when the subject has no public social footprint.",
+        "presentation": { "footprint": "standard" }
+      },
+      "requires": ["subject_profile"],
+      "compute": [
+        {
+          "bindTo": "social_view",
+          "expr": "($count(requires.subject_profile.social.handles) > 0) ? { \"kind\": \"table\" } : { \"kind\": \"markdown\", \"data\": { \"value\": \"_No public social presence found._\" } }"
+        }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "ref",
+            "label": "Handles",
+            "data": {
+              "bind": "requires.subject_profile.social.handles",
+              "viewBind": "computed_values.social_view",
+              "fallbackKind": "markdown",
+              "columns": ["platform", "handle", "url"]
+            }
+          }
+        ]
+      },
+      "card_data": {}
+    }
+  ]
+}

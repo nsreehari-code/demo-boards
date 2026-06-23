@@ -29,6 +29,11 @@
         "type": "string"
       }
     },
+    "skip_when": {
+      "type": "string",
+      "required": false,
+      "description": "Optional JSONata predicate over requires.* and card_data.* only. When it evaluates truthy this source_def is skipped — treated as if absent: not queued, no fetch, no fetched_sources entry. The card completes once remaining (non-skipped) source_defs and computes finish."
+    },
     "optionalForCompletionGating": {
       "type": "boolean",
       "required": false,

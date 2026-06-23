@@ -424,6 +424,7 @@
           "id": "card-journey-observatory",
           "meta": {
             "title": "Journey Observatory",
+            "gandalf": true,
             "tags": ["observatory", "journey", "observables"],
             "desc": "Reads the board's own runtime status whenever the journey graph changes and publishes a compact observatory object plus UI metrics for the strategist. Deterministic observation only — it never authors cards.",
             "presentation": {

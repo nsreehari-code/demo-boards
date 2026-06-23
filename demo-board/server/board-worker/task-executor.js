@@ -688,6 +688,9 @@ function buildSupportedSourceDefSchema(registry, kindSpec) {
         type: 'object',
         required: false,
       },
+      _skip: {
+        required: false,
+      },
     },
     additionalProperties: false,
   };

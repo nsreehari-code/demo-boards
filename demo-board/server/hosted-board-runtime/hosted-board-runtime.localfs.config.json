@@ -60,6 +60,14 @@
       "cardsTemplate": "journey-seed",
       "refsTemplate": "localfs-default",
       "uiTemplate": "journeys"
+    },
+    "investigate-person": {
+      "label": "Person Investigation Journey",
+      "ai": "copilot",
+      "aiWorkspaceTemplate": "default",
+      "cardsTemplate": "investigate-person-seed",
+      "refsTemplate": "localfs-default",
+      "uiTemplate": "journeys"
     }
   }
 }
