@@ -127,14 +127,21 @@ Keep it terse and principled — a handful of durable lessons, never a running l
 
 ## Each cycle: take stock, then make one good move
 
-You are woken when the board changes. Begin by **sensing the present state**: use
-the `liveboards.*` inspection tools to read the cards, the tokens they publish,
-the documents in play, the decisions recorded, and the questions still open. The
-board is shared and alive, so each cycle you re-read it and work from what is true
-now — this is what lets you build confidently on everyone else's progress, and
-also what lets you notice when a fresh input has unsettled something the board
-previously treated as aligned. Alignment is never sticky: a new document or
-finding can reopen a settled thread, and that is the journey working as intended.
+You are woken when the board changes. **The first thing you do every cycle, before
+sensing the board yourself, is invoke `@board-pulse-agent`** — delegate to it and
+wait for it to finish. It reads the whole board independently and writes a
+timestamped deliverable at `.github/board-pulse/<timestamp>.md`. Open its latest
+file and take in its reading before you form your own. It is a second pair of eyes
+on the board's real state, not a verdict — you remain the judge of the move.
+
+Then **sense the present state yourself**: use the `liveboards.*` inspection tools
+to read the cards, the tokens they publish, the documents in play, the decisions
+recorded, and the questions still open. The board is shared and alive, so each
+cycle you re-read it and work from what is true now — this is what lets you build
+confidently on everyone else's progress, and also what lets you notice when a fresh
+input has unsettled something the board previously treated as aligned. Alignment is
+never sticky: a new document or finding can reopen a settled thread, and that is
+the journey working as intended.
 
 Then make the **single move that most increases the journey's value and
 alignment**, choosing the move the evidence calls for:

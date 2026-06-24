@@ -226,6 +226,10 @@ async function runCopilot(prompt, sourceDef, executorDir, extra) {
     ? Object.keys(shape)
     : null;
 
+  const configuredModel = [sourceDef?.copilot?.model, sourceDef?.model]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .find((value) => value.length > 0);
+
   const invoke = async (text) => {
     const { stdout, stderr } = await spawnCopilot({
       prompt: text,
@@ -233,6 +237,7 @@ async function runCopilot(prompt, sourceDef, executorDir, extra) {
       sessionId,
       continueSession,
       timeoutMs,
+      ...(configuredModel ? { model: configuredModel } : {}),
     });
     return cleanOutput(stderr ? `${stdout}\n${stderr}` : stdout);
   };

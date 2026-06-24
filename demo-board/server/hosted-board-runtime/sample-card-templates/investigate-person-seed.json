@@ -221,6 +221,52 @@
         ]
       },
       "card_data": {}
+    },
+    {
+      "id": "card-deepen-workiq",
+      "meta": {
+        "title": "Internal Footprint (M365)",
+        "tags": ["investigate", "deepen", "workiq", "internal"],
+        "desc": "Active deepening lens: once a subject is identified, queries Microsoft 365 via WorkIQ for the person's internal org, role, and collaboration footprint — information the open-web harvest cannot see. Stays idle until there is a real identity to chase.",
+        "presentation": { "footprint": "wide" }
+      },
+      "requires": ["subject_profile"],
+      "source_defs": [
+        {
+          "bindTo": "workiq",
+          "outputFile": "workiq-internal.md",
+          "projections": {
+            "subject_name": "requires.subject_profile.identity.name"
+          },
+          "skip_when": "$trim(requires.subject_profile.identity.name & '') = ''",
+          "mcp": {
+            "server": "workiq",
+            "tool": "workiq.ask",
+            "input": {
+              "query": "Give a concise internal profile of {{subject_name}} from Microsoft 365 directory and collaboration signals: their team or org, role/title, and the main areas they work on. Return markdown, at most 5 bullets, no heading. If you cannot confidently find this exact person, reply with a single line saying so."
+            }
+          }
+        }
+      ],
+      "compute": [
+        {
+          "bindTo": "workiq_md",
+          "expr": "($exists(fetched_sources.workiq) and $trim(fetched_sources.workiq & '') != '') ? fetched_sources.workiq : \"_Awaiting a confirmed subject before querying internal M365 signals\\u2026_\""
+        }
+      ],
+      "provides": [
+        { "bindTo": "workiq_internal", "ref": "fetched_sources.workiq" }
+      ],
+      "view": {
+        "elements": [
+          {
+            "kind": "markdown",
+            "label": "Internal (M365)",
+            "data": { "bind": "computed_values.workiq_md" }
+          }
+        ]
+      },
+      "card_data": {}
     }
   ]
 }

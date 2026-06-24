@@ -107,6 +107,7 @@ function parseArgs(argv) {
       case '--prompt': opts.prompt = next(); break;
       case '--output-file': opts.outputFile = next(); break;
       case '--cwd': opts.workingDir = next(); break;
+      case '--model': opts.model = next(); break;
       case '--session-id': opts.sessionId = next(); break;
       case '--add-dir': opts.addDirs.push(next()); break;
       default: break;
@@ -127,6 +128,7 @@ async function main() {
     workingDir: opts.workingDir,
     addDirs: opts.addDirs,
     sessionId: opts.sessionId,
+    ...(opts.model ? { model: opts.model } : {}),
   });
   const output = stderr ? `${stdout}\n${stderr}` : stdout;
   fs.writeFileSync(opts.outputFile, output, 'utf-8');
