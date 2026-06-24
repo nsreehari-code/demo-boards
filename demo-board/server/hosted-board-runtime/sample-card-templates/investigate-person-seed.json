@@ -6,24 +6,38 @@
       "id": "card-investigate-query",
       "meta": {
         "title": "Who are we investigating?",
-        "tags": ["investigate", "seed", "intent"],
+        "tags": [
+          "investigate",
+          "seed",
+          "intent"
+        ],
         "desc": "Describe the person and why you are investigating them — a name, plus any context (role, company, city) that helps pin the right individual. This sets the frame for the whole board; edit it any time to re-point the investigation.",
-        "presentation": { "footprint": "standard" }
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "provides": [
-        { "bindTo": "subject_query", "ref": "card_data.query" }
+        {
+          "bindTo": "subject_query",
+          "ref": "card_data.query"
+        }
       ],
       "compute": [],
       "view": {
         "elements": [
           {
             "kind": "markdown",
-            "data": { "value": "Name the person to investigate and why — for example: _Alex Rivera, senior backend engineer, applying for a staff role; verify background and public footprint._ Add any city, employer, or handle you already know." }
+            "data": {
+              "value": "Name the person to investigate and why — for example: _Alex Rivera, senior backend engineer, applying for a staff role; verify background and public footprint._ Add any city, employer, or handle you already know."
+            }
           },
           {
             "kind": "notes",
             "label": "Subject and purpose",
-            "data": { "bind": "card_data.query", "writeTo": "card_data.query" }
+            "data": {
+              "bind": "card_data.query"
+            },
+            "writeTo": "card_data.query"
           }
         ]
       },
@@ -35,34 +49,56 @@
       "id": "card-investigate-intake",
       "meta": {
         "title": "Documents & Evidence",
-        "tags": ["investigate", "seed", "intake"],
+        "tags": [
+          "investigate",
+          "seed",
+          "intake"
+        ],
         "desc": "Drop a resume, dossier, or any supporting document here — or write a note, or both. The identity hub reads whatever you provide before searching the open web.",
         "card_renderer": "postbox-universal",
-        "presentation": { "footprint": "standard" }
+        "presentation": {
+          "footprint": "standard"
+        }
       },
       "provides": [
-        { "bindTo": "subject_files", "ref": "card_data.files" }
+        {
+          "bindTo": "subject_files",
+          "ref": "card_data.files"
+        }
       ],
       "compute": [],
       "view": {
         "elements": [
           {
             "kind": "markdown",
-            "data": { "value": "Attach documents, write a message, or both. The identity hub reads these first." }
+            "data": {
+              "value": "Attach documents, write a message, or both. The identity hub reads these first."
+            }
           }
         ]
       },
-      "card_data": { "files": [] }
+      "card_data": {
+        "files": []
+      }
     },
     {
       "id": "card-identity-hub",
       "meta": {
         "title": "Identity Hub",
-        "tags": ["investigate", "hub", "disambiguation"],
+        "tags": [
+          "investigate",
+          "hub",
+          "disambiguation"
+        ],
         "desc": "Reads the uploaded documents and the query, then searches the web to disambiguate the person and harvest their public footprint in a single pass. Publishes the candidates and the subject profile every lens builds on.",
-        "presentation": { "footprint": "wide" }
+        "presentation": {
+          "footprint": "wide"
+        }
       },
-      "requires": ["subject_query", "subject_files"],
+      "requires": [
+        "subject_query",
+        "subject_files"
+      ],
       "source_defs": [
         {
           "bindTo": "harvest",
@@ -84,15 +120,23 @@
         }
       ],
       "provides": [
-        { "bindTo": "candidates", "ref": "fetched_sources.harvest.candidates" },
-        { "bindTo": "subject_profile", "ref": "fetched_sources.harvest.subject_profile" }
+        {
+          "bindTo": "candidates",
+          "ref": "fetched_sources.harvest.candidates"
+        },
+        {
+          "bindTo": "subject_profile",
+          "ref": "fetched_sources.harvest.subject_profile"
+        }
       ],
       "view": {
         "elements": [
           {
             "kind": "markdown",
             "label": "Working identity",
-            "data": { "bind": "computed_values.identity_md" }
+            "data": {
+              "bind": "computed_values.identity_md"
+            }
           }
         ]
       },
@@ -102,11 +146,19 @@
       "id": "card-identity-candidates",
       "meta": {
         "title": "Identity Disambiguation",
-        "tags": ["investigate", "disambiguation", "decision"],
+        "tags": [
+          "investigate",
+          "disambiguation",
+          "decision"
+        ],
         "desc": "The people who plausibly match this name. When more than one matches, confirm which one the investigation is about; with a single confident match, no decision is needed.",
-        "presentation": { "footprint": "standard" }
+        "presentation": {
+          "footprint": "standard"
+        }
       },
-      "requires": ["candidates"],
+      "requires": [
+        "candidates"
+      ],
       "compute": [
         {
           "bindTo": "candidates_view",
@@ -119,10 +171,17 @@
             "kind": "ref",
             "label": "Candidates",
             "data": {
-              "bind": "requires.candidates",
+              "bind": "requires.candidates"
+            },
+            "spec": {
               "viewBind": "computed_values.candidates_view",
               "fallbackKind": "markdown",
-              "columns": ["name", "headline", "confidence", "distinguishers"]
+              "columns": [
+                "name",
+                "headline",
+                "confidence",
+                "distinguishers"
+              ]
             }
           }
         ]
@@ -133,11 +192,19 @@
       "id": "card-lens-linkedin",
       "meta": {
         "title": "Professional Background",
-        "tags": ["investigate", "linkedin", "lens"],
+        "tags": [
+          "investigate",
+          "linkedin",
+          "lens"
+        ],
         "desc": "Career history from the subject profile. Presents roles when present; mutes itself when the subject has no professional record on file.",
-        "presentation": { "footprint": "standard" }
+        "presentation": {
+          "footprint": "standard"
+        }
       },
-      "requires": ["subject_profile"],
+      "requires": [
+        "subject_profile"
+      ],
       "compute": [
         {
           "bindTo": "linkedin_view",
@@ -150,10 +217,17 @@
             "kind": "ref",
             "label": "Roles",
             "data": {
-              "bind": "requires.subject_profile.linkedin.roles",
+              "bind": "requires.subject_profile.linkedin.roles"
+            },
+            "spec": {
               "viewBind": "computed_values.linkedin_view",
               "fallbackKind": "markdown",
-              "columns": ["title", "company", "start", "end"]
+              "columns": [
+                "title",
+                "company",
+                "start",
+                "end"
+              ]
             }
           }
         ]
@@ -164,11 +238,19 @@
       "id": "card-lens-news",
       "meta": {
         "title": "News & Press",
-        "tags": ["investigate", "news", "lens"],
+        "tags": [
+          "investigate",
+          "news",
+          "lens"
+        ],
         "desc": "Recent press and public mentions. Presents items when present; mutes itself when there is no coverage.",
-        "presentation": { "footprint": "standard" }
+        "presentation": {
+          "footprint": "standard"
+        }
       },
-      "requires": ["subject_profile"],
+      "requires": [
+        "subject_profile"
+      ],
       "compute": [
         {
           "bindTo": "news_view",
@@ -181,10 +263,17 @@
             "kind": "ref",
             "label": "Mentions",
             "data": {
-              "bind": "requires.subject_profile.news.items",
+              "bind": "requires.subject_profile.news.items"
+            },
+            "spec": {
               "viewBind": "computed_values.news_view",
               "fallbackKind": "markdown",
-              "columns": ["date", "title", "source", "sentiment"]
+              "columns": [
+                "date",
+                "title",
+                "source",
+                "sentiment"
+              ]
             }
           }
         ]
@@ -195,11 +284,19 @@
       "id": "card-lens-social",
       "meta": {
         "title": "Social Presence",
-        "tags": ["investigate", "social", "lens"],
+        "tags": [
+          "investigate",
+          "social",
+          "lens"
+        ],
         "desc": "Public social and professional handles. Presents handles when present; mutes itself when the subject has no public social footprint.",
-        "presentation": { "footprint": "standard" }
+        "presentation": {
+          "footprint": "standard"
+        }
       },
-      "requires": ["subject_profile"],
+      "requires": [
+        "subject_profile"
+      ],
       "compute": [
         {
           "bindTo": "social_view",
@@ -212,10 +309,16 @@
             "kind": "ref",
             "label": "Handles",
             "data": {
-              "bind": "requires.subject_profile.social.handles",
+              "bind": "requires.subject_profile.social.handles"
+            },
+            "spec": {
               "viewBind": "computed_values.social_view",
               "fallbackKind": "markdown",
-              "columns": ["platform", "handle", "url"]
+              "columns": [
+                "platform",
+                "handle",
+                "url"
+              ]
             }
           }
         ]
@@ -226,11 +329,20 @@
       "id": "card-deepen-workiq",
       "meta": {
         "title": "Internal Footprint (M365)",
-        "tags": ["investigate", "deepen", "workiq", "internal"],
+        "tags": [
+          "investigate",
+          "deepen",
+          "workiq",
+          "internal"
+        ],
         "desc": "Active deepening lens: once a subject is identified, queries Microsoft 365 via WorkIQ for the person's internal org, role, and collaboration footprint — information the open-web harvest cannot see. Stays idle until there is a real identity to chase.",
-        "presentation": { "footprint": "wide" }
+        "presentation": {
+          "footprint": "wide"
+        }
       },
-      "requires": ["subject_profile"],
+      "requires": [
+        "subject_profile"
+      ],
       "source_defs": [
         {
           "bindTo": "workiq",
@@ -255,14 +367,19 @@
         }
       ],
       "provides": [
-        { "bindTo": "workiq_internal", "ref": "fetched_sources.workiq" }
+        {
+          "bindTo": "workiq_internal",
+          "ref": "fetched_sources.workiq"
+        }
       ],
       "view": {
         "elements": [
           {
             "kind": "markdown",
             "label": "Internal (M365)",
-            "data": { "bind": "computed_values.workiq_md" }
+            "data": {
+              "bind": "computed_values.workiq_md"
+            }
           }
         ]
       },

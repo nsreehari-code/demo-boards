@@ -52,12 +52,12 @@ expects is summarised below. When authoring or repairing a card, make sure the
 
 | kind             | Expected `data` shape                                                                  | Key `data.*` options                                |
 | ---------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `metric`         | Number / string, OR `{ title?, value, detail? }`                                       | (label comes from `element.label`)                  |
+| `metric`         | Number or string (the value; title comes from `element.label`)                          | (label comes from `element.label`)                  |
 | `text`           | String (or anything stringifiable); `format: "file-links"` expects an array of files   | `format`, `style`, `hideIfEmpty`                    |
 | `badge`          | String / number (rendered as text inside a colored pill)                               | `colorMap: { "<value>": "green"\|"amber"\|… }`      |
-| `alert`          | Number, OR `{ value: number }`                                                         | `thresholds: { green, amber }` (each like `"<10"`)  |
-| `narrative`      | String, OR `{ text: string }`                                                          | —                                                   |
-| `markdown`       | Markdown string, OR `{ text: string }`                                                 | —                                                   |
+| `alert`          | Number                                                                                  | `thresholds: { green, amber }` (each like `"<10"`)  |
+| `narrative`      | String                                                                                  | —                                                   |
+| `markdown`       | Markdown string                                                                         | —                                                   |
 | `list`           | Array of primitives / objects, OR plain object (rendered as key/value `dl`)            | `maxRows`, `placeholder`                            |
 | `table`          | Array of row objects: `[{ colA, colB, ... }, ...]`                                     | `columns`, `maxRows`, `sortable`, `placeholder`     |
 | `editable-table` | Same as `table` (array of row objects)                                                 | `columns`, `schema.properties`, `addRow`, `deleteRow`, `writeTo` |
@@ -67,7 +67,7 @@ expects is summarised below. When authoring or repairing a card, make sure the
 | `form`           | Object of current field values: `{ fieldA: ..., fieldB: ... }`                         | `fields` (JSON-schema-ish: `properties`, `required`), `writeTo` |
 | `notes`          | String (the current notes content)                                                     | `writeTo`                                           |
 | `todo`           | Array of items: `[{ text: string, done: boolean }, ...]`                               | `writeTo`                                           |
-| `actions`        | (Optional) array of button defs; usually buttons come from `data.buttons`              | `buttons: [{ id, label, style?, size?, disabled? }]`|
+| `actions`        | (no value — `buttons` are config, see options)                                          | `buttons: [{ id, label, style?, size?, disabled? }]`|
 
 Notes:
 

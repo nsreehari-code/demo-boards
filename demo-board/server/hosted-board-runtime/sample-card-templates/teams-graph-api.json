@@ -58,8 +58,8 @@
           {
             "kind": "form",
             "label": "Channel",
-            "data": {
-              "writeTo": "card_data",
+            "writeTo": "card_data",
+            "spec": {
               "discardLabel": "Reset",
               "saveLabel": "Apply",
               "fields": {
@@ -91,7 +91,9 @@
             "kind": "table",
             "label": "Recent Messages",
             "data": {
-              "bind": "computed_values.rows",
+              "bind": "computed_values.rows"
+            },
+            "spec": {
               "columns": [
                 "from",
                 "type",

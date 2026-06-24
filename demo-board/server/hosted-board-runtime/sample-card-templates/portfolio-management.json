@@ -27,8 +27,10 @@
             "kind": "editable-table",
             "label": "Holdings",
             "data": {
-              "bind": "card_data.holdings",
-              "writeTo": "card_data.holdings",
+              "bind": "card_data.holdings"
+            },
+            "writeTo": "card_data.holdings",
+            "spec": {
               "columns": [
                 "ticker",
                 "quantity",
@@ -128,7 +130,9 @@
             "kind": "table",
             "label": "Prices",
             "data": {
-              "bind": "computed_values.prices",
+              "bind": "computed_values.prices"
+            },
+            "spec": {
               "columns": [
                 "ticker",
                 "name",
@@ -207,7 +211,9 @@
             "kind": "chart",
             "label": "Portfolio Value by Ticker",
             "data": {
-              "bind": "computed_values.positions",
+              "bind": "computed_values.positions"
+            },
+            "spec": {
               "chartType": "pie",
               "columns": [
                 "ticker",
@@ -422,10 +428,12 @@
             "kind": "ref",
             "label": "Proposed Trades",
             "data": {
-              "bind": "computed_values.rebalance_proposed_trades",
+              "bind": "computed_values.rebalance_proposed_trades"
+            },
+            "writeTo": "card_data.proposed_trades",
+            "spec": {
               "viewBind": "computed_values.rebalance_view",
               "fallbackKind": "editable-table",
-              "writeTo": "card_data.proposed_trades",
               "columns": [
                 "ticker",
                 "direction",
@@ -461,9 +469,9 @@
             "kind": "notes",
             "label": "Notes",
             "data": {
-              "bind": "card_data.notes",
-              "writeTo": "card_data.notes"
-            }
+              "bind": "card_data.notes"
+            },
+            "writeTo": "card_data.notes"
           }
         ]
       },

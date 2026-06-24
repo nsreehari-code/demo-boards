@@ -52,41 +52,95 @@
       "ai-workdirs-setup": [
         {
           "copilot-root": "default",
-          "instructionsDirs": ["{{BOARD_ROOT}}/server/chat-flow/instructions", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/instructions"],
-          "agentsDirs": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/agents"],
-          "agentsSkills": ["{{BOARD_ROOT}}/server/chat-flow/skills", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/skills"],
-          "agentsHooks": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/hooks"],
+          "instructionsDirs": [
+            "{{BOARD_ROOT}}/server/chat-flow/instructions",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/instructions"
+          ],
+          "agentsDirs": [
+            "{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/agents"
+          ],
+          "agentsSkills": [
+            "{{BOARD_ROOT}}/server/chat-flow/skills",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/skills"
+          ],
+          "agentsHooks": [
+            "{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/default/hooks"
+          ],
           "copyScripts": []
         },
         {
           "copilot-root": "worker-default",
-          "instructionsDirs": ["{{BOARD_ROOT}}/server/chat-flow/instructions", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/instructions"],
-          "agentsDirs": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/agents"],
-          "agentsSkills": ["{{BOARD_ROOT}}/server/chat-flow/skills", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/skills"],
-          "agentsHooks": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/hooks"],
+          "instructionsDirs": [
+            "{{BOARD_ROOT}}/server/chat-flow/instructions",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/instructions"
+          ],
+          "agentsDirs": [
+            "{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/agents"
+          ],
+          "agentsSkills": [
+            "{{BOARD_ROOT}}/server/chat-flow/skills",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/skills"
+          ],
+          "agentsHooks": [
+            "{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/worker-default/hooks"
+          ],
           "copyScripts": []
         },
         {
           "copilot-root": "gandalf",
-          "instructionsDirs": ["{{BOARD_ROOT}}/server/chat-flow/instructions", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/gandalf/instructions"],
-          "agentsDirs": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/gandalf/agents"],
-          "agentsSkills": ["{{BOARD_ROOT}}/server/chat-flow/skills", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/gandalf/skills"],
-          "agentsHooks": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/gandalf/hooks"],
+          "instructionsDirs": [
+            "{{BOARD_ROOT}}/server/chat-flow/instructions",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/gandalf/instructions"
+          ],
+          "agentsDirs": [
+            "{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/gandalf/agents"
+          ],
+          "agentsSkills": [
+            "{{BOARD_ROOT}}/server/chat-flow/skills",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/gandalf/skills"
+          ],
+          "agentsHooks": [
+            "{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/gandalf/hooks"
+          ],
           "copyScripts": []
         },
         {
           "copilot-root": "strategist",
-          "instructionsDirs": ["{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/instructions", "{{BOARD_ROOT}}/server/chat-flow/instructions-strategist", "{{BOARD_ROOT}}/server/chat-flow/instructions"],
-          "agentsDirs": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/agents"],
-          "agentsSkills": ["{{BOARD_ROOT}}/server/chat-flow/skills", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/skills"],
-          "agentsHooks": ["{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks", "{{BOARD_ROOT}}/server/chat-flow/hooks-strategist", "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/hooks"],
+          "instructionsDirs": [
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/instructions",
+            "{{BOARD_ROOT}}/server/chat-flow/instructions-strategist",
+            "{{BOARD_ROOT}}/server/chat-flow/instructions"
+          ],
+          "agentsDirs": [
+            "{{BOARD_ROOT}}/server/chat-flow/copilot-chat/agents",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/agents"
+          ],
+          "agentsSkills": [
+            "{{BOARD_ROOT}}/server/chat-flow/skills",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/skills"
+          ],
+          "agentsHooks": [
+            "{{BOARD_ROOT}}/server/chat-flow/copilot-chat/hooks",
+            "{{BOARD_ROOT}}/server/chat-flow/hooks-strategist",
+            "{{BOARD_ROOT}}/boards/{{boardId}}/copilot/strategist/hooks"
+          ],
           "copyScripts": []
         }
       ],
       "copilotSetupScripts": [
         {
           "script": "{{BOARD_ROOT}}/server/sync-copilot-mcp-config.js",
-          "args": ["--refresh", "--agentface-url", "{{AGENT_FACE_MCP_URL}}"]
+          "args": [
+            "--refresh",
+            "--agentface-url",
+            "{{AGENT_FACE_MCP_URL}}"
+          ]
         }
       ]
     }
@@ -151,7 +205,11 @@
             "desc": "Board intake card for reviewing and managing incoming evidence."
           },
           "__private": {
-            "chat": {"copilot": {"ws": "gandalf"} }
+            "chat": {
+              "copilot": {
+                "ws": "gandalf"
+              }
+            }
           },
           "view": {
             "elements": [
@@ -165,7 +223,7 @@
           },
           "card_data": {}
         },
-                {
+        {
           "id": "gandalf-postbox",
           "meta": {
             "title": "Postbox",
@@ -175,7 +233,7 @@
           },
           "view": {
             "elements": [
-                            {
+              {
                 "kind": "markdown",
                 "data": {
                   "value": "Review and manage incoming evidence for this board."
@@ -228,7 +286,12 @@
             "card_renderer": "ingest"
           },
           "__private": {
-            "chat": {"copilot": {"ws": "gandalf"}, "visible_controlplane_only": true }
+            "chat": {
+              "copilot": {
+                "ws": "gandalf"
+              },
+              "visible_controlplane_only": true
+            }
           },
           "view": {
             "elements": [
@@ -242,21 +305,29 @@
           },
           "card_data": {}
         },
-
         {
           "id": "journey-strategist",
           "meta": {
             "title": "Journey Strategist",
             "gandalf": true,
             "card_renderer": "strategist",
-            "tags": ["strategist", "journey", "exploration"],
+            "tags": [
+              "strategist",
+              "journey",
+              "exploration"
+            ],
             "desc": "Board-level journey strategist. Wakes on compact observatory updates, reads the current journey via board-inspection tools, and authors the next move — new or updated cards — to keep the journey advancing toward its objective.",
             "presentation": {
               "footprint": "wide"
             }
           },
           "__private": {
-            "chat": {"copilot": {"ws": "gandalf"}, "visible_controlplane_only": true }
+            "chat": {
+              "copilot": {
+                "ws": "gandalf"
+              },
+              "visible_controlplane_only": true
+            }
           },
           "requires": [
             "journey_observables",
@@ -343,23 +414,25 @@
                 "kind": "notes",
                 "label": "Steering / Guardrails (optional)",
                 "data": {
-                  "bind": "card_data.steering",
-                  "writeTo": "card_data.steering"
-                }
+                  "bind": "card_data.steering"
+                },
+                "writeTo": "card_data.steering"
               },
               {
                 "kind": "notes",
                 "label": "Scope — data domains, time window (optional)",
                 "data": {
-                  "bind": "card_data.scope",
-                  "writeTo": "card_data.scope"
-                }
+                  "bind": "card_data.scope"
+                },
+                "writeTo": "card_data.scope"
               },
               {
                 "kind": "badge",
                 "label": "Strategist Status",
                 "data": {
-                  "bind": "computed_values.status_value",
+                  "bind": "computed_values.status_value"
+                },
+                "spec": {
                   "colorMap": {
                     "advancing": "success",
                     "waiting": "warning",
@@ -393,7 +466,9 @@
                 "kind": "table",
                 "label": "Cards Created This Cycle",
                 "data": {
-                  "bind": "computed_values.created_table",
+                  "bind": "computed_values.created_table"
+                },
+                "spec": {
                   "columns": [
                     "card_id",
                     "purpose",
@@ -406,7 +481,9 @@
                 "kind": "list",
                 "label": "Deferred Branches",
                 "data": {
-                  "bind": "computed_values.next_candidates_list",
+                  "bind": "computed_values.next_candidates_list"
+                },
+                "spec": {
                   "placeholder": "No deferred branches"
                 }
               }
@@ -426,7 +503,11 @@
           "meta": {
             "title": "Journey Observatory",
             "gandalf": true,
-            "tags": ["observatory", "journey", "observables"],
+            "tags": [
+              "observatory",
+              "journey",
+              "observables"
+            ],
             "desc": "Reads the board's own runtime status whenever the journey graph changes and publishes a compact observatory object plus UI metrics for the strategist. Deterministic observation only — it never authors cards.",
             "presentation": {
               "footprint": "wide"
@@ -444,19 +525,46 @@
               "outputFile": "journey-observatory-observations.json",
               "observables": {
                 "scope": "board-runtime",
-                "excludeCardIds": ["journey-strategist", "card-journey-observatory"]
+                "excludeCardIds": [
+                  "journey-strategist",
+                  "card-journey-observatory"
+                ]
               }
             }
           ],
           "compute": [
-            { "bindTo": "obs_card_count", "expr": "fetched_sources.observations.card_count ? fetched_sources.observations.card_count : 0" },
-            { "bindTo": "obs_completed_count", "expr": "fetched_sources.observations.completed_count ? fetched_sources.observations.completed_count : 0" },
-            { "bindTo": "obs_failed_count", "expr": "fetched_sources.observations.failed_count ? fetched_sources.observations.failed_count : 0" },
-            { "bindTo": "obs_blocked_count", "expr": "fetched_sources.observations.blocked_count ? fetched_sources.observations.blocked_count : 0" },
-            { "bindTo": "obs_in_progress_count", "expr": "fetched_sources.observations.in_progress_count ? fetched_sources.observations.in_progress_count : 0" },
-            { "bindTo": "obs_settled", "expr": "fetched_sources.observations.settled = true" },
-            { "bindTo": "obs_satisfied_ratio", "expr": "fetched_sources.observations.card_count > 0 ? (fetched_sources.observations.cards_fully_satisfied / fetched_sources.observations.card_count) : 0" },
-            { "bindTo": "obs_progress_ratio", "expr": "$min([1, (fetched_sources.observations.completed_count / 5)])" },
+            {
+              "bindTo": "obs_card_count",
+              "expr": "fetched_sources.observations.card_count ? fetched_sources.observations.card_count : 0"
+            },
+            {
+              "bindTo": "obs_completed_count",
+              "expr": "fetched_sources.observations.completed_count ? fetched_sources.observations.completed_count : 0"
+            },
+            {
+              "bindTo": "obs_failed_count",
+              "expr": "fetched_sources.observations.failed_count ? fetched_sources.observations.failed_count : 0"
+            },
+            {
+              "bindTo": "obs_blocked_count",
+              "expr": "fetched_sources.observations.blocked_count ? fetched_sources.observations.blocked_count : 0"
+            },
+            {
+              "bindTo": "obs_in_progress_count",
+              "expr": "fetched_sources.observations.in_progress_count ? fetched_sources.observations.in_progress_count : 0"
+            },
+            {
+              "bindTo": "obs_settled",
+              "expr": "fetched_sources.observations.settled = true"
+            },
+            {
+              "bindTo": "obs_satisfied_ratio",
+              "expr": "fetched_sources.observations.card_count > 0 ? (fetched_sources.observations.cards_fully_satisfied / fetched_sources.observations.card_count) : 0"
+            },
+            {
+              "bindTo": "obs_progress_ratio",
+              "expr": "$min([1, (fetched_sources.observations.completed_count / 5)])"
+            },
             {
               "bindTo": "journey_value",
               "expr": "fetched_sources.observations.card_count > 0 ? $round($max([0, $min([100, computed_values.obs_progress_ratio * (70 + computed_values.obs_satisfied_ratio * 20 + (computed_values.obs_settled ? 10 : 0)) - fetched_sources.observations.failed_count * 25 - fetched_sources.observations.blocked_count * 15])])) : 0"
@@ -475,21 +583,31 @@
             }
           ],
           "provides": [
-            { "bindTo": "journey_observables", "ref": "computed_values.journey_observables" },
-            { "bindTo": "board_observables", "ref": "computed_values.board_observables" }
+            {
+              "bindTo": "journey_observables",
+              "ref": "computed_values.journey_observables"
+            },
+            {
+              "bindTo": "board_observables",
+              "ref": "computed_values.board_observables"
+            }
           ],
           "view": {
             "elements": [
               {
                 "kind": "metric",
                 "label": "Journey Value",
-                "data": { "bind": "computed_values.journey_value" }
+                "data": {
+                  "bind": "computed_values.journey_value"
+                }
               },
               {
                 "kind": "badge",
                 "label": "Value Band",
                 "data": {
-                  "bind": "computed_values.journey_value_band",
+                  "bind": "computed_values.journey_value_band"
+                },
+                "spec": {
                   "colorMap": {
                     "healthy": "success",
                     "building": "warning",
@@ -501,22 +619,30 @@
               {
                 "kind": "metric",
                 "label": "Cards (work graph)",
-                "data": { "bind": "computed_values.obs_card_count" }
+                "data": {
+                  "bind": "computed_values.obs_card_count"
+                }
               },
               {
                 "kind": "metric",
                 "label": "Completed",
-                "data": { "bind": "computed_values.obs_completed_count" }
+                "data": {
+                  "bind": "computed_values.obs_completed_count"
+                }
               },
               {
                 "kind": "metric",
                 "label": "Blocked",
-                "data": { "bind": "computed_values.obs_blocked_count" }
+                "data": {
+                  "bind": "computed_values.obs_blocked_count"
+                }
               },
               {
                 "kind": "metric",
                 "label": "Failed",
-                "data": { "bind": "computed_values.obs_failed_count" }
+                "data": {
+                  "bind": "computed_values.obs_failed_count"
+                }
               }
             ]
           },

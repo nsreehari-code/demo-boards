@@ -1,0 +1,11 @@
+{
+  "entries": [
+    {
+      "key": "strategist.pre-journey-hold",
+      "value": "When a journey board's seed/intent holds only the factory placeholder (no real human input) and a clarify/intake card is already in place, HOLD rather than fabricate downstream work. Runtime 'completed' + present provides tokens can be hollow scaffolding defaults, not signal. Build the intake surface once, then wait for real input; authoring research/itinerary cards off an empty brief is value-burning churn.",
+      "deprecated": false,
+      "createdAt": "2026-06-24T20:29:57.038Z",
+      "updatedAt": "2026-06-24T20:29:57.038Z"
+    }
+  ]
+}

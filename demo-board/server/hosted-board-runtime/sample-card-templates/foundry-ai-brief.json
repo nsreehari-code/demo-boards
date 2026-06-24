@@ -40,8 +40,8 @@
           {
             "kind": "form",
             "label": "Topic",
-            "data": {
-              "writeTo": "card_data",
+            "writeTo": "card_data",
+            "spec": {
               "saveLabel": "Apply",
               "discardLabel": "Reset",
               "fields": {

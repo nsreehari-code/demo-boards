@@ -53,7 +53,9 @@
         "kind": "table",
         "label": "Prices",
         "data": {
-          "bind": "computed_values.prices",
+          "bind": "computed_values.prices"
+        },
+        "spec": {
           "columns": [
             "ticker",
             "name",

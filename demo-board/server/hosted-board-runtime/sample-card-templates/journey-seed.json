@@ -29,9 +29,9 @@
             "kind": "notes",
             "label": "What do you want to investigate?",
             "data": {
-              "bind": "card_data.intent",
-              "writeTo": "card_data.intent"
-            }
+              "bind": "card_data.intent"
+            },
+            "writeTo": "card_data.intent"
           }
         ]
       },

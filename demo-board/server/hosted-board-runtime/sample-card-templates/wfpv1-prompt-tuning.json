@@ -106,7 +106,9 @@
             "kind": "table",
             "label": "Activity Preview",
             "data": {
-              "bind": "computed_values.activity_preview_rows",
+              "bind": "computed_values.activity_preview_rows"
+            },
+            "spec": {
               "columns": [
                 "Date (UTC)",
                 "Activity",
@@ -204,7 +206,9 @@
             "kind": "table",
             "label": "Per-Sample Results",
             "data": {
-              "bind": "computed_values.batch_results_table",
+              "bind": "computed_values.batch_results_table"
+            },
+            "spec": {
               "columns": [
                 "alert_id",
                 "ground_truth_label",
@@ -363,7 +367,9 @@
             "kind": "text",
             "label": "Execution Output",
             "data": {
-              "bind": "computed_values.execution_output",
+              "bind": "computed_values.execution_output"
+            },
+            "spec": {
               "hideIfEmpty": true
             }
           },
@@ -418,7 +424,9 @@
             "kind": "table",
             "label": "Failure Patterns",
             "data": {
-              "bind": "computed_values.failure_patterns_table",
+              "bind": "computed_values.failure_patterns_table"
+            },
+            "spec": {
               "columns": [
                 "category",
                 "count",
@@ -463,9 +471,9 @@
             "kind": "notes",
             "label": "Guidance",
             "data": {
-              "bind": "card_data.guidance_text",
-              "writeTo": "card_data.guidance_text"
-            }
+              "bind": "card_data.guidance_text"
+            },
+            "writeTo": "card_data.guidance_text"
           },
           {
             "kind": "markdown",
@@ -512,9 +520,9 @@
             "kind": "notes",
             "label": "Observations",
             "data": {
-              "bind": "card_data.observation_text",
-              "writeTo": "card_data.observation_text"
-            }
+              "bind": "card_data.observation_text"
+            },
+            "writeTo": "card_data.observation_text"
           },
           {
             "kind": "markdown",
@@ -609,7 +617,9 @@
             "kind": "table",
             "label": "Prompt Slots",
             "data": {
-              "bind": "computed_values.prompt_slots_table",
+              "bind": "computed_values.prompt_slots_table"
+            },
+            "spec": {
               "columns": [
                 "slot_id",
                 "agent",
@@ -644,9 +654,9 @@
             "kind": "notes",
             "label": "Prompt Draft",
             "data": {
-              "bind": "card_data.prompt_draft",
-              "writeTo": "card_data.prompt_draft"
-            }
+              "bind": "card_data.prompt_draft"
+            },
+            "writeTo": "card_data.prompt_draft"
           }
         ]
       },
@@ -851,7 +861,9 @@
             "kind": "table",
             "label": "Ledger Entries",
             "data": {
-              "bind": "computed_values.ledger_rows",
+              "bind": "computed_values.ledger_rows"
+            },
+            "spec": {
               "columns": [
                 "sample_index",
                 "alert_id",
@@ -931,8 +943,8 @@
           {
             "kind": "form",
             "label": "Cursor",
-            "data": {
-              "writeTo": "card_data.cursor",
+            "writeTo": "card_data.cursor",
+            "spec": {
               "fields": {
                 "type": "object",
                 "properties": {
@@ -959,7 +971,9 @@
             "kind": "table",
             "label": "Cursor State",
             "data": {
-              "bind": "computed_values.current_sample_row",
+              "bind": "computed_values.current_sample_row"
+            },
+            "spec": {
               "columns": [
                 "alert_id",
                 "ground_truth_label",
@@ -1047,8 +1061,8 @@
           {
             "kind": "form",
             "label": "Iteration Inputs",
-            "data": {
-              "writeTo": "card_data.sample_set",
+            "writeTo": "card_data.sample_set",
+            "spec": {
               "fields": {
                 "type": "object",
                 "properties": {
@@ -1100,7 +1114,9 @@
             "kind": "table",
             "label": "Available Sets",
             "data": {
-              "bind": "computed_values.sample_sets_table",
+              "bind": "computed_values.sample_sets_table"
+            },
+            "spec": {
               "columns": [
                 "sample_set_id",
                 "title",
@@ -1113,7 +1129,9 @@
             "kind": "table",
             "label": "Alert IDs In Set",
             "data": {
-              "bind": "computed_values.selected_alert_rows",
+              "bind": "computed_values.selected_alert_rows"
+            },
+            "spec": {
               "columns": [
                 "alert_id"
               ],
@@ -1215,17 +1233,17 @@
             "kind": "notes",
             "label": "Investigation Plan Seed (for codegen)",
             "data": {
-              "bind": "card_data.investigation_plan_json",
-              "writeTo": "card_data.investigation_plan_json"
-            }
+              "bind": "card_data.investigation_plan_json"
+            },
+            "writeTo": "card_data.investigation_plan_json"
           },
           {
             "kind": "notes",
             "label": "Direct Feedback Seed",
             "data": {
-              "bind": "card_data.direct_feedback",
-              "writeTo": "card_data.direct_feedback"
-            }
+              "bind": "card_data.direct_feedback"
+            },
+            "writeTo": "card_data.direct_feedback"
           },
           {
             "kind": "markdown",
@@ -1259,7 +1277,9 @@
             "kind": "text",
             "label": "Raw Output",
             "data": {
-              "bind": "computed_values.raw_output",
+              "bind": "computed_values.raw_output"
+            },
+            "spec": {
               "hideIfEmpty": true
             }
           }
@@ -1301,8 +1321,8 @@
           {
             "kind": "form",
             "label": "Tuning Inputs",
-            "data": {
-              "writeTo": "card_data.target",
+            "writeTo": "card_data.target",
+            "spec": {
               "fields": {
                 "type": "object",
                 "properties": {
@@ -1412,7 +1432,9 @@
             "kind": "badge",
             "label": "Status",
             "data": {
-              "bind": "computed_values.verdict_badge",
+              "bind": "computed_values.verdict_badge"
+            },
+            "spec": {
               "colorMap": {
                 "usable": "green",
                 "strong candidate": "green",

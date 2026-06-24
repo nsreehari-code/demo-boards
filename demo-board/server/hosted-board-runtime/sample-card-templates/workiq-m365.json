@@ -109,8 +109,8 @@
           {
             "kind": "form",
             "label": "Time Horizon",
-            "data": {
-              "writeTo": "card_data",
+            "writeTo": "card_data",
+            "spec": {
               "saveLabel": "Apply",
               "discardLabel": "Reset",
               "fields": {
@@ -182,8 +182,8 @@
           {
             "kind": "form",
             "label": "Lookback Window",
-            "data": {
-              "writeTo": "card_data",
+            "writeTo": "card_data",
+            "spec": {
               "saveLabel": "Apply",
               "discardLabel": "Reset",
               "fields": {
