@@ -111,7 +111,7 @@ function runCopilotNodeSmoke(tmpDir) {
   console.log('OK  copilot-cli.js query smoke check passed');
 }
 
-function runWorkiqCliSmoke() {
+function smokeWorkiqCliInstall() {
   const workiqJs = resolveWorkiqCliPath();
   const result = run(process.execPath, [workiqJs, 'ask', '-q', query], {
     stdio: ['inherit', 'pipe', 'pipe'],
@@ -134,11 +134,11 @@ function main() {
       runCopilotNodeSmoke(tmpDir);
     } else if (mode === 'workiq') {
       console.log('Running WorkIQ CLI setup smoke check...');
-      runWorkiqCliSmoke();
+      smokeWorkiqCliInstall();
     } else {
       console.log('Running Copilot + WorkIQ CLI setup smoke checks...');
       runCopilotNodeSmoke(tmpDir);
-      runWorkiqCliSmoke();
+      smokeWorkiqCliInstall();
     }
     console.log('All setup checks passed.');
   } finally {
