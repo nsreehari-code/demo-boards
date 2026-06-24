@@ -64,7 +64,7 @@ expects is summarised below. When authoring or repairing a card, make sure the
 | `chart`          | Array of row objects, OR `{ labels: [...], datasets: [{ label, data: [...] }] }`       | `chartType`, `columns`, `series`, `stacked`, `legend`, `grid`, `height` (see Charts section) |
 | `searchbox`      | Single text/number/date field value, usually persisted through `card_data`                | `fields.properties` (single field), `writeTo`, `actionLabel` |
 | `selection`      | Single selected value, with options from enum or bound row-source data                     | `fields.properties` (single field), `writeTo`      |
-| `form`           | Object of current field values: `{ fieldA: ..., fieldB: ... }`                         | `fields` (JSON-schema-ish: `properties`, `required`), `writeTo` |
+| `form`           | Object of current field values: `{ fieldA: ..., fieldB: ... }`                         | `fields` (JSON-schema-ish: `properties`, `required`), `validators`, `writeTo` |
 | `notes`          | String (the current notes content)                                                     | `writeTo`                                           |
 | `todo`           | Array of items: `[{ text: string, done: boolean }, ...]`                               | `writeTo`                                           |
 | `actions`        | (no value — `buttons` are config, see options)                                          | `buttons: [{ id, label, style?, size?, disabled? }]`|
@@ -74,6 +74,12 @@ Notes:
 - Editable kinds (`editable-table`, `form`, `searchbox`, `selection`, `notes`, `todo`) must set
   `data.writeTo` to the data-object path their saves should publish to. Without
   `writeTo`, edits are dropped silently.
+- `form` required-field emptiness is enforced by `fields.required` (submit stays
+  disabled until those are filled). Use `spec.validators` only for format or
+  cross-field rules: an array of `[jsonataExpr, errorMessage]` pairs, each expr
+  evaluated against `{ data: <current values> }` and must return `true` to pass.
+  Validators run on blur and submit. Make rules pass through on empty (e.g.
+  `data.x = '' or <rule>`) so they don't duplicate the `required` check.
 - `actions` buttons emit save events keyed by `button.id`; the card's action
   handler is expected to know what each id means.
 
