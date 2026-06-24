@@ -1031,8 +1031,18 @@ async function handleManageBoardsRoute({
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
     }
-    await boardLayouts.set(id, layout);
-    sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(layout) } });
+    const mode = typeof args?.mode === 'string' ? args.mode.trim() : '';
+    let nextLayout = layout;
+    if (mode === 'shallow-merge') {
+      const existing = await boardLayouts.get(id);
+      const base = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {};
+      nextLayout = { ...base, ...layout };
+    } else if (mode && mode !== 'replace') {
+      sendJson(res, 400, { status: 'error', error: `args.mode must be 'replace' or 'shallow-merge'` });
+      return;
+    }
+    await boardLayouts.set(id, nextLayout);
+    sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(nextLayout) } });
     return;
   }
 
