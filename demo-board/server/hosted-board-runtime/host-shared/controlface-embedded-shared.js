@@ -303,6 +303,17 @@
       throw new Error('createManagedBoardsApi requires full board lifecycle functions');
     }
 
+    function readHostConfigArgs(args) {
+      var source = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
+      return {
+        hostConfigPath: normalizeOptionalString(source.hostConfigPath),
+        localFsConfigLoaderPath: normalizeOptionalString(source.localFsConfigLoaderPath),
+        templatesConfigPath: normalizeOptionalString(source.templatesConfigPath),
+        assistantRegistryPath: normalizeOptionalString(source.assistantRegistryPath),
+        setupSingleAiWorkspaceScriptPath: normalizeOptionalString(source.setupSingleAiWorkspaceScriptPath),
+      };
+    }
+
     async function getExistingState(boardId) {
       var normalizedBoardId = normalizeRequiredBoardId(boardId);
       var board = await Promise.resolve(lifecycle.get(normalizedBoardId));
@@ -621,6 +632,40 @@
           return createHttpEnvelope(200, { status: 'success', data: { board: summarizeBoardForList(addedState.board) } });
         }
 
+        if (subcommand === 'describe-host-config') {
+          if (!deps.hostBridge || typeof deps.hostBridge.DescribeHostConfigJson !== 'function') {
+            return createErrorEnvelope(501, 'host config bridge is unavailable');
+          }
+          var describeArgs = readHostConfigArgs(args);
+          var described = JSON.parse(deps.hostBridge.DescribeHostConfigJson(
+            describeArgs.hostConfigPath,
+            describeArgs.localFsConfigLoaderPath,
+            describeArgs.templatesConfigPath,
+            describeArgs.assistantRegistryPath,
+            describeArgs.setupSingleAiWorkspaceScriptPath
+          ));
+          return createHttpEnvelope(200, { status: 'success', data: described });
+        }
+
+        if (subcommand === 'resolve-board-config') {
+          if (!deps.hostBridge || typeof deps.hostBridge.ResolveBoardConfigJson !== 'function') {
+            return createErrorEnvelope(501, 'host config bridge is unavailable');
+          }
+          var resolveBoardId = normalizeRequiredBoardId(args.boardId);
+          var resolveRecord = args.record && typeof args.record === 'object' && !Array.isArray(args.record) ? cloneJsonValue(args.record) : null;
+          if (!resolveRecord) {
+            return createErrorEnvelope(400, 'args.record is required (object)');
+          }
+          var resolveArgs = readHostConfigArgs(args);
+          var resolved = JSON.parse(deps.hostBridge.ResolveBoardConfigJson(
+            resolveBoardId,
+            JSON.stringify(resolveRecord),
+            resolveArgs.hostConfigPath,
+            resolveArgs.localFsConfigLoaderPath
+          ));
+          return createHttpEnvelope(200, { status: 'success', data: resolved });
+        }
+
         if (subcommand === 'save-meta') {
           var metadata = args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata) ? cloneJsonValue(args.metadata) : null;
           if (!metadata) {
@@ -665,6 +710,22 @@
           var refreshState = await getRequiredState(args.boardId);
           requireActiveRuntimeBoard(refreshState.boardId, 409);
           return createHttpEnvelope(200, { status: 'success', data: { board: summarizeBoardForList(refreshState.board) } });
+        }
+
+        if (subcommand === 'setup-board-workspace') {
+          if (!deps.hostBridge || typeof deps.hostBridge.SetupBoardWorkspace !== 'function') {
+            return createErrorEnvelope(501, 'workspace setup bridge is unavailable');
+          }
+          var setupState = await getRequiredState(args.boardId);
+          var setupArgs = readHostConfigArgs(args);
+          deps.hostBridge.SetupBoardWorkspace(
+            setupState.boardId,
+            JSON.stringify(setupState.board),
+            setupArgs.hostConfigPath,
+            setupArgs.localFsConfigLoaderPath,
+            setupArgs.setupSingleAiWorkspaceScriptPath
+          );
+          return createHttpEnvelope(200, { status: 'success', data: { board: summarizeBoardForList(setupState.board) } });
         }
 
         if (subcommand === 'deprecate-board') {
