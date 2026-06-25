@@ -10,9 +10,19 @@ const hostedServerLogPath = path.join(boardDir, 'logs', 'hosted-server.log');
 const prepareHostsEntry = path.join(runtimeDir, 'scripts', 'prepare-local-hosts.js');
 const controlfaceEntry = path.join(runtimeDir, 'http-mcp-controlface', 'controlface-server.js');
 const queueRunnerEntry = path.join(runtimeDir, 'queue-runner', 'queue-runner.js');
+const runtimeCoreEntry = path.join(runtimeDir, 'runtime-core', 'index.js');
 const localfsConfigArgv = ['--config', './hosted-board-runtime.localfs.config.json'];
 
-for (const entryPath of [prepareHostsEntry, controlfaceEntry, queueRunnerEntry]) {
+// Opt-in single-process runtime core: runs the HTTP runtime surface plus the
+// queue-runner in one process. Default (unset) keeps the legacy two-process
+// launch unchanged.
+const useEmbedded = process.argv.includes('--embedded') || process.env.DEMO_BOARDS_EMBEDDED === '1';
+
+const requiredEntries = useEmbedded
+  ? [prepareHostsEntry, runtimeCoreEntry]
+  : [prepareHostsEntry, controlfaceEntry, queueRunnerEntry];
+
+for (const entryPath of requiredEntries) {
   if (!fs.existsSync(entryPath)) {
     console.error(`[start-local-hosts] Missing ${entryPath}`);
     process.exit(1);
@@ -69,9 +79,14 @@ function prepareHosts() {
       console.error(`[start-local-hosts] prepare-local-hosts exited with code ${code ?? 0}`);
       process.exit(code ?? 1);
     }
-    const controlface = startRuntime(controlfaceEntry, 'controlface');
-    const queueRunner = startRuntime(queueRunnerEntry, 'queue-runner');
-    runtimeChildren = [controlface, queueRunner];
+    if (useEmbedded) {
+      const runtimeCore = startRuntime(runtimeCoreEntry, 'runtime-core');
+      runtimeChildren = [runtimeCore];
+    } else {
+      const controlface = startRuntime(controlfaceEntry, 'controlface');
+      const queueRunner = startRuntime(queueRunnerEntry, 'queue-runner');
+      runtimeChildren = [controlface, queueRunner];
+    }
 
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);

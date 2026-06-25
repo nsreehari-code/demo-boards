@@ -124,8 +124,15 @@ export function buildBoardBundle(boardId, boardConfig, _localFsServices = {}, ru
   const requestProcessAccumulated = typeof runtimeHooks.requestProcessAccumulated === 'function'
     ? runtimeHooks.requestProcessAccumulated
     : () => {};
+  const publishBoardChangeNotifications = typeof runtimeHooks.publishBoardChangeNotifications === 'function'
+    ? runtimeHooks.publishBoardChangeNotifications
+    : null;
   boardAdapter.requestProcessAccumulated = requestProcessAccumulated;
   nonCoreAdapter.requestProcessAccumulated = requestProcessAccumulated;
+  if (publishBoardChangeNotifications) {
+    boardAdapter.publishBoardChangeNotifications = publishBoardChangeNotifications;
+    nonCoreAdapter.publishBoardChangeNotifications = publishBoardChangeNotifications;
+  }
 
   const hostedTaskExecutorRef = makeHostedTaskExecutorRef(boardId);
   const chatHandlerFlow = buildHostedChatHandlerFlow(boardConfig);
