@@ -17,7 +17,7 @@ The published frontend artifacts remain in this repo under `docs/`, but the Vite
 npm install
 ```
 
-2. Start the local backend (MCP server + hosted runtime) as a background daemon:
+2. Start the local backend (MCP server + runtime core) as a background daemon:
 
 ```bash
 npm i -g pm2   # one-time, required by the daemon (see below)
@@ -54,8 +54,9 @@ pm2 save
 pm2 startup           # follow the printed instructions (Windows: install pm2-windows-startup)
 ```
 
-PM2 wraps `scripts/start-server.cjs`, auto-restarts on crash, and writes logs to
-`demo-board/logs/pm2-out.log` and `demo-board/logs/pm2-error.log`.
+PM2 manages the MCP server plus the shared runtime core, auto-restarts on crash,
+and writes logs to `demo-board/logs/pm2-mcp-out.log`, `demo-board/logs/pm2-mcp-error.log`,
+`demo-board/logs/pm2-runtime-out.log`, and `demo-board/logs/pm2-runtime-error.log`.
 
 ## Frontend Source
 
@@ -68,7 +69,7 @@ PM2 wraps `scripts/start-server.cjs`, auto-restarts on crash, and writes logs to
 |---|---|
 | `npm start` | Start the backend detached via PM2 (alias for `start:daemon`; terminal can be closed) |
 | `npm stop` | Stop the PM2-managed backend (alias for `stop:daemon`) |
-| `npm run start:fg` | Start the MCP server and hosted runtime locally in the foreground (frontend is hosted at https://nsreehari-code.github.io/demo-boards) |
+| `npm run start:fg` | Start the MCP server and the shared runtime core locally in the foreground (frontend is hosted at https://nsreehari-code.github.io/demo-boards) |
 | `npm run start:daemon` | Start the backend detached via PM2 (terminal can be closed) |
 | `npm run stop:daemon` | Stop the PM2-managed backend |
 | `npm run status:daemon` | Show PM2 process status |

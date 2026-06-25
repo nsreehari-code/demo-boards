@@ -4,9 +4,9 @@ import http from 'node:http';
 import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHostedBoardQueueLaneRegistry, createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
-import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
+import { createHttpBoardCallbackTransport, createInProcessBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
 import { loadLocalFsHostConfig, resolveConfigRelativePath } from '../localfs-adapter/load-config.js';
 import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
@@ -18,6 +18,10 @@ import {
   loadTaskExecutorModule,
 } from '../host-shared/worker-modules/task-executor-module.js';
 import { createWakeTrigger, queueCollectionPath, startLaneRunners } from '../host-shared/lanes/runtime.js';
+import {
+  boardSourceFetchCallbackKey,
+  isEmbeddedHost,
+} from '../host-shared/in-process-source-fetch-callback.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -381,11 +385,15 @@ async function postMcp(url, tool, args = {}) {
   return payload;
 }
 
-function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, serverUrl, notifyServerUrl, notifyUrl, mcpServerUrl, apiBasePrefix, watchpartyFileRegistry }) {
+function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, serverUrl, notifyServerUrl, notifyUrl, watchpartyPublishNotifications, mcpServerUrl, apiBasePrefix, watchpartyFileRegistry }) {
   const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
     serverUrl,
+    boardToolInvoker: typeof runtime?.boardToolInvoker === 'function'
+      ? runtime.boardToolInvoker
+      : null,
     notifyServerUrl,
     notifyUrl,
+    watchpartyPublishNotifications,
     mcpServerUrl,
     apiBasePrefix,
     configDir: runtime.configDir,
@@ -448,7 +456,49 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
   });
 }
 
-async function main() {
+function createInProcessNotificationPublisher(boardId, runtimeBoardRegistry, processLogger) {
+  return async (notifications) => {
+    if (!Array.isArray(notifications) || notifications.length === 0) {
+      return;
+    }
+    const entry = runtimeBoardRegistry?.get(boardId);
+    const runtime = entry?.runtime;
+    if (!runtime || typeof runtime.emitNotification !== 'function') {
+      throw new Error(`in-process emitNotification target missing for board ${boardId}`);
+    }
+    try {
+      await runtime.emitNotification({
+        kind: 'notification-batch',
+        notifications,
+      });
+    } catch (error) {
+      processLogger?.error?.(
+        `[queue-runner] in-process notify failed for ${boardId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  };
+}
+
+function createInProcessBoardToolInvoker(boardId, runtimeBoardRegistry) {
+  return async (tool, args = {}, options = {}) => {
+    const entry = runtimeBoardRegistry?.get(boardId);
+    if (!entry) {
+      throw new Error(`in-process board runtime missing for board ${boardId}`);
+    }
+    return entry.runtime.handleRuntimeApi
+      ? (await import('../http-mcp-controlface/controlface-mcp-surface.js')).invokeBoardRuntimeJson(
+          entry,
+          { apiBasePrefix: '/api/boards', host: '127.0.0.1', port: 7799 },
+          boardId,
+          options?.controlplane ? 'mcp-controlplane' : 'mcp',
+          { tool, args },
+        )
+      : null;
+  };
+}
+
+export async function startQueueRunner(options = {}) {
   const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadLocalFsHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'queueRunner');
   const queueLaneTuning = buildHostedQueueLaneTuning(hostConfig);
@@ -458,6 +508,9 @@ async function main() {
   );
   const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
+  const runtimeBoardRegistry = options && typeof options === 'object' && options.boardRuntimes instanceof Map
+    ? options.boardRuntimes
+    : null;
   const stopSubscriptions = [];
   const watchedBoards = new Map();
   let keepAliveTimer = null;
@@ -497,8 +550,14 @@ async function main() {
     // workspace and on boardId to scope liveboards.* tool calls to this board.
     const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
       serverUrl: callbackServerOrigin,
+      boardToolInvoker: isEmbeddedHost() && runtimeBoardRegistry
+        ? createInProcessBoardToolInvoker(boardId, runtimeBoardRegistry)
+        : null,
       notifyServerUrl: callbackServerOrigin,
       notifyUrl: `${apiBaseUrl}/notify-q`,
+      watchpartyPublishNotifications: isEmbeddedHost() && runtimeBoardRegistry
+        ? createInProcessNotificationPublisher(boardId, runtimeBoardRegistry, processLogger)
+        : null,
       mcpServerUrl: hostConfig.mcpServerUrl,
       apiBasePrefix: hostConfig.apiBasePrefix,
       configDir: hostConfig.configDir,
@@ -513,9 +572,19 @@ async function main() {
       boardId,
       boardConfig,
       adapterServices,
-      {},
+      isEmbeddedHost() && runtimeBoardRegistry
+        ? {
+            publishBoardChangeNotifications: createInProcessNotificationPublisher(
+              boardId,
+              runtimeBoardRegistry,
+              processLogger,
+            ),
+          }
+        : {},
       {
-        callbackTransport: createHttpBoardCallbackTransport(webhooksUrl),
+        callbackTransport: isEmbeddedHost()
+          ? createInProcessBoardCallbackTransport(boardSourceFetchCallbackKey(boardId))
+          : createHttpBoardCallbackTransport(webhooksUrl),
         configDir: hostConfig.configDir,
         taskExecutorRef: createHostedImmediateTaskExecutorRef(boardId, boardRuntimeNeeds.taskExecutorExtra),
         resolveConfigRelativePath,
@@ -544,6 +613,9 @@ async function main() {
       bundle,
       runtime: {
         ...runtime,
+        boardToolInvoker: isEmbeddedHost() && runtimeBoardRegistry
+          ? createInProcessBoardToolInvoker(boardId, runtimeBoardRegistry)
+          : null,
         configDir: hostConfig.configDir,
         foundryAgents: hostConfig.foundryAgents,
         chatFlowTimeoutMs: hostConfig.chatFlowTimeoutMs,
@@ -556,6 +628,9 @@ async function main() {
       serverUrl: callbackServerOrigin,
       notifyServerUrl: callbackServerOrigin,
       notifyUrl: `${apiBaseUrl}/notify-q`,
+      watchpartyPublishNotifications: isEmbeddedHost() && runtimeBoardRegistry
+        ? createInProcessNotificationPublisher(boardId, runtimeBoardRegistry, processLogger)
+        : null,
       mcpServerUrl: hostConfig.mcpServerUrl,
       apiBasePrefix: hostConfig.apiBasePrefix,
       watchpartyFileRegistry: adapterServices?.watchpartyFileRegistry,
@@ -648,10 +723,17 @@ async function main() {
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  return { shutdown, reconcileBoards };
 }
 
-main().catch((error) => {
-  const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
-  processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+const isQueueRunnerEntrypoint = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+if (isQueueRunnerEntrypoint) {
+  startQueueRunner().catch((error) => {
+    const processLogger = createLogger('queue-runner', { filePath: HOSTED_SERVER_LOG_PATH });
+    processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

@@ -5,12 +5,11 @@ import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createSingleBoardServerRuntime } from 'yaml-flow/board-live-cards-server-runtime';
 import { createHttpBoardCallbackTransport } from 'yaml-flow/board-live-cards-node';
 import { loadLocalFsHostConfig, resolveConfigRelativePath } from '../localfs-adapter/load-config.js';
-import { createBoardLayoutsStore } from '../board-layouts/layout-store.js';
 import { createDynamicBoards } from '../boards-index/dynamic-boards.js';
 import { buildBoardBundle as buildLocalFsBoardBundle } from '../localfs-adapter/build-board-bundle.js';
 import { initializeLocalFsServices } from '../localfs-adapter/localfs-init.js';
@@ -27,6 +26,10 @@ import {
   createHostedImmediateTaskExecutorRef,
   loadTaskExecutorModule,
 } from '../host-shared/worker-modules/task-executor-module.js';
+import {
+  isEmbeddedHost,
+  registerBoardSourceFetchInProcessCallback,
+} from '../host-shared/in-process-source-fetch-callback.js';
 import {
   getSampleTemplateEnvelope,
   listSampleTemplateEntries,
@@ -533,8 +536,16 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
   const buildBoardBundle = buildLocalFsBoardBundle;
   const boardId = boardConfig.id;
   const callbackBaseUrl = `http://${hostConfig.host}:${hostConfig.port}${hostConfig.apiBasePrefix}/${encodeURIComponent(boardId)}/mcp-webhooks`;
+  let entry;
   const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
     serverUrl: `http://${hostConfig.host}:${hostConfig.port}`,
+    boardToolInvoker: async (tool, args = {}, options = {}) => invokeBoardRuntimeJson(
+      entry,
+      hostConfig,
+      boardId,
+      options?.controlplane ? 'mcp-controlplane' : 'mcp',
+      { tool, args },
+    ),
     mcpServerUrl: hostConfig.mcpServerUrl,
     apiBasePrefix: hostConfig.apiBasePrefix,
     foundryAgents: hostConfig.foundryAgents,
@@ -581,15 +592,31 @@ async function buildSingleBoardRuntime(hostConfig, adapterServices, boardConfig,
     logger: processLogger.child(`${boardId}:controlface`),
     notificationTransport,
   });
-  return {
+  let unregisterSourceFetchCallback;
+  entry = {
     runtime,
     boardRuntimeNeeds,
     async close() {
+      if (typeof unregisterSourceFetchCallback === 'function') {
+        unregisterSourceFetchCallback();
+      }
       if (typeof notificationTransport.closeAll === 'function') {
         await notificationTransport.closeAll();
       }
     },
   };
+  // In the embedded single-process host, the in-process task executor reports
+  // source-fetch completion through the in-process callback transport rather
+  // than a spawnSync HTTP POST (which would self-deadlock). controlface owns
+  // the authoritative board runtime, so it registers the handler and forwards
+  // the webhook to its own runtime exactly as the inbound HTTP POST would.
+  if (isEmbeddedHost()) {
+    unregisterSourceFetchCallback = registerBoardSourceFetchInProcessCallback(
+      boardId,
+      (body) => invokeBoardRuntimeJson(entry, hostConfig, boardId, 'mcp-webhooks', body),
+    );
+  }
+  return entry;
 }
 
 async function buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards) {
@@ -923,6 +950,7 @@ async function handleManageBoardsRoute({
   adapterServices,
   boardRuntimes,
   processLogger,
+  onBoardsChanged,
 }) {
   const rawBody = await readRawRequestBody(req);
   const body = parseJsonObjectOrEmpty(rawBody);
@@ -975,6 +1003,9 @@ async function handleManageBoardsRoute({
     const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
     await upsertBoardRuntimeEntry(boardRuntimes, id, runtimePair, processLogger);
     await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
+    if (typeof onBoardsChanged === 'function') {
+      await onBoardsChanged();
+    }
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;
   }
@@ -1010,7 +1041,7 @@ async function handleManageBoardsRoute({
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
     }
-    const layout = await boardLayouts.get(id);
+    const layout = await dynamicBoards.getLayout(id);
     sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(layout) } });
     return;
   }
@@ -1066,6 +1097,9 @@ async function handleManageBoardsRoute({
     const runtimePair = await buildSingleBoardRuntime(hostConfig, adapterServices, board, processLogger);
     await upsertBoardRuntimeEntry(boardRuntimes, id, runtimePair, processLogger);
     await upsertAdminTemplateCards({ boardEntry: runtimePair, hostConfig, board });
+    if (typeof onBoardsChanged === 'function') {
+      await onBoardsChanged();
+    }
     sendJson(res, 200, { status: 'success', data: { board: summarizeBoardForList(board) } });
     return;
   }
@@ -1146,7 +1180,6 @@ async function handleManageBoardsRoute({
       sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
       return;
     }
-    await boardLayouts.remove(id);
     boardRuntimes.delete(id);
     sendJson(res, 200, {
       status: 'success',
@@ -1157,6 +1190,9 @@ async function handleManageBoardsRoute({
         archiveWorkspaceDir: archived.archiveWorkspaceDir,
       },
     });
+      if (typeof onBoardsChanged === 'function') {
+        await onBoardsChanged();
+      }
     return;
   }
 
@@ -1260,12 +1296,11 @@ async function handleMcpExtrasRoute({ rawBody, res, controlfaceMcp }) {
   sendJson(res, 200, controlfaceMcp.executeExtrasHttp(body));
 }
 
-async function main() {
+export async function startControlface(options = {}) {
   const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
   const hostConfig = loadLocalFsHostConfig(DEFAULT_CONFIG_PATH, process.argv.slice(2), 'controlface');
   const adapterServices = await initializeLocalFsServices(hostConfig.localfs);
   const dynamicBoards = createDynamicBoards({ hostConfig, adapterServices });
-  const boardLayouts = createBoardLayoutsStore({ registry: hostConfig.runtimeBoardsRegistry, adapterServices });
   const boardRuntimes = await buildBoardRuntimes(hostConfig, adapterServices, dynamicBoards);
 
   const controlfaceMcp = createControlfaceMcpSurface({ hostConfig, boardRuntimes });
@@ -1347,8 +1382,10 @@ async function main() {
       requestLogger.info(formatControlfacePickupMessage(req, parsedUrl, requestDetails));
       res.once('finish', logCompletionOnce);
       res.once('close', logCompletionOnce);
-      sendJson(res, 200, {
-        ok: true,
+      const ready = typeof options?.isReady === 'function' ? options.isReady() !== false : true;
+      sendJson(res, ready ? 200 : 503, {
+        ok: ready,
+        ready,
         boards: Array.from(boardRuntimes.keys()),
       });
       return;
@@ -1365,11 +1402,11 @@ async function main() {
           req,
           res,
           dynamicBoards,
-          boardLayouts,
           hostConfig,
           adapterServices,
           boardRuntimes,
           processLogger,
+          onBoardsChanged: typeof options?.onBoardsChanged === 'function' ? options.onBoardsChanged : null,
         });
       } catch (err) {
         const statusCode = Number.isInteger(err?.statusCode) && err.statusCode >= 400 ? err.statusCode : 500;
@@ -1497,21 +1534,30 @@ async function main() {
     }
   });
 
-  server.listen(hostConfig.port, hostConfig.host, () => {
-    processLogger.info(`Listening on http://${hostConfig.host}:${hostConfig.port}`);
-    void bootstrapConfiguredBoards({ dynamicBoards, hostConfig, adapterServices, boardRuntimes, processLogger })
-      .then(() => {
-        processLogger.info(`Boards: ${Array.from(boardRuntimes.keys()).join(', ')}`);
-      })
-      .catch((error) => {
-        processLogger.error(`Bootstrap failed: ${error instanceof Error ? error.message : String(error)}`);
-        server.close(() => process.exit(1));
-      });
+  return await new Promise((resolve, reject) => {
+    server.listen(hostConfig.port, hostConfig.host, () => {
+      processLogger.info(`Listening on http://${hostConfig.host}:${hostConfig.port}`);
+      void bootstrapConfiguredBoards({ dynamicBoards, hostConfig, adapterServices, boardRuntimes, processLogger })
+        .then(() => {
+          processLogger.info(`Boards: ${Array.from(boardRuntimes.keys()).join(', ')}`);
+          resolve({ server, boardRuntimes, hostConfig, adapterServices, dynamicBoards, processLogger });
+        })
+        .catch((error) => {
+          processLogger.error(`Bootstrap failed: ${error instanceof Error ? error.message : String(error)}`);
+          server.close(() => process.exit(1));
+          reject(error);
+        });
+    });
   });
 }
 
-main().catch((error) => {
-  const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
-  processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+const isControlfaceEntrypoint = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+if (isControlfaceEntrypoint) {
+  startControlface().catch((error) => {
+    const processLogger = createLogger('controlface', { filePath: HOSTED_SERVER_LOG_PATH });
+    processLogger.error(`Failed to start: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

@@ -72,6 +72,9 @@ export function buildContext(extra = {}) {
     }
     ctx[field] = value;
   }
+  if (typeof extra?.boardToolInvoker === 'function') {
+    ctx.boardToolInvoker = extra.boardToolInvoker;
+  }
   return Object.freeze(ctx);
 }
 
@@ -149,6 +152,17 @@ async function fetchServerTool(serverUrl, tool, args = {}, { controlplane = fals
   return payload;
 }
 
+export async function invokeBoardTool(context, tool, args = {}, { controlplane = false } = {}) {
+  const boardToolInvoker = typeof context?.boardToolInvoker === 'function'
+    ? context.boardToolInvoker
+    : null;
+  if (boardToolInvoker) {
+    return boardToolInvoker(tool, args, { controlplane });
+  }
+  const serverUrl = typeof context?.serverUrl === 'string' ? context.serverUrl : '';
+  return fetchServerTool(serverUrl, tool, args, { controlplane });
+}
+
 export function resolveAgentFaceMcpUrl(context) {
   const serverUrl = typeof context?.serverUrl === 'string' ? context.serverUrl.trim().replace(/\/+$/, '') : '';
   if (!serverUrl) return '';
@@ -204,7 +218,7 @@ export async function invokeMcpServerTool(context, toolName, args = {}) {
   }
 }
 
-async function fetchChatMessagesOnce(serverUrl, boardId, cardId, turnId, tailTurns) {
+async function fetchChatMessagesOnce(context, boardId, cardId, turnId, tailTurns) {
   const args = { board_id: boardId, card_id: cardId };
   if (typeof turnId === 'string' && turnId.trim()) {
     args.turn_id = turnId.trim();
@@ -213,7 +227,7 @@ async function fetchChatMessagesOnce(serverUrl, boardId, cardId, turnId, tailTur
   if (tailTurnsInt !== null) {
     args.tail_turns = tailTurnsInt;
   }
-  const payload = await fetchServerTool(serverUrl, 'inspect.chat-messages-on-cards', args);
+  const payload = await invokeBoardTool(context, 'inspect.chat-messages-on-cards', args);
   if (payload?.status !== 'success') {
     throw new Error(`inspect.chat-messages-on-cards returned unexpected payload: ${JSON.stringify(payload)}`);
   }
@@ -279,7 +293,7 @@ function enhanceChatMessageWithAttachmentHint(message, cardId, attachments) {
   return enhanced;
 }
 
-async function readChatMessages(serverUrl, boardId, cardId, turnId, tailTurns) {
+async function readChatMessages(context, boardId, cardId, turnId, tailTurns) {
   if (!boardId || !cardId) {
     return [];
   }
@@ -289,7 +303,7 @@ async function readChatMessages(serverUrl, boardId, cardId, turnId, tailTurns) {
 
   while (Date.now() < deadline) {
     try {
-      const records = await fetchChatMessagesOnce(serverUrl, boardId, cardId, turnId, tailTurns);
+      const records = await fetchChatMessagesOnce(context, boardId, cardId, turnId, tailTurns);
       lastRecords = records;
       if (records.length > 0) {
         return records;
@@ -318,16 +332,15 @@ function isNonEmptyAssistantMessage(message) {
 }
 
 export async function isAssistantMessageInTurn(context, { cardId: cardIdOverride, turnId: turnIdOverride, tailTurns = null } = {}) {
-  const serverUrl = context?.serverUrl;
   const boardId = context?.boardId;
   const cardId = cardIdOverride !== undefined ? cardIdOverride : context?.cardId;
   const turnId = turnIdOverride !== undefined ? turnIdOverride : context?.turnId;
-  if (!serverUrl || !boardId || !cardId) {
+  if (!boardId || !cardId) {
     return false;
   }
 
   try {
-    const messages = await readChatMessages(serverUrl, boardId, cardId, turnId, tailTurns);
+    const messages = await readChatMessages(context, boardId, cardId, turnId, tailTurns);
     return messages.some(isNonEmptyAssistantMessage);
   } catch {
     return false;
@@ -335,7 +348,6 @@ export async function isAssistantMessageInTurn(context, { cardId: cardIdOverride
 }
 
 export async function getEnhancedChatMessages(context, { cardId: cardIdOverride, turnId: turnIdOverride, tailTurns = null } = {}) {
-  const serverUrl = context?.serverUrl;
   const boardId = context?.boardId;
   const cardId = cardIdOverride !== undefined ? cardIdOverride : context?.cardId;
   const turnId = turnIdOverride !== undefined ? turnIdOverride : context?.turnId;
@@ -344,14 +356,14 @@ export async function getEnhancedChatMessages(context, { cardId: cardIdOverride,
   }
 
   try {
-    const messages = await readChatMessages(serverUrl, boardId, cardId, turnId, tailTurns);
+    const messages = await readChatMessages(context, boardId, cardId, turnId, tailTurns);
     const attachments = messages
       .map((message) => parseSystemMessageFileIndex(typeof message?.text === 'string' ? message.text : ''))
       .filter((value) => Number.isInteger(value))
       .map((idx) => ({ idx }));
     return messages.map((message) => enhanceChatMessageWithAttachmentHint(message, cardId, attachments));
   } catch {
-    return readChatMessages(serverUrl, boardId, cardId, turnId, tailTurns);
+    return readChatMessages(context, boardId, cardId, turnId, tailTurns);
   }
 }
 
@@ -369,10 +381,10 @@ function toCardPrivateKey(assistantKey) {
 }
 
 export async function getCardPrivateChatSection(context, assistantKey) {
-  const { serverUrl, boardId, cardId } = context ?? {};
+  const { boardId, cardId } = context ?? {};
   if (!boardId || !cardId) return {};
   try {
-    const payload = await fetchServerTool(serverUrl, 'getstate.card-private', {
+    const payload = await invokeBoardTool(context, 'getstate.card-private', {
       board_id: boardId,
       card_id: cardId,
       key: toCardPrivateKey(assistantKey),
@@ -391,7 +403,7 @@ export async function setCardPrivateChatSection(context, assistantKey, value, { 
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('setCardPrivate value must be a plain object');
   }
-  const { serverUrl, boardId, cardId } = context ?? {};
+  const { boardId, cardId } = context ?? {};
   if (!boardId || !cardId) return false;
   let nextValue = value;
   if (merge) {
@@ -399,7 +411,7 @@ export async function setCardPrivateChatSection(context, assistantKey, value, { 
     nextValue = { ...existing, ...value };
   }
   try {
-    const payload = await fetchServerTool(serverUrl, 'setstate.card-private', {
+    const payload = await invokeBoardTool(context, 'setstate.card-private', {
       board_id: boardId,
       card_id: cardId,
       key: toCardPrivateKey(assistantKey),

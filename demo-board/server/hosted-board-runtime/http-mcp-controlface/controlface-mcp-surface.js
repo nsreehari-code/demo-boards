@@ -323,6 +323,89 @@ function buildManifestDocument(manifest, tools, { endpoint, serverName, serverVe
   };
 }
 
+function classifyMimeType(mimeType) {
+  const baseType = String(mimeType || '').split(';')[0].trim().toLowerCase();
+  if (!baseType) return 'binary';
+  if (baseType.startsWith('text/')) return 'text';
+  if (baseType.startsWith('image/')) return 'image';
+  if (baseType.startsWith('audio/')) return 'audio';
+  if (
+    baseType === 'application/json'
+    || baseType === 'application/xml'
+    || baseType === 'application/javascript'
+    || baseType === 'application/x-yaml'
+    || baseType === 'application/yaml'
+    || baseType.endsWith('+json')
+    || baseType.endsWith('+xml')
+  ) {
+    return 'text';
+  }
+  return 'binary';
+}
+
+function decodeTextual(bodyBytes, mimeType) {
+  try {
+    const charsetMatch = /charset=([^;]+)/i.exec(String(mimeType || ''));
+    const encoding = (charsetMatch?.[1] || 'utf8').trim().toLowerCase().replace(/^utf-/, 'utf');
+    return Buffer.from(bodyBytes).toString(Buffer.isEncoding(encoding) ? encoding : 'utf8');
+  } catch {
+    return Buffer.from(bodyBytes).toString('utf8');
+  }
+}
+
+function asPrettyJson(value) {
+  return JSON.stringify(value, null, 2);
+}
+
+export function toJsonToolResult(result) {
+  const text = typeof result === 'string' ? result : asPrettyJson(result);
+  return {
+    content: [{ type: 'text', text }],
+    structuredContent: result === null || result === undefined ? { result: null } : { result },
+  };
+}
+
+export function toRawToolResult(remoteTool, boardId, args, capture) {
+  const cardId = typeof args?.card_id === 'string' && args.card_id.trim()
+    ? args.card_id.trim()
+    : 'unknown-card';
+  const fileIdx = Number.isInteger(args?.file_idx)
+    ? args.file_idx
+    : Number.parseInt(String(args?.file_idx ?? ''), 10);
+  const resourceName = Number.isInteger(fileIdx)
+    ? `${cardId}/attachments/${fileIdx}`
+    : `${cardId}/attachments/raw`;
+  const resourceUri = `liveboards://${encodeURIComponent(boardId)}/${resourceName}`;
+  const mimeType = capture.getHeader('content-type') || 'application/octet-stream';
+  const kind = classifyMimeType(mimeType);
+  const meta = {
+    'liveboards/raw-tool': remoteTool,
+    'liveboards/mime-type': mimeType,
+    'liveboards/resource-uri': resourceUri,
+  };
+
+  if (kind === 'text') {
+    return {
+      content: [{ type: 'text', text: decodeTextual(capture.bodyBytes, mimeType) }],
+      _meta: meta,
+    };
+  }
+
+  const base64 = Buffer.from(capture.bodyBytes).toString('base64');
+
+  if (kind === 'image') {
+    return { content: [{ type: 'image', data: base64, mimeType }], _meta: meta };
+  }
+  if (kind === 'audio') {
+    return { content: [{ type: 'audio', data: base64, mimeType }], _meta: meta };
+  }
+
+  return {
+    content: [{ type: 'resource', resource: { uri: resourceUri, mimeType, blob: base64 } }],
+    _meta: meta,
+  };
+}
+
 export function createControlfaceMcpSurface({ hostConfig, boardRuntimes, manifestPath } = {}) {
   if (!hostConfig || typeof hostConfig !== 'object') {
     throw new Error('createControlfaceMcpSurface requires hostConfig');
@@ -431,5 +514,65 @@ export function createControlfaceMcpSurface({ hostConfig, boardRuntimes, manifes
     executeToolCall,
     executeExtrasHttp,
     getAgentManifestDocument,
+  };
+}
+
+export function createAgentfaceMcpSurface({
+  hostConfig,
+  boardRuntimes,
+  manifestPath,
+  endpoint,
+  serverName,
+  serverVersion,
+  defaultDescription,
+} = {}) {
+  const surface = createControlfaceMcpSurface({ hostConfig, boardRuntimes, manifestPath });
+  const manifestDocument = surface.getAgentManifestDocument({
+    endpoint,
+    serverName,
+    serverVersion,
+    defaultDescription,
+  });
+
+  function listTools() {
+    return surface.tools.map((tool) => ({
+      name: tool.name,
+      title: tool.title || tool.name,
+      description: tool.description || '',
+      inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object'
+        ? tool.inputSchema
+        : { type: 'object', properties: {} },
+    }));
+  }
+
+  async function callTool(name, args) {
+    const toolName = typeof name === 'string' ? name.trim() : '';
+    if (!toolName) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: "unknown tool ''" }) }],
+        isError: true,
+      };
+    }
+
+    try {
+      const outcome = await surface.executeToolCall(toolName, args);
+      if (outcome.kind === 'raw') {
+        return toRawToolResult(outcome.remoteTool, outcome.boardId, outcome.upstreamArgs, outcome.capture);
+      }
+      return toJsonToolResult(outcome.payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: `${toolName} failed: ${message}` }) }],
+        isError: true,
+      };
+    }
+  }
+
+  return {
+    ...surface,
+    manifestDocument,
+    listTools,
+    callTool,
   };
 }
