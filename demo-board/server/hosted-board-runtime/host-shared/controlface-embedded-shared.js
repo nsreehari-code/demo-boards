@@ -423,6 +423,52 @@
       );
     }
 
+    // Resolves the hydrated board config (with ui['admin-cards']) for a managed board so the
+    // shared ManageBoardsCore seeding path has the admin template cards to seed. Falls back to
+    // the raw record when the host does not expose a config resolver (no admin cards -> no-op).
+    async function resolveSeedBoard(boardId, recordBoard) {
+      var normalizedBoardId = normalizeRequiredBoardId(boardId);
+      var baseBoard = recordBoard && typeof recordBoard === 'object' && !Array.isArray(recordBoard)
+        ? cloneJsonValue(recordBoard)
+        : {};
+      if (typeof deps.resolveBoardConfig === 'function') {
+        try {
+          var resolved = await Promise.resolve(deps.resolveBoardConfig(normalizedBoardId, baseBoard));
+          if (resolved && typeof resolved === 'object' && !Array.isArray(resolved)) {
+            baseBoard = resolved;
+          }
+        } catch (error) {
+          // Config resolution is best-effort; without it we simply seed no admin cards.
+        }
+      }
+      baseBoard.id = normalizedBoardId;
+      return baseBoard;
+    }
+
+    // Converged hosted manage-boards path shared with the Node controlface server:
+    // resolve config -> ensure workspace -> provision runtime -> seed admin template cards.
+    // Requires the host to wire provisionRuntime + invokeRuntimeTool adapters; otherwise it is
+    // a no-op so legacy hosts keep their previous (record-only) behavior.
+    async function provisionAndSeedManagedBoard(boardId, recordBoard) {
+      if (!globalThis.ManageBoardsCore || typeof globalThis.ManageBoardsCore.provisionAndSeedBoard !== 'function') {
+        return;
+      }
+      if (typeof deps.provisionRuntime !== 'function' || typeof deps.invokeRuntimeTool !== 'function') {
+        return;
+      }
+      var seedBoard = await resolveSeedBoard(boardId, recordBoard);
+      await globalThis.ManageBoardsCore.provisionAndSeedBoard({
+        board: seedBoard,
+        ensureWorkspace: typeof deps.ensureWorkspace === 'function'
+          ? function (board) { return deps.ensureWorkspace(board); }
+          : null,
+        provisionRuntime: function (board) { return deps.provisionRuntime(board); },
+        invokeRuntimeTool: function (runtimeEntry, runtimeBoardId, routeKind, payload) {
+          return deps.invokeRuntimeTool(runtimeEntry, runtimeBoardId, routeKind, payload);
+        },
+      });
+    }
+
     async function listRuntimeCardsForBoard(boardId) {
       var payload = await invokeRuntimeTool(boardId, 'mcp-controlplane', 'list-runtime-cards', { board_id: boardId });
       var cards = Array.isArray(payload && payload.data)
@@ -629,6 +675,7 @@
           }
           addRecord.id = addBoardId;
           var addedState = await createState(addBoardId, { boardId: addBoardId, board: addRecord, layout: null });
+          await provisionAndSeedManagedBoard(addedState.boardId, addedState.board);
           return createHttpEnvelope(200, { status: 'success', data: { board: summarizeBoardForList(addedState.board) } });
         }
 
@@ -703,12 +750,14 @@
             return createErrorEnvelope(404, "board '" + saveRecordState.boardId + "' not found");
           }
           saveRecordState = normalizeManagedBoardState(saveRecordState.boardId, { boardId: saveRecordState.boardId, board: updatedRecordBoard, layout: saveRecordState.layout });
+          await provisionAndSeedManagedBoard(saveRecordState.boardId, saveRecordState.board);
           return createHttpEnvelope(200, { status: 'success', data: { board: summarizeBoardForList(saveRecordState.board) } });
         }
 
         if (subcommand === 'refresh-board') {
           var refreshState = await getRequiredState(args.boardId);
           requireActiveRuntimeBoard(refreshState.boardId, 409);
+          await provisionAndSeedManagedBoard(refreshState.boardId, refreshState.board);
           return createHttpEnvelope(200, { status: 'success', data: { board: summarizeBoardForList(refreshState.board) } });
         }
 

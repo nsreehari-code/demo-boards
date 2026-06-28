@@ -23,6 +23,9 @@ import {
   runSetupSingleAiWorkspaceScript,
 } from '../host-shared/ai-workspace-setup.js';
 import { createLogger, HOSTED_SERVER_LOG_PATH } from '../host-shared/logging.js';
+// Side-effect import: attaches globalThis.ManageBoardsCore (host-agnostic manage-boards
+// orchestration shared with the embedded WinUI runtime).
+import '../host-shared/manage-boards-core.js';
 import {
   createHostedImmediateTaskExecutorRef,
   loadTaskExecutorModule,
@@ -747,86 +750,15 @@ function summarizeCardForImport(card) {
   };
 }
 
-function listAdminTemplateCards(board) {
-  const cards = board?.ui?.['admin-cards'];
-  return Array.isArray(cards) ? cards.filter((card) => card && typeof card === 'object' && !Array.isArray(card)) : [];
-}
-
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function collectTemplatePrivateEntries(templatePrivateSection, parentKey = '') {
-  if (!isPlainObject(templatePrivateSection)) {
-    return [];
-  }
-
-  return Object.entries(templatePrivateSection).flatMap(([key, value]) => {
-    const normalizedKey = typeof key === 'string' ? key.trim() : '';
-    if (!normalizedKey) {
-      return [];
-    }
-
-    if (normalizedKey === 'visible_controlplane_only') {
-      return [];
-    }
-
-    const dottedKey = parentKey ? `${parentKey}.${normalizedKey}` : normalizedKey;
-    const isAddressablePrivateKey = dottedKey.includes('.');
-    if (!isPlainObject(value)) {
-      return isAddressablePrivateKey ? [{ key: dottedKey, value }] : [];
-    }
-
-    const nestedEntries = collectTemplatePrivateEntries(value, dottedKey);
-    if (!isAddressablePrivateKey) {
-      return nestedEntries;
-    }
-    return nestedEntries.length > 0
-      ? [{ key: dottedKey, value }, ...nestedEntries]
-      : [{ key: dottedKey, value }];
-  });
-}
-
-async function applyTemplatePrivateState({ boardEntry, hostConfig, boardId, cardId, card }) {
-  const templatePrivate = card?.__private;
-  const entries = collectTemplatePrivateEntries(templatePrivate);
-  for (const entry of entries) {
-    await invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, 'mcp-controlplane', {
-      tool: 'setstate.card-private',
-      args: {
-        board_id: boardId,
-        card_id: cardId,
-        key: entry.key,
-        value: entry.value,
-      },
-    });
-  }
-}
-
+// Admin-template seeding is delegated to the host-agnostic ManageBoardsCore so the Node
+// hosted controlface and the embedded WinUI runtime seed boards via the exact same logic.
+// The Node host injects its runtime-invocation adapter (invokeBoardRuntimeJson).
 async function upsertAdminTemplateCards({ boardEntry, hostConfig, board }) {
-  const boardId = typeof board?.id === 'string' ? board.id.trim() : '';
-  if (!boardId) {
-    throw new Error('Board id is required to upsert admin template cards');
-  }
-
-  const cards = listAdminTemplateCards(board);
-  for (const card of cards) {
-    const cardId = typeof card?.id === 'string' ? card.id.trim() : '';
-    if (!cardId) {
-      throw new Error(`Admin template card for board '${boardId}' must have a non-empty string id`);
-    }
-
-    await invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, 'mcp-controlplane', {
-      tool: 'manage.admin-upsert-card',
-      args: {
-        board_id: boardId,
-        card_id: cardId,
-        candidate_card_content: card,
-      },
-    });
-
-    await applyTemplatePrivateState({ boardEntry, hostConfig, boardId, cardId, card });
-  }
+  await globalThis.ManageBoardsCore.upsertAdminTemplateCards({
+    board,
+    invokeRuntimeTool: (boardId, routeKind, payload) =>
+      invokeBoardRuntimeJson(boardEntry, hostConfig, boardId, routeKind, payload),
+  });
 }
 
 async function listRuntimeCardsForBoard(boardEntry, hostConfig, boardId) {
