@@ -38,6 +38,7 @@
     "start:daemon": "npm run prepare:hosts && npm run pm2:runtime:migrate && pm2 startOrRestart ecosystem.config.cjs && npm run wait:hosted",
     "stop:daemon": "pm2 stop ecosystem.config.cjs",
     "status:daemon": "pm2 status demo-boards-mcp demo-boards-runtime",
+    "daemon:status": "npm run status:daemon",
     "daemon:restart": "npm run prepare:hosts && npm run pm2:runtime:migrate && pm2 startOrRestart ecosystem.config.cjs && npm run wait:hosted",
     "daemon:delete": "pm2 delete ecosystem.config.cjs",
     "daemon:logs": "pm2 logs demo-boards-mcp demo-boards-runtime",
@@ -54,7 +55,7 @@
     "better-sqlite3": "^12.9.0",
     "node-sse": "^0.0.2",
     "pdf-parse": "^2.4.5",
-    "yaml-flow": "^8.11.10"
+    "yaml-flow": "^8.11.12"
   },
   "devDependencies": {
     "pm2": "^7.0.1"
