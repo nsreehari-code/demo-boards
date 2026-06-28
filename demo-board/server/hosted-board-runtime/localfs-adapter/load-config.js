@@ -79,31 +79,6 @@ function deepReplaceTemplateTokens(value, tokens) {
   return value;
 }
 
-function mergeJsonObjects(base, override) {
-  const left = base && typeof base === 'object' && !Array.isArray(base) ? base : {};
-  const right = override && typeof override === 'object' && !Array.isArray(override) ? override : {};
-  const merged = { ...left };
-
-  for (const [key, value] of Object.entries(right)) {
-    const leftValue = merged[key];
-    if (
-      leftValue
-      && typeof leftValue === 'object'
-      && !Array.isArray(leftValue)
-      && value
-      && typeof value === 'object'
-      && !Array.isArray(value)
-    ) {
-      merged[key] = mergeJsonObjects(leftValue, value);
-      continue;
-    }
-
-    merged[key] = value;
-  }
-
-  return merged;
-}
-
 function deriveBoardRoot(configDir) {
   return deriveBoardRootFromConfigDir(configDir);
 }
@@ -264,9 +239,6 @@ export function buildBoardConfig(boardId, source, { configDir, boardRoot = deriv
   const uiTemplateName = typeof record.uiTemplate === 'string' && record.uiTemplate.trim()
     ? record.uiTemplate.trim()
     : '';
-  const recordUi = record.ui && typeof record.ui === 'object' && !Array.isArray(record.ui)
-    ? record.ui
-    : {};
   let ui = {};
   if (uiTemplateName) {
     const template = uiTemplates[uiTemplateName];
@@ -277,7 +249,6 @@ export function buildBoardConfig(boardId, source, { configDir, boardRoot = deriv
       ? deepReplaceTemplateTokens(template, tokens)
       : {};
   }
-  ui = mergeJsonObjects(ui, recordUi);
 
   return {
     id: normalizedBoardId,
