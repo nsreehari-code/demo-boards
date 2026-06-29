@@ -8,6 +8,7 @@
     "check:prereqs": "node scripts/setup-check-copilot-workiq.mjs",
     "test": "node demo-board/test/agentface-mcp-smoke.js && node demo-board/test/my-http-test.js --skip-tests T9,T9F && npm run mcp:test",
     "test:http": "node demo-board/test/my-http-test.js --skip-tests T9,T9F",
+    "test:layout-ns": "node demo-board/test/manage-boards-layout-namespace-smoke.js",
     "test:strategist": "node demo-board/test/strategist-http-test.js --run-tests B1",
     "test:strategist:acceptance": "node demo-board/test/strategist-http-test.js --run-tests A1",
     "test:strategist:live": "node demo-board/test/strategist-http-test.js --run-tests S1,S2,S3",

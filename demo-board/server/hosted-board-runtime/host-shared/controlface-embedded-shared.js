@@ -47,6 +47,74 @@
     return normalized;
   }
 
+  var DEFAULT_LAYOUT_NAMESPACE = 'frontend';
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function normalizeLayoutNamespace(value) {
+    var normalized = normalizeOptionalString(value);
+    return normalized || DEFAULT_LAYOUT_NAMESPACE;
+  }
+
+  function isNamespacedLayoutRecord(layout) {
+    return isPlainObject(layout)
+      && layout.__namespaced === true
+      && isPlainObject(layout.namespaces);
+  }
+
+  function createNamespacedLayoutRecord() {
+    return {
+      __namespaced: true,
+      namespaces: {},
+    };
+  }
+
+  function readLayoutNamespace(layout, namespaceValue) {
+    var namespaceKey = normalizeLayoutNamespace(namespaceValue);
+    if (!isPlainObject(layout)) {
+      return null;
+    }
+    if (isNamespacedLayoutRecord(layout)) {
+      var namespacedLayout = layout.namespaces[namespaceKey];
+      return isPlainObject(namespacedLayout) ? cloneJsonValue(namespacedLayout) : null;
+    }
+    return namespaceKey === DEFAULT_LAYOUT_NAMESPACE ? cloneJsonValue(layout) : null;
+  }
+
+  function writeLayoutNamespace(layout, namespaceValue, nextLayout) {
+    var namespaceKey = normalizeLayoutNamespace(namespaceValue);
+    var record = isNamespacedLayoutRecord(layout)
+      ? cloneJsonValue(layout)
+      : createNamespacedLayoutRecord();
+
+    if (!isNamespacedLayoutRecord(layout) && isPlainObject(layout)) {
+      record.namespaces[DEFAULT_LAYOUT_NAMESPACE] = cloneJsonValue(layout);
+    }
+
+    record.namespaces[namespaceKey] = isPlainObject(nextLayout) ? cloneJsonValue(nextLayout) : {};
+    return record;
+  }
+
+  function mergeLayoutNamespace(layout, namespaceValue, key, value) {
+    var normalizedKey = normalizeOptionalString(key);
+    if (!normalizedKey) {
+      throw new Error('Layout key is required');
+    }
+
+    var currentNamespaceLayout = readLayoutNamespace(layout, namespaceValue);
+    var nextNamespaceLayout = isPlainObject(currentNamespaceLayout)
+      ? currentNamespaceLayout
+      : {};
+    nextNamespaceLayout[normalizedKey] = cloneJsonValue(value);
+
+    return {
+      storedLayout: writeLayoutNamespace(layout, namespaceValue, nextNamespaceLayout),
+      namespaceLayout: cloneJsonValue(nextNamespaceLayout),
+    };
+  }
+
   function createDefaultManagedBoardState(boardId) {
     return {
       boardId: boardId,
@@ -660,7 +728,8 @@
 
         if (subcommand === 'get-layout') {
           var getLayoutState = await getRequiredState(args.boardId);
-          return createHttpEnvelope(200, { status: 'success', data: { layout: summarizeBoardLayout(getLayoutState.layout) } });
+          var getLayoutNamespace = normalizeLayoutNamespace(args.ns);
+          return createHttpEnvelope(200, { status: 'success', data: { layout: summarizeBoardLayout(readLayoutNamespace(getLayoutState.layout, getLayoutNamespace)) } });
         }
 
         if (subcommand === 'add-board') {
@@ -729,13 +798,35 @@
 
         if (subcommand === 'save-layout') {
           var saveLayoutState = await getRequiredState(args.boardId);
-          var layout = args.layout && typeof args.layout === 'object' && !Array.isArray(args.layout) ? cloneJsonValue(args.layout) : null;
-          if (!layout) {
-            return createErrorEnvelope(400, 'args.layout is required (object)');
+          var saveLayoutNamespace = normalizeLayoutNamespace(args.ns);
+          var replaceLayout = args.keyvals && typeof args.keyvals === 'object' && !Array.isArray(args.keyvals)
+            ? cloneJsonValue(args.keyvals)
+            : (args.layout && typeof args.layout === 'object' && !Array.isArray(args.layout) ? cloneJsonValue(args.layout) : null);
+          if (!replaceLayout) {
+            return createErrorEnvelope(400, 'args.keyvals is required (object)');
           }
-          await Promise.resolve(lifecycle.saveLayout(saveLayoutState.boardId, layout));
-          saveLayoutState.layout = layout;
-          return createHttpEnvelope(200, { status: 'success', data: { layout: summarizeBoardLayout(saveLayoutState.layout) } });
+          var saveLayoutMode = normalizeOptionalString(args.mode).toLowerCase();
+          if (saveLayoutMode && saveLayoutMode !== 'replace' && saveLayoutMode !== 'shallow-merge') {
+            return createErrorEnvelope(400, "args.mode must be 'replace' or 'shallow-merge'");
+          }
+
+          var existingLayout = readLayoutNamespace(saveLayoutState.layout, saveLayoutNamespace);
+          var nextLayout = saveLayoutMode === 'shallow-merge'
+            ? Object.assign({}, isPlainObject(existingLayout) ? existingLayout : {}, replaceLayout)
+            : replaceLayout;
+          var storedLayout = writeLayoutNamespace(saveLayoutState.layout, saveLayoutNamespace, nextLayout);
+          await Promise.resolve(lifecycle.saveLayout(saveLayoutState.boardId, storedLayout));
+          saveLayoutState.layout = storedLayout;
+          return createHttpEnvelope(200, { status: 'success', data: { layout: summarizeBoardLayout(nextLayout) } });
+        }
+
+        if (subcommand === 'shallow-merge') {
+          var shallowMergeState = await getRequiredState(args.boardId);
+          var shallowMergeNamespace = normalizeLayoutNamespace(args.ns);
+          var mergedLayout = mergeLayoutNamespace(shallowMergeState.layout, shallowMergeNamespace, args.key, args.val);
+          await Promise.resolve(lifecycle.saveLayout(shallowMergeState.boardId, mergedLayout.storedLayout));
+          shallowMergeState.layout = mergedLayout.storedLayout;
+          return createHttpEnvelope(200, { status: 'success', data: { layout: summarizeBoardLayout(mergedLayout.namespaceLayout) } });
         }
 
         if (subcommand === 'save-board-record') {

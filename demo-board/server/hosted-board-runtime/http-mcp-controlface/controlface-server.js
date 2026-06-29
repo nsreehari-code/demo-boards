@@ -108,6 +108,78 @@ function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const DEFAULT_LAYOUT_NAMESPACE = 'frontend';
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeLayoutNamespace(value) {
+  const normalized = normalizeText(value);
+  return normalized || DEFAULT_LAYOUT_NAMESPACE;
+}
+
+function isNamespacedLayoutRecord(layout) {
+  return isPlainObject(layout)
+    && layout.__namespaced === true
+    && isPlainObject(layout.namespaces);
+}
+
+function createNamespacedLayoutRecord() {
+  return {
+    __namespaced: true,
+    namespaces: {},
+  };
+}
+
+function cloneJsonValue(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function readLayoutNamespace(layout, namespaceValue) {
+  const namespaceKey = normalizeLayoutNamespace(namespaceValue);
+  if (!isPlainObject(layout)) {
+    return null;
+  }
+  if (isNamespacedLayoutRecord(layout)) {
+    const namespacedLayout = layout.namespaces[namespaceKey];
+    return isPlainObject(namespacedLayout) ? cloneJsonValue(namespacedLayout) : null;
+  }
+  return namespaceKey === DEFAULT_LAYOUT_NAMESPACE ? cloneJsonValue(layout) : null;
+}
+
+function writeLayoutNamespace(layout, namespaceValue, nextLayout) {
+  const namespaceKey = normalizeLayoutNamespace(namespaceValue);
+  const record = isNamespacedLayoutRecord(layout)
+    ? cloneJsonValue(layout)
+    : createNamespacedLayoutRecord();
+
+  if (!isNamespacedLayoutRecord(layout) && isPlainObject(layout)) {
+    record.namespaces[DEFAULT_LAYOUT_NAMESPACE] = cloneJsonValue(layout);
+  }
+
+  record.namespaces[namespaceKey] = isPlainObject(nextLayout) ? cloneJsonValue(nextLayout) : {};
+  return record;
+}
+
+function mergeLayoutNamespace(layout, namespaceValue, key, value) {
+  const normalizedKey = normalizeText(key);
+  if (!normalizedKey) {
+    throw new Error('Layout key is required');
+  }
+
+  const currentNamespaceLayout = readLayoutNamespace(layout, namespaceValue);
+  const nextNamespaceLayout = isPlainObject(currentNamespaceLayout)
+    ? currentNamespaceLayout
+    : {};
+  nextNamespaceLayout[normalizedKey] = cloneJsonValue(value);
+
+  return {
+    storedLayout: writeLayoutNamespace(layout, namespaceValue, nextNamespaceLayout),
+    namespaceLayout: cloneJsonValue(nextNamespaceLayout),
+  };
+}
+
 function matchBoardRoute(apiBasePrefix, pathname) {
   const prefix = String(apiBasePrefix || '').replace(/\/$/, '');
   const pattern = new RegExp(`^${escapeRegex(prefix)}/([^/]+)(?:/|$)`);
@@ -975,7 +1047,8 @@ async function handleManageBoardsRoute({
       return;
     }
     const layout = await dynamicBoards.getLayout(id);
-    sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(layout) } });
+    const namespaceKey = normalizeLayoutNamespace(args?.ns);
+    sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(readLayoutNamespace(layout, namespaceKey)) } });
     return;
   }
 
@@ -985,9 +1058,12 @@ async function handleManageBoardsRoute({
       sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
       return;
     }
-    const layout = args?.layout;
-    if (!layout || typeof layout !== 'object' || Array.isArray(layout)) {
-      sendJson(res, 400, { status: 'error', error: 'args.layout is required (object)' });
+    const namespaceKey = normalizeLayoutNamespace(args?.ns);
+    const keyvals = isPlainObject(args?.keyvals)
+      ? cloneJsonValue(args.keyvals)
+      : (isPlainObject(args?.layout) ? cloneJsonValue(args.layout) : null);
+    if (!keyvals) {
+      sendJson(res, 400, { status: 'error', error: 'args.keyvals is required (object)' });
       return;
     }
     const board = await dynamicBoards.get(id);
@@ -996,17 +1072,42 @@ async function handleManageBoardsRoute({
       return;
     }
     const mode = typeof args?.mode === 'string' ? args.mode.trim() : '';
-    let nextLayout = layout;
+    const existingStoredLayout = await boardLayouts.get(id);
+    const existingNamespaceLayout = readLayoutNamespace(existingStoredLayout, namespaceKey);
+    let nextLayout = keyvals;
     if (mode === 'shallow-merge') {
-      const existing = await boardLayouts.get(id);
-      const base = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {};
-      nextLayout = { ...base, ...layout };
+      const base = isPlainObject(existingNamespaceLayout) ? existingNamespaceLayout : {};
+      nextLayout = { ...base, ...keyvals };
     } else if (mode && mode !== 'replace') {
       sendJson(res, 400, { status: 'error', error: `args.mode must be 'replace' or 'shallow-merge'` });
       return;
     }
-    await boardLayouts.set(id, nextLayout);
+    await boardLayouts.set(id, writeLayoutNamespace(existingStoredLayout, namespaceKey, nextLayout));
     sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(nextLayout) } });
+    return;
+  }
+
+  if (subcommand === 'shallow-merge') {
+    const id = typeof args?.boardId === 'string' ? args.boardId.trim() : '';
+    if (!id) {
+      sendJson(res, 400, { status: 'error', error: 'args.boardId is required' });
+      return;
+    }
+    const key = normalizeText(args?.key);
+    if (!key) {
+      sendJson(res, 400, { status: 'error', error: 'args.key is required' });
+      return;
+    }
+    const board = await dynamicBoards.get(id);
+    if (!board) {
+      sendJson(res, 404, { status: 'error', error: `board '${id}' not found` });
+      return;
+    }
+    const namespaceKey = normalizeLayoutNamespace(args?.ns);
+    const existingStoredLayout = await boardLayouts.get(id);
+    const merged = mergeLayoutNamespace(existingStoredLayout, namespaceKey, key, args?.val);
+    await boardLayouts.set(id, merged.storedLayout);
+    sendJson(res, 200, { status: 'success', data: { layout: summarizeBoardLayout(merged.namespaceLayout) } });
     return;
   }
 
