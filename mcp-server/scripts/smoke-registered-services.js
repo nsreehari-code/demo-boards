@@ -46,6 +46,35 @@ function parseDisabledHandlers() {
   );
 }
 
+function validateCopilotContract(tools) {
+  const byName = new Map(tools.map((tool) => [tool.name, tool]));
+  const expected = [
+    'copilot.check_environment',
+    'copilot.list_agents',
+    'copilot.run_agent',
+    'copilot.list_runs',
+    'copilot.get_run',
+    'copilot.cancel_run',
+  ];
+  for (const name of expected) {
+    const tool = byName.get(name);
+    if (!tool?.outputSchema) {
+      throw new Error(`Copilot tool ${name} must declare outputSchema`);
+    }
+  }
+
+  const runProperties = byName.get('copilot.run_agent')?.inputSchema?.properties || {};
+  if (runProperties.message?.minLength !== 1) {
+    throw new Error('copilot.run_agent message must reject empty input');
+  }
+  if (JSON.stringify(runProperties.runMode?.enum) !== JSON.stringify(['sync', 'async'])) {
+    throw new Error('copilot.run_agent runMode must be constrained to sync or async');
+  }
+  if (JSON.stringify(runProperties.invocationMode?.enum) !== JSON.stringify(['flag', 'prompt'])) {
+    throw new Error('copilot.run_agent invocationMode must be constrained to flag or prompt');
+  }
+}
+
 function main() {
   const servers = readRegistry();
   const disabledHandlers = parseDisabledHandlers();
@@ -75,6 +104,10 @@ function main() {
 
     const loaded = loadManifest(manifestPath);
     const toolNames = [];
+
+    if (serverName === 'copilot') {
+      validateCopilotContract(loaded.manifest.tools);
+    }
 
     for (const tool of loaded.manifest.tools) {
       const prior = seenToolNames.get(tool.name);

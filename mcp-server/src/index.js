@@ -93,6 +93,7 @@ function registerManifestTools(server, tools) {
         title: tool.title || tool.name,
         description: tool.description || '',
         ...(tool.inputSchema ? { inputSchema: convertJsonSchemaToZodShape(tool.inputSchema) } : {}),
+        ...(tool.outputSchema ? { outputSchema: convertJsonSchemaToZodShape(tool.outputSchema) } : {}),
       },
       async (args) => handler(args, tool)
     );
@@ -121,6 +122,12 @@ function applySchemaConstraints(schema, spec) {
 function convertJsonSchemaNode(spec) {
   if (!spec || typeof spec !== 'object') {
     return z.any();
+  }
+
+  if (Array.isArray(spec.enum) && spec.enum.length > 0) {
+    const literals = spec.enum.map((value) => z.literal(value));
+    const schema = literals.length === 1 ? literals[0] : z.union(literals);
+    return applySchemaConstraints(schema, spec);
   }
 
   if (spec.type === 'string') {
