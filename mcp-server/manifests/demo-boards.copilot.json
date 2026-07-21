@@ -1,0 +1,168 @@
+{
+  "server": {
+    "name": "demo-boards-mcp",
+    "version": "0.1.0",
+    "description": "demo-boards Copilot CLI tool surface"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+    "urlDefault": "http://127.0.0.1:7801/mcp"
+  },
+  "tools": [
+    {
+      "name": "copilot.check_environment",
+      "title": "Check Copilot CLI Environment",
+      "description": "Verify that the local Copilot CLI is installed and report available local custom agents.",
+      "handler": "copilot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string",
+            "description": "Optional working directory used to discover the nearest project-level .github/agents folder."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "copilot.list_agents",
+      "title": "List Copilot Agents",
+      "description": "List available local Copilot CLI custom agents from project and user agent directories.",
+      "handler": "copilot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string",
+            "description": "Optional working directory used to discover the nearest project-level .github/agents folder."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "copilot.run_agent",
+      "title": "Run Copilot Agent",
+      "description": "Run the local Copilot CLI with an explicit custom agent or with prompt-based agent selection.",
+      "handler": "copilot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Prompt text to send to Copilot."
+          },
+          "agent": {
+            "type": "string",
+            "description": "Optional custom agent id (file stem without .agent.md). When omitted, Copilot chooses normally."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Optional working directory passed to Copilot with -C. Defaults to the workspace root."
+          },
+          "addDirs": {
+            "type": "array",
+            "description": "Optional extra directories passed with --add-dir.",
+            "items": { "type": "string" },
+            "maxItems": 20
+          },
+          "attachments": {
+            "type": "array",
+            "description": "Optional files attached to the initial prompt.",
+            "items": { "type": "string" },
+            "maxItems": 20
+          },
+          "model": {
+            "type": "string",
+            "description": "Optional model override."
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Optional explicit Copilot session id."
+          },
+          "continueSession": {
+            "type": "boolean",
+            "description": "Resume the most recent Copilot session before sending the prompt."
+          },
+          "resumeSession": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Resume by session id, id prefix, task id, or exact session name. Mutually exclusive with sessionId and continueSession. The interactive session picker is intentionally not exposed by this hosted tool."
+          },
+          "sessionName": {
+            "type": "string",
+            "description": "Optional name for a newly created session. Cannot be combined with a resume option."
+          },
+          "reasoningEffort": {
+            "type": "string",
+            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+            "description": "Optional native Copilot reasoning effort level."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 900000,
+            "description": "Optional timeout override in milliseconds."
+          },
+          "invocationMode": {
+            "type": "string",
+            "description": "How to target the agent: flag (default, uses --agent) or prompt (injects an explicit instruction into the prompt)."
+          },
+          "runMode": {
+            "type": "string",
+            "description": "sync (default) waits for completion; async starts a background run and returns a run id for later polling/cancellation."
+          }
+        },
+        "required": ["message"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "copilot.list_runs",
+      "title": "List Copilot Runs",
+      "description": "List Copilot runs started through this MCP server process.",
+      "handler": "copilot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "copilot.get_run",
+      "title": "Get Copilot Run",
+      "description": "Get the current state and output of a previously started Copilot run.",
+      "handler": "copilot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The run id returned by copilot.run_agent in async mode."
+          }
+        },
+        "required": ["runId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "copilot.cancel_run",
+      "title": "Cancel Copilot Run",
+      "description": "Request cancellation of a running Copilot CLI process started by this MCP server.",
+      "handler": "copilot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The run id returned by copilot.run_agent in async mode."
+          }
+        },
+        "required": ["runId"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

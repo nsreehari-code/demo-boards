@@ -17,6 +17,63 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const COPILOT_MODEL = 'gpt-5.4';
+export const COPILOT_TIMEOUT_MS = 300_000;
+
+export function buildCopilotCommand(opts = {}) {
+  const {
+    workingDir,
+    addDirs = [],
+    attachments = [],
+    agent,
+    model = COPILOT_MODEL,
+    sessionId,
+    continueSession = false,
+    resumeSession,
+    sessionName,
+    reasoningEffort,
+  } = opts;
+
+  const sessionModes = [continueSession, Boolean(sessionId), Boolean(resumeSession)]
+    .filter(Boolean).length;
+  if (sessionModes > 1) {
+    throw new Error('continueSession, sessionId, and resumeSession are mutually exclusive');
+  }
+  if (sessionName && sessionModes > 0) {
+    throw new Error('sessionName can only be used when starting a new session');
+  }
+
+  const onWindows = process.platform === 'win32';
+  const args = [];
+  if (workingDir) args.push('-C', workingDir);
+  if (agent) args.push('--agent', agent);
+  if (continueSession) args.push('--continue');
+  if (sessionId) args.push('--session-id', sessionId);
+  if (typeof resumeSession === 'string' && resumeSession) args.push(`--resume=${resumeSession}`);
+  if (sessionName) args.push('--name', sessionName);
+  if (reasoningEffort) args.push('--effort', reasoningEffort);
+  args.push('-s', '--no-ask-user', '--allow-all-tools', '--model', model);
+  if (onWindows) args.push('--deny-tool', 'shell');
+  for (const dir of addDirs) args.push('--add-dir', dir);
+  for (const attachment of attachments) args.push('--attachment', attachment);
+
+  return {
+    command: onWindows ? 'copilot.exe' : 'copilot',
+    args,
+  };
+}
+
+export function spawnCopilot(opts = {}) {
+  const { prompt = '', workingDir } = opts;
+  const { command, args } = buildCopilotCommand(opts);
+  const child = spawn(command, args, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+    cwd: workingDir || undefined,
+    env: process.env,
+  });
+  child.stdin.end(prompt);
+  return child;
+}
 
 /**
  * Spawn the headless copilot CLI. Prompt is piped via stdin.
@@ -29,9 +86,14 @@ export const COPILOT_MODEL = 'gpt-5.4';
  * @param {string} [opts.prompt]          Prompt text, piped via stdin.
  * @param {string} [opts.workingDir]      Copilot working directory (`-C`).
  * @param {string[]} [opts.addDirs]       Extra dirs (`--add-dir`).
+ * @param {string[]} [opts.attachments]   Initial prompt attachments (`--attachment`).
+ * @param {string} [opts.agent]           Custom agent id (`--agent`).
  * @param {string} [opts.model]           Model id (default COPILOT_MODEL).
  * @param {string} [opts.sessionId]       Native session id (`--session-id`).
  * @param {boolean} [opts.continueSession] Resume the most recent session (`--continue`).
+ * @param {string} [opts.resumeSession] Resume by id, prefix, task id, or exact name (`--resume`).
+ * @param {string} [opts.sessionName]      Name a newly created session (`--name`).
+ * @param {string} [opts.reasoningEffort]  Native reasoning effort level (`--effort`).
  * @param {number} [opts.timeoutMs]       Kill the process after this many ms.
  * @param {(chunk: string) => void} [opts.onData] Live stdout chunk callback.
  */
@@ -40,31 +102,31 @@ export function runCopilot(opts = {}) {
     prompt = '',
     workingDir,
     addDirs = [],
+    attachments = [],
+    agent,
     model = COPILOT_MODEL,
     sessionId,
     continueSession = false,
-    timeoutMs = 300_000,
+    resumeSession,
+    sessionName,
+    reasoningEffort,
+    timeoutMs = COPILOT_TIMEOUT_MS,
     onData,
   } = opts;
 
   return new Promise((resolve, reject) => {
-    const onWindows = process.platform === 'win32';
-    const args = [];
-    if (workingDir) args.push('-C', workingDir);
-    if (continueSession) args.push('--continue');
-    if (sessionId) args.push('--session-id', sessionId);
-    args.push('-s', '--no-ask-user', '--allow-all-tools', '--model', model);
-    if (onWindows) args.push('--deny-tool', 'shell');
-    for (const dir of addDirs) args.push('--add-dir', dir);
-
-    const command = onWindows ? 'copilot.exe' : 'copilot';
-    const spawnArgs = args;
-
-    const child = spawn(command, spawnArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      cwd: workingDir || undefined,
-      env: process.env,
+    const child = spawnCopilot({
+      prompt,
+      workingDir,
+      addDirs,
+      attachments,
+      agent,
+      model,
+      sessionId,
+      continueSession,
+      resumeSession,
+      sessionName,
+      reasoningEffort,
     });
 
     let stdout = '';
@@ -89,7 +151,6 @@ export function runCopilot(opts = {}) {
     child.on('close', (code) => finish(() => resolve({ code, stdout, stderr })));
 
     timer = setTimeout(() => { child.kill(); }, timeoutMs);
-    child.stdin.end(prompt);
   });
 }
 
@@ -107,6 +168,7 @@ function parseArgs(argv) {
       case '--prompt': opts.prompt = next(); break;
       case '--output-file': opts.outputFile = next(); break;
       case '--cwd': opts.workingDir = next(); break;
+      case '--agent': opts.agent = next(); break;
       case '--model': opts.model = next(); break;
       case '--session-id': opts.sessionId = next(); break;
       case '--add-dir': opts.addDirs.push(next()); break;
@@ -127,6 +189,7 @@ async function main() {
     prompt,
     workingDir: opts.workingDir,
     addDirs: opts.addDirs,
+    agent: opts.agent,
     sessionId: opts.sessionId,
     ...(opts.model ? { model: opts.model } : {}),
   });

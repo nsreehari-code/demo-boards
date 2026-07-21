@@ -21,7 +21,7 @@
     "mcp:install": "npm --prefix mcp-server install",
     "mcp:test": "npm --prefix mcp-server run test:smoke",
     "mcp:sentinel:tenant-check": "npm --prefix mcp-server run smoke:sentinel:tenant",
-    "mcp:dry-run": "npm --prefix mcp-server run dry-run -- --manifest manifests/demo-boards.workiq.json --manifest manifests/demo-boards.graph.json --manifest ../mcp-server-managed-truthsets/finbook/mcp-executable-manifest.json --transport streamable-http",
+    "mcp:dry-run": "npm --prefix mcp-server run dry-run -- --manifest manifests/demo-boards.workiq.json --manifest manifests/demo-boards.copilot.json --manifest manifests/demo-boards.graph.json --manifest ../mcp-server-managed-truthsets/finbook/mcp-executable-manifest.json --transport streamable-http",
     "setup:check:copilot-only": "node scripts/setup-check-copilot-workiq.mjs --copilot-only",
     "setup:check:workiq-only": "node scripts/setup-check-copilot-workiq.mjs --workiq-only",
     "setup:check:copilot-workiq": "node scripts/setup-check-copilot-workiq.mjs",

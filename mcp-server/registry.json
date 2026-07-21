@@ -30,6 +30,9 @@
     "workiq": {
       "manifest": "demo-boards.workiq.json"
     },
+    "copilot": {
+      "manifest": "demo-boards.copilot.json"
+    },
     "graph": {
       "manifest": "demo-boards.graph.json"
     },

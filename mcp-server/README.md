@@ -75,6 +75,34 @@ Example tool entry:
 }
 ```
 
+## Copilot CLI tools
+
+The server can also expose local GitHub Copilot CLI tools for custom agents defined in project or
+user agent directories.
+
+Current first-pass tools:
+- `copilot.check_environment` — verify that `copilot` is installed and report discovered local agents
+- `copilot.list_agents` — enumerate local custom agents from `.github/agents` and `~/.copilot/agents`
+- `copilot.run_agent` — run Copilot with either:
+  - direct custom-agent selection via `--agent <name>`; or
+  - prompt-based agent targeting when you choose `invocationMode: "prompt"`
+  - native session control through `continueSession`, `sessionId`, `resumeSession`, and `sessionName`
+  - initial file attachments, model selection, reasoning effort, working-directory access, and timeout control
+  - synchronous completion or process-owned async execution through `runMode`
+- `copilot.list_runs` — list async Copilot runs started by this MCP server process
+- `copilot.get_run` — inspect a previously started async run, including accumulated stdout/stderr
+- `copilot.cancel_run` — terminate a running Copilot process by run id
+
+The installed CLI currently advertises `--agent`, `--continue`, and `--session-id`, but does **not**
+advertise a dedicated stop/cancel command. The MCP host now owns async child processes itself, so
+`copilot.run_agent` can be used with `runMode: "async"` and later managed through the run lifecycle
+tools above. Async run records are process-local and are cleared when the MCP server restarts.
+
+Session selectors are mutually exclusive. Use `continueSession` for the most recent session,
+`sessionId` to create or resume a UUID-backed session, or `resumeSession` to resume by ID, prefix,
+task ID, or exact session name. Bare `--resume` is not exposed because its interactive picker is not
+appropriate for the hosted MCP transport.
+
 Example source definition shape for the executor:
 
 ```json
