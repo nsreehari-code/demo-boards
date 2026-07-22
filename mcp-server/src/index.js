@@ -228,6 +228,13 @@ function sendText(res, status, message) {
   res.end(message);
 }
 
+function applyCorsHeaders(res, origin = '*') {
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Mcp-Session-Id, Last-Event-ID');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+}
+
 function appendMcpServerLogLine(message) {
   const line = `${formatTimestamp()} ${message}`;
   try {
@@ -315,11 +322,8 @@ async function startStreamableHttpServer(loaded) {
     }
 
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id, Last-Event-ID',
-        'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
-      });
+      applyCorsHeaders(res);
+      res.writeHead(204);
       res.end();
       return;
     }
@@ -328,6 +332,8 @@ async function startStreamableHttpServer(loaded) {
     const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
 
     try {
+      applyCorsHeaders(res, req.headers.origin || '*');
+
       if (req.method === 'POST') {
         const parsedBody = await readJsonBody(req);
         const requestSummary = summarizeMcpRequestBody(parsedBody);
