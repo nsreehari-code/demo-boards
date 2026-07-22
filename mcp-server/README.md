@@ -83,6 +83,9 @@ user agent directories.
 Current first-pass tools:
 - `copilot.check_environment` — verify that `copilot` is installed and report discovered local agents
 - `copilot.list_agents` — enumerate local custom agents from `.github/agents` and `~/.copilot/agents`
+- `copilot.list_source_roots` — show extra configured source directory roots used for agent discovery
+- `copilot.upsert_source_root` — add or update one extra source directory root used for agent discovery
+- `copilot.remove_source_root` — remove one configured extra source directory root by id
 - `copilot.run_agent` — run Copilot with either:
   - direct custom-agent selection via `--agent <name>`; or
   - prompt-based agent targeting when you choose `invocationMode: "prompt"`
@@ -97,6 +100,12 @@ The installed CLI currently advertises `--agent`, `--continue`, and `--session-i
 advertise a dedicated stop/cancel command. The MCP host now owns async child processes itself, so
 `copilot.run_agent` can be used with `runMode: "async"` and later managed through the run lifecycle
 tools above. Async run records are process-local and are cleared when the MCP server restarts.
+
+Configured extra source roots are stored in the managed Lore truthset under the app-scoped Lore
+namespace `app/copilot-c2` using the key `source-roots`. Each root can point at either a repository root or a direct
+`.github/agents` directory. Discovery still includes the default workspace `.github/agents`, the
+nearest project `.github/agents` for the requested `cwd`, and the MCP server user's
+`~/.copilot/agents`.
 
 Session selectors are mutually exclusive. Use `continueSession` for the most recent session,
 `sessionId` to create or resume a UUID-backed session, or `resumeSession` to resume by ID, prefix,

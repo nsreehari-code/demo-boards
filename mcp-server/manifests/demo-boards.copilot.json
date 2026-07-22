@@ -78,6 +78,98 @@
       }
     },
     {
+      "name": "copilot.list_source_roots",
+      "title": "List Copilot Source Roots",
+      "description": "List configured extra source directory roots that the Copilot MCP handler searches for project .github/agents directories.",
+      "handler": "copilot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "count": { "type": "integer" },
+          "roots": {
+            "type": "array",
+            "items": { "type": "object" },
+            "description": "Configured source roots with id, label, path, and enabled flag."
+          }
+        },
+        "required": ["count", "roots"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "copilot.upsert_source_root",
+      "title": "Add Or Update Copilot Source Root",
+      "description": "Add or update one extra source directory root used for Copilot agent discovery. The path must exist on the MCP server machine. If the path is a repository root, the nearest .github/agents directory under it is used; if the path itself is a .github/agents directory, it is used directly.",
+      "handler": "copilot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable root id. Optional; defaults to a normalized basename of the path."
+          },
+          "label": {
+            "type": "string",
+            "description": "Optional display label."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing directory on the MCP server machine. Can be a repository root or a direct .github/agents directory."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether this root should participate in discovery. Defaults to true."
+          }
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "root": { "type": "object", "description": "The stored root record." },
+          "count": { "type": "integer" },
+          "roots": { "type": "array", "items": { "type": "object" } },
+          "created": { "type": "boolean" }
+        },
+        "required": ["root", "count", "roots", "created"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "copilot.remove_source_root",
+      "title": "Remove Copilot Source Root",
+      "description": "Remove one configured extra source directory root by id.",
+      "handler": "copilot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The configured source root id to remove."
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "removed": { "type": "object", "description": "The removed root record." },
+          "count": { "type": "integer" },
+          "roots": { "type": "array", "items": { "type": "object" } }
+        },
+        "required": ["removed", "count", "roots"],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "copilot.run_agent",
       "title": "Run Copilot Agent",
       "description": "Start a headless Copilot CLI task in an existing repository on the MCP server machine. Copilot tools are auto-approved, so the run may read or modify repository files and execute permitted commands. Omit agent for normal Copilot behavior, or select a discovered custom agent. Use runMode=sync for the final response, or runMode=async to receive a process-local run id and then poll copilot.get_run or cancel with copilot.cancel_run. Async records disappear when the MCP server restarts.",

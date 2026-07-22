@@ -5,7 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const SCOPE_GLOBAL = 'global';
-const SCOPE_PREFIXES = ['board/', 'user/'];
+const SCOPE_PREFIXES = ['board/', 'user/', 'app/'];
 const SEGMENT_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 
 function validateScope(scope) {
@@ -17,7 +17,7 @@ function validateScope(scope) {
   if (scope === SCOPE_GLOBAL) return { kind: 'global', id: null };
   const prefix = SCOPE_PREFIXES.find((candidate) => scope.startsWith(candidate));
   if (!prefix) {
-    const err = new Error(`scope must be "global", "board/<id>", or "user/<id>" (got "${scope}")`);
+    const err = new Error(`scope must be "global", "board/<id>", "user/<id>", or "app/<id>" (got "${scope}")`);
     err.code = 'lore_scope_invalid';
     throw err;
   }
@@ -43,6 +43,7 @@ function resolveScopeFile(rootDir, scope) {
   const parsed = validateScope(scope);
   if (parsed.kind === 'global') return path.join(rootDir, 'global', 'kb.json');
   if (parsed.kind === 'board') return path.join(rootDir, 'boards', parsed.id, 'kb.json');
+  if (parsed.kind === 'app') return path.join(rootDir, 'apps', parsed.id, 'kb.json');
   return path.join(rootDir, 'users', parsed.id, 'kb.json');
 }
 
@@ -189,7 +190,7 @@ function listScopes(rootDir, options = {}) {
   if (fs.existsSync(path.join(rootDir, 'global', 'kb.json'))) {
     scopes.push('global');
   }
-  for (const [dirName, scopePrefix] of [['boards', 'board'], ['users', 'user']]) {
+  for (const [dirName, scopePrefix] of [['boards', 'board'], ['users', 'user'], ['apps', 'app']]) {
     const baseDir = path.join(rootDir, dirName);
     if (!fs.existsSync(baseDir)) continue;
     for (const id of fs.readdirSync(baseDir)) {

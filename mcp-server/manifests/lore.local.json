@@ -19,7 +19,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', or 'user/<id>'." },
+          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', 'user/<id>', or 'app/<id>'." },
           "key": { "type": "string", "description": "Lore entry key (dotted, e.g. board.fy-convention)." }
         },
         "required": ["scope", "key"],
@@ -35,7 +35,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', or 'user/<id>'." },
+          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', 'user/<id>', or 'app/<id>'." },
           "keyPrefix": { "type": "string", "description": "Optional key prefix filter (e.g. 'identity.')." },
           "includeDeprecated": { "type": "boolean", "description": "When true, include deprecated entries. Default false." }
         },
@@ -46,13 +46,13 @@
     {
       "name": "lore.list_scopes",
       "title": "Lore List Scopes",
-      "description": "Discover scopes that have any stored lore. Optionally filter by prefix (e.g. 'board/').",
+      "description": "Discover scopes that have any stored lore. Optionally filter by prefix (e.g. 'board/' or 'app/').",
       "handler": "lore",
       "config": { "rootPath": "../../mcp-server-managed-truthsets/lore" },
       "inputSchema": {
         "type": "object",
         "properties": {
-          "prefix": { "type": "string", "description": "Optional scope prefix filter such as 'board/' or 'user/'." }
+          "prefix": { "type": "string", "description": "Optional scope prefix filter such as 'board/', 'user/', or 'app/'." }
         },
         "additionalProperties": false
       }
@@ -66,7 +66,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', or 'user/<id>'." },
+          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', 'user/<id>', or 'app/<id>'." },
           "key": { "type": "string", "description": "Lore entry key." },
           "value": { "description": "Entry value. Strings, objects, or arrays are all supported." }
         },
@@ -83,7 +83,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', or 'user/<id>'." },
+          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', 'user/<id>', or 'app/<id>'." },
           "key": { "type": "string", "description": "Lore entry key." },
           "value": { "description": "Value to append." }
         },
@@ -100,7 +100,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', or 'user/<id>'." },
+          "scope": { "type": "string", "description": "Scope: 'global', 'board/<id>', 'user/<id>', or 'app/<id>'." },
           "key": { "type": "string", "description": "Lore entry key." }
         },
         "required": ["scope", "key"],

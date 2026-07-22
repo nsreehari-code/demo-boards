@@ -4,6 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   COPILOT_MODEL,
@@ -12,12 +13,22 @@ import {
   spawnCopilot,
 } from '../../../demo-board/server/lib/copilot-cli.js';
 
+const require = createRequire(import.meta.url);
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEMO_BOARDS_ROOT = path.resolve(__dirname, '..', '..');
 const WORKSPACE_ROOT = path.resolve(DEMO_BOARDS_ROOT, '..');
+const LORE_ROOT_DIR = path.resolve(DEMO_BOARDS_ROOT, '..', 'mcp-server-managed-truthsets', 'lore');
+const LORE_STORE_PATH = path.join(LORE_ROOT_DIR, 'lib', 'lore-store.cjs');
+const SOURCE_ROOTS_SCOPE = 'app/copilot-c2';
+const SOURCE_ROOTS_KEY = 'source-roots';
 const COPILOT_RUNS = new Map();
 const MAX_COMPLETED_RUNS = 50;
+
+function cloneJson(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
 
 function repoRelative(targetPath) {
   return path.relative(WORKSPACE_ROOT, targetPath).replace(/\\/g, '/');
@@ -79,6 +90,70 @@ function parseAgentFrontmatter(markdown) {
   return result;
 }
 
+function normalizeSourceRootId(value) {
+  return typeof value === 'string'
+    ? value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+    : '';
+}
+
+function normalizeSourceRootRecord(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+  const resolvedPath = ensureExistingDir(entry.path, 'source root path');
+  if (!resolvedPath) return null;
+  const id = normalizeSourceRootId(entry.id || path.basename(resolvedPath));
+  if (!id) throw new Error(`Unable to derive source root id for ${resolvedPath}`);
+  return {
+    id,
+    label: normalizeOptionalString(entry.label) || id,
+    path: resolvedPath,
+    enabled: entry.enabled !== false,
+  };
+}
+
+function loadLoreStore() {
+  delete require.cache[require.resolve(LORE_STORE_PATH)];
+  return require(LORE_STORE_PATH);
+}
+
+function loadSourceRoots() {
+  const store = loadLoreStore();
+  const entry = store.get(LORE_ROOT_DIR, SOURCE_ROOTS_SCOPE, SOURCE_ROOTS_KEY);
+  const roots = Array.isArray(entry?.value) ? entry.value : [];
+  return roots
+    .map((entry) => normalizeSourceRootRecord(entry))
+    .filter(Boolean)
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function saveSourceRoots(roots) {
+  const store = loadLoreStore();
+  const normalized = roots
+    .map((entry) => normalizeSourceRootRecord(entry))
+    .filter(Boolean)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  if (normalized.length === 0) {
+    try {
+      store.remove(LORE_ROOT_DIR, SOURCE_ROOTS_SCOPE, SOURCE_ROOTS_KEY);
+    } catch (error) {
+      if (!error || error.code !== 'lore_not_found') throw error;
+    }
+    return normalized;
+  }
+  store.set(LORE_ROOT_DIR, SOURCE_ROOTS_SCOPE, SOURCE_ROOTS_KEY, normalized);
+  return normalized;
+}
+
+function isAgentsDirectory(candidate) {
+  return path.basename(candidate) === 'agents' && path.basename(path.dirname(candidate)) === '.github';
+}
+
+function resolveConfiguredAgentsDir(candidate) {
+  const resolved = ensureExistingDir(candidate, 'source root path');
+  if (!resolved) return '';
+  if (isAgentsDirectory(resolved)) return resolved;
+  return nearestProjectAgentsDir(resolved);
+}
+
 function nearestProjectAgentsDir(startDir) {
   let current = ensureExistingDir(startDir || WORKSPACE_ROOT, 'cwd') || WORKSPACE_ROOT;
   while (true) {
@@ -98,6 +173,11 @@ function collectAgentDirectories(cwd) {
   if (fs.existsSync(workspaceAgents)) dirs.push(workspaceAgents);
   const nearest = nearestProjectAgentsDir(cwd || WORKSPACE_ROOT);
   if (nearest && !dirs.includes(nearest)) dirs.push(nearest);
+  for (const sourceRoot of loadSourceRoots()) {
+    if (sourceRoot.enabled === false) continue;
+    const configured = resolveConfiguredAgentsDir(sourceRoot.path);
+    if (configured && !dirs.includes(configured)) dirs.push(configured);
+  }
   const userAgents = path.join(os.homedir(), '.copilot', 'agents');
   if (fs.existsSync(userAgents)) dirs.push(userAgents);
   return dirs;
@@ -423,6 +503,64 @@ async function handleListAgents(args) {
   });
 }
 
+async function handleListSourceRoots() {
+  const roots = loadSourceRoots();
+  return asTextResult(
+    roots.length === 0
+      ? 'No configured Copilot source roots.'
+      : roots.map((root) => `- ${root.id}: ${root.path}`).join('\n'),
+    {
+      count: roots.length,
+      roots: cloneJson(roots),
+    }
+  );
+}
+
+async function handleUpsertSourceRoot(args) {
+  const resolvedPath = ensureExistingDir(args?.path, 'path');
+  const nextRoot = normalizeSourceRootRecord({
+    id: normalizeSourceRootId(args?.id) || path.basename(resolvedPath),
+    label: args?.label,
+    path: resolvedPath,
+    enabled: args?.enabled,
+  });
+  const roots = loadSourceRoots();
+  const index = roots.findIndex((entry) => entry.id === nextRoot.id);
+  const saved = saveSourceRoots(
+    index >= 0
+      ? roots.map((entry, entryIndex) => (entryIndex === index ? nextRoot : entry))
+      : [...roots, nextRoot]
+  );
+  return asTextResult(
+    index >= 0
+      ? `Updated Copilot source root ${nextRoot.id}.`
+      : `Added Copilot source root ${nextRoot.id}.`,
+    {
+      root: cloneJson(nextRoot),
+      count: saved.length,
+      roots: cloneJson(saved),
+      created: index < 0,
+    }
+  );
+}
+
+async function handleRemoveSourceRoot(args) {
+  const rootId = normalizeSourceRootId(args?.id);
+  if (!rootId) throw new Error('copilot.remove_source_root requires id');
+  const roots = loadSourceRoots();
+  const existing = roots.find((entry) => entry.id === rootId);
+  if (!existing) throw new Error(`Unknown Copilot source root '${rootId}'`);
+  const saved = saveSourceRoots(roots.filter((entry) => entry.id !== rootId));
+  return asTextResult(
+    `Removed Copilot source root ${rootId}.`,
+    {
+      removed: cloneJson(existing),
+      count: saved.length,
+      roots: cloneJson(saved),
+    }
+  );
+}
+
 async function handleRunAgent(args) {
   const config = prepareRunArguments(args);
   if (config.runMode === 'async') {
@@ -528,6 +666,12 @@ export async function handleCopilotTool(args, tool) {
       return handleCheckEnvironment(args);
     case 'copilot.list_agents':
       return handleListAgents(args);
+    case 'copilot.list_source_roots':
+      return handleListSourceRoots(args);
+    case 'copilot.upsert_source_root':
+      return handleUpsertSourceRoot(args);
+    case 'copilot.remove_source_root':
+      return handleRemoveSourceRoot(args);
     case 'copilot.run_agent':
       return handleRunAgent(args);
     case 'copilot.list_runs':
