@@ -352,7 +352,12 @@ function buildRunSummary(run) {
     : `Copilot run ${run.id} ${run.status}${run.exitCode === null ? '' : ` (exit ${run.exitCode})`}.`;
 }
 
-function prepareRunArguments(args) {
+function projectRootForAgent(agent) {
+  if (agent?.source !== 'project' || !agent.path) return '';
+  return path.dirname(path.dirname(path.dirname(agent.path)));
+}
+
+export function prepareRunArguments(args) {
   const message = normalizeOptionalString(args?.message);
   if (!message) throw new Error('copilot.run_agent requires a non-empty message');
 
@@ -361,7 +366,8 @@ function prepareRunArguments(args) {
     throw new Error(`Unsupported invocationMode '${args?.invocationMode}'. Expected 'flag' or 'prompt'.`);
   }
 
-  const cwd = ensureExistingDir(args?.cwd || WORKSPACE_ROOT, 'cwd') || WORKSPACE_ROOT;
+  const requestedCwd = ensureExistingDir(args?.cwd || WORKSPACE_ROOT, 'cwd') || WORKSPACE_ROOT;
+  let cwd = requestedCwd;
   const addDirs = Array.isArray(args?.addDirs)
     ? args.addDirs.map((entry) => ensureExistingDir(entry, 'addDirs entry')).filter(Boolean)
     : [];
@@ -370,9 +376,12 @@ function prepareRunArguments(args) {
     : [];
   const agent = normalizeOptionalString(args?.agent);
   if (agent) {
-    const agents = listAgents(cwd);
-    if (!agents.some((entry) => entry.id === agent)) {
-      throw new Error(`Unknown local Copilot agent '${agent}' for cwd ${cwd}`);
+    const selectedAgent = listAgents(requestedCwd).find((entry) => entry.id === agent);
+    if (!selectedAgent) {
+      throw new Error(`Unknown local Copilot agent '${agent}' for cwd ${requestedCwd}`);
+    }
+    if (!normalizeOptionalString(args?.cwd)) {
+      cwd = projectRootForAgent(selectedAgent) || requestedCwd;
     }
   }
 
