@@ -32,6 +32,163 @@ async function dispatchJournal(storage, operation, args) {
 
 export function createFilesystemStorageDispatcher(storage) {
   const lockTokens = new Map();
+  const transitionTokens = new Map();
+  const runtimeStateKey = '__gik_runtime_state__';
+
+  function runtimeRefs(request) {
+    for (const name of ['stateRef', 'effectsQueueRef']) {
+      if (typeof request?.[name] !== 'string' || !request[name]) {
+        throw new Error(`${name} must be a non-empty string.`);
+      }
+    }
+    const stateNamespace = storage.namespaceForRef(request.stateRef);
+    const effectsNamespace = storage.namespaceForRef(request.effectsQueueRef);
+    if (stateNamespace !== effectsNamespace) {
+      throw new Error('Filesystem transitions require stateRef and effectsQueueRef to use the same namespace.');
+    }
+    return {
+      stateRef: request.stateRef,
+      effectsQueueRef: request.effectsQueueRef,
+      effectsLane: optionalString(request.effectsLane),
+    };
+  }
+
+  function transitionRefs(request) {
+    if (typeof request?.journalRef !== 'string' || !request.journalRef) {
+      throw new Error('journalRef must be a non-empty string.');
+    }
+    return { ...runtimeRefs(request), journalRef: request.journalRef };
+  }
+
+  function refsKey(refs) {
+    return JSON.stringify(refs);
+  }
+
+  async function releaseTransition(token) {
+    const held = transitionTokens.get(token);
+    if (!held) return false;
+    transitionTokens.delete(token);
+    clearTimeout(held.timer);
+    await held.release();
+    return true;
+  }
+
+  async function initializeRuntime(request) {
+    const refs = runtimeRefs(request);
+    if (typeof request.kernelId !== 'string' || !request.kernelId) {
+      throw new Error('kernelId must be a non-empty string.');
+    }
+    if (!Object.prototype.hasOwnProperty.call(request, 'initialState')) {
+      throw new Error('initialState is required.');
+    }
+    const release = await storage.lockForRef(refs.stateRef).tryAcquire();
+    if (!release) throw new Error('Runtime is busy.');
+    try {
+      const stateStorage = storage.kvStorageForRef(refs.stateRef);
+      const current = await stateStorage.read(runtimeStateKey);
+      if (current) {
+        if (current.kernelId !== request.kernelId) {
+          throw new Error(`Runtime state belongs to kernel ${current.kernelId}, not ${request.kernelId}.`);
+        }
+        return { created: false, revision: current.revision };
+      }
+      const revision = crypto.randomUUID();
+      await stateStorage.write(runtimeStateKey, {
+        kernelId: request.kernelId,
+        revision,
+        cursor: null,
+        state: request.initialState,
+      });
+      return { created: true, revision };
+    } finally {
+      await release();
+    }
+  }
+
+  async function acquireTransition(request) {
+    const refs = transitionRefs(request);
+    if (typeof request.kernelId !== 'string' || !request.kernelId) {
+      throw new Error('kernelId must be a non-empty string.');
+    }
+    const release = await storage.lockForRef(refs.stateRef).tryAcquire();
+    if (!release) return null;
+
+    const leaseMs = Number.isInteger(request.leaseMs) && request.leaseMs > 0 ? request.leaseMs : 300_000;
+    const leaseToken = crypto.randomUUID();
+    const leaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+    const timer = setTimeout(() => releaseTransition(leaseToken).catch(() => {}), leaseMs);
+    timer.unref?.();
+    transitionTokens.set(leaseToken, {
+      refsKey: refsKey(refs),
+      kernelId: request.kernelId,
+      release,
+      timer,
+    });
+
+    try {
+      const persisted = await storage.kvStorageForRef(refs.stateRef).read(runtimeStateKey);
+      if (!persisted) throw new Error('Runtime is not initialized.');
+      if (persisted.kernelId !== request.kernelId) {
+        throw new Error(`Runtime state belongs to kernel ${persisted.kernelId}, not ${request.kernelId}.`);
+      }
+      const cursor = persisted?.cursor ?? null;
+      const journal = await storage.journalStorageForRef(refs.journalRef).readAfter(cursor);
+      return {
+        leaseToken,
+        leaseExpiresAt,
+        state: persisted.state,
+        revision: persisted.revision,
+        cursor,
+        entries: journal.entries,
+      };
+    } catch (error) {
+      await releaseTransition(leaseToken);
+      throw error;
+    }
+  }
+
+  async function commitTransition(request) {
+    const refs = transitionRefs(request);
+    const held = transitionTokens.get(request.leaseToken);
+    if (!held || held.refsKey !== refsKey(refs) || held.kernelId !== request.kernelId) {
+      return { ok: false, reason: 'lease-lost', revision: null };
+    }
+    try {
+      const stateStorage = storage.kvStorageForRef(refs.stateRef);
+      const current = await stateStorage.read(runtimeStateKey);
+      const revision = current?.revision ?? null;
+      if (revision !== request.expectedRevision || (current?.cursor ?? null) !== request.previousCursor) {
+        return { ok: false, reason: 'conflict', revision };
+      }
+      if (!Array.isArray(request.effects)) throw new Error('effects must be an array.');
+      const queue = storage.queueStorageForRef(refs.effectsQueueRef, refs.effectsLane);
+      const staged = [];
+      try {
+        for (const effect of request.effects) staged.push(await queue.stage(effect));
+        const nextRevision = crypto.randomUUID();
+        await stateStorage.write(runtimeStateKey, {
+          kernelId: request.kernelId,
+          revision: nextRevision,
+          cursor: String(request.nextCursor),
+          state: request.state ?? null,
+        });
+        for (const message of staged) await queue.commitStaged(message.id);
+        return { ok: true, revision: nextRevision };
+      } catch (error) {
+        for (const message of staged) await queue.discardStaged(message.id, 'transition commit failed').catch(() => false);
+        throw error;
+      }
+    } finally {
+      await releaseTransition(request.leaseToken);
+    }
+  }
+
+  async function abortTransition(request) {
+    const refs = transitionRefs(request);
+    const held = transitionTokens.get(request.leaseToken);
+    if (!held || held.refsKey !== refsKey(refs) || held.kernelId !== request.kernelId) return false;
+    return releaseTransition(request.leaseToken);
+  }
 
   async function dispatch(request) {
     if (!request || typeof request.ref !== 'string' || typeof request.operation !== 'string') {
@@ -126,6 +283,10 @@ export function createFilesystemStorageDispatcher(storage) {
 
   return {
     dispatch,
+    initializeRuntime,
+    acquireTransition,
+    commitTransition,
+    abortTransition,
     async dispatchBatch(requests) {
       if (!Array.isArray(requests)) throw new Error('operations must be an array.');
       const results = [];

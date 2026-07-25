@@ -54,6 +54,86 @@
         "required": ["operations"],
         "additionalProperties": false
       }
+    },
+    {
+      "name": "filesystem.runtime_initialize",
+      "handler": "filesystem",
+      "title": "Initialize filesystem runtime",
+      "description": "Creates the initial runtime state when it does not already exist.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stateRef": { "type": "string", "minLength": 1 },
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "kernelId": { "type": "string", "minLength": 1 },
+          "initialState": {}
+        },
+        "required": ["stateRef", "effectsQueueRef", "kernelId", "initialState"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "filesystem.transition_acquire",
+      "handler": "filesystem",
+      "title": "Acquire filesystem transition",
+      "description": "Acquires a runtime lock and returns state plus pending journal entries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stateRef": { "type": "string", "minLength": 1 },
+          "journalRef": { "type": "string", "minLength": 1 },
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "kernelId": { "type": "string", "minLength": 1 },
+          "leaseMs": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["stateRef", "journalRef", "effectsQueueRef", "kernelId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "filesystem.transition_commit",
+      "handler": "filesystem",
+      "title": "Commit filesystem transition",
+      "description": "Commits runtime state and effects, then releases the runtime lock.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stateRef": { "type": "string", "minLength": 1 },
+          "journalRef": { "type": "string", "minLength": 1 },
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "kernelId": { "type": "string", "minLength": 1 },
+          "leaseToken": { "type": "string", "minLength": 1 },
+          "expectedRevision": { "type": ["string", "null"] },
+          "previousCursor": { "type": ["string", "null"] },
+          "nextCursor": { "type": "string", "minLength": 1 },
+          "state": {},
+          "effects": { "type": "array" }
+        },
+        "required": ["stateRef", "journalRef", "effectsQueueRef", "kernelId", "leaseToken", "expectedRevision", "previousCursor", "nextCursor", "state", "effects"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "filesystem.transition_abort",
+      "handler": "filesystem",
+      "title": "Abort filesystem transition",
+      "description": "Releases a filesystem runtime lock without committing a transition.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stateRef": { "type": "string", "minLength": 1 },
+          "journalRef": { "type": "string", "minLength": 1 },
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "kernelId": { "type": "string", "minLength": 1 },
+          "leaseToken": { "type": "string", "minLength": 1 }
+        },
+        "required": ["stateRef", "journalRef", "effectsQueueRef", "kernelId", "leaseToken"],
+        "additionalProperties": false
+      }
     }
   ]
 }

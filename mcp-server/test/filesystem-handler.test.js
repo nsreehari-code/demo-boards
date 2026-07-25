@@ -58,3 +58,50 @@ test('filesystem batch isolates operation failures and continues in order', asyn
   assert.equal(response.structuredContent.results[1].ok, true);
   assert.equal(response.structuredContent.results[2].result, true);
 });
+
+test('filesystem transition tools hold the lock through commit and release it', async (t) => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-fs-transition-'));
+  t.after(() => fs.rm(rootDir, { recursive: true, force: true }));
+  const handler = createFilesystemToolHandler({ rootDir });
+  const { ref } = (await handler({ namespace: 'runtime' }, { name: 'filesystem.create_ref' })).structuredContent;
+  await handler({ operations: [
+    { ref, capability: 'journal', operation: 'append', args: [{ type: 'increment', amount: 2 }] },
+  ] }, { name: 'filesystem.storage_batch' });
+  const request = {
+    stateRef: ref, journalRef: ref, effectsQueueRef: ref,
+    kernelId: 'counter-v1',
+  };
+  await assert.rejects(
+    handler(request, { name: 'filesystem.transition_acquire' }),
+    /Runtime is not initialized/,
+  );
+  const initialized = (await handler({
+    stateRef: ref, effectsQueueRef: ref, kernelId: 'counter-v1', initialState: { count: 0 },
+  }, { name: 'filesystem.runtime_initialize' })).structuredContent.initialization;
+  assert.equal(initialized.created, true);
+  assert.deepEqual((await handler({
+    stateRef: ref, effectsQueueRef: ref, kernelId: 'counter-v1', initialState: { count: 99 },
+  }, { name: 'filesystem.runtime_initialize' })).structuredContent.initialization, {
+    created: false, revision: initialized.revision,
+  });
+  const acquired = (await handler(request, { name: 'filesystem.transition_acquire' })).structuredContent.transition;
+  assert.equal(acquired.entries.length, 1);
+  assert.equal((await handler(request, { name: 'filesystem.transition_acquire' })).structuredContent.transition, null);
+  const committed = (await handler({
+    ...request,
+    leaseToken: acquired.leaseToken,
+    expectedRevision: acquired.revision,
+    previousCursor: acquired.cursor,
+    nextCursor: acquired.entries[0].id,
+    state: { count: 2 },
+    effects: [{ type: 'count-changed', count: 2 }],
+  }, { name: 'filesystem.transition_commit' })).structuredContent;
+  assert.equal(committed.ok, true);
+  const next = (await handler(request, { name: 'filesystem.transition_acquire' })).structuredContent.transition;
+  assert.deepEqual(next.state, { count: 2 });
+  assert.deepEqual(next.entries, []);
+  assert.equal((await handler({
+    stateRef: ref, journalRef: ref, effectsQueueRef: ref,
+    kernelId: 'counter-v1', leaseToken: next.leaseToken,
+  }, { name: 'filesystem.transition_abort' })).structuredContent.aborted, true);
+});

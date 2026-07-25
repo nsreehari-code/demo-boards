@@ -25,6 +25,14 @@ export function createFilesystemToolHandler(options = {}) {
         return result({ ref: storage.createRef(args.namespace), kind: 'fs-path' });
       case 'filesystem.storage_batch':
         return result({ results: await dispatcher.dispatchBatch(args.operations) });
+      case 'filesystem.runtime_initialize':
+        return result({ initialization: await dispatcher.initializeRuntime(args) });
+      case 'filesystem.transition_acquire':
+        return result({ transition: await dispatcher.acquireTransition(args) });
+      case 'filesystem.transition_commit':
+        return result(await dispatcher.commitTransition(args));
+      case 'filesystem.transition_abort':
+        return result({ aborted: await dispatcher.abortTransition(args) });
       default:
         throw new Error(`Unsupported filesystem tool: ${tool.name}`);
     }

@@ -24,7 +24,11 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'filesystem.create_ref',
+    'filesystem.runtime_initialize',
     'filesystem.storage_batch',
+    'filesystem.transition_abort',
+    'filesystem.transition_acquire',
+    'filesystem.transition_commit',
   ]);
 
   const created = await client.callTool({
@@ -45,4 +49,53 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     { ok: true, result: null },
     { ok: true, result: { count: 7 } },
   ]);
+
+  await client.callTool({
+    name: 'filesystem.storage_batch',
+    arguments: { operations: [
+      { ref, capability: 'journal', operation: 'append', args: [{ type: 'increment' }] },
+    ] },
+  });
+  const initialized = await client.callTool({
+    name: 'filesystem.runtime_initialize',
+    arguments: {
+      stateRef: ref, effectsQueueRef: ref,
+      kernelId: 'stdio-kernel', initialState: { count: 0 },
+    },
+  });
+  assert.equal(initialized.structuredContent.initialization.created, true);
+  const acquired = await client.callTool({
+    name: 'filesystem.transition_acquire',
+    arguments: {
+      stateRef: ref, journalRef: ref, effectsQueueRef: ref,
+      kernelId: 'stdio-kernel',
+    },
+  });
+  assert.equal(acquired.structuredContent.transition.entries.length, 1);
+  const committed = await client.callTool({
+    name: 'filesystem.transition_commit',
+    arguments: {
+      stateRef: ref, journalRef: ref, effectsQueueRef: ref,
+      kernelId: 'stdio-kernel', leaseToken: acquired.structuredContent.transition.leaseToken,
+      expectedRevision: acquired.structuredContent.transition.revision, previousCursor: null,
+      nextCursor: acquired.structuredContent.transition.entries[0].id,
+      state: { count: 1 }, effects: [],
+    },
+  });
+  assert.equal(committed.structuredContent.ok, true);
+  const next = await client.callTool({
+    name: 'filesystem.transition_acquire',
+    arguments: {
+      stateRef: ref, journalRef: ref, effectsQueueRef: ref,
+      kernelId: 'stdio-kernel',
+    },
+  });
+  const aborted = await client.callTool({
+    name: 'filesystem.transition_abort',
+    arguments: {
+      stateRef: ref, journalRef: ref, effectsQueueRef: ref,
+      kernelId: 'stdio-kernel', leaseToken: next.structuredContent.transition.leaseToken,
+    },
+  });
+  assert.equal(aborted.structuredContent.aborted, true);
 });
