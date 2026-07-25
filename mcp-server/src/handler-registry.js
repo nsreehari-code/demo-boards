@@ -6,6 +6,7 @@ import { handleRemoteMcpTool } from './handlers/mcp-proxy.js';
 import { handleSentinelLogin } from './handlers/sentinel-auth.js';
 import { handleKustoTool } from './handlers/kusto.js';
 import { handleCopilotTool } from './handlers/copilot.js';
+import { handleFilesystemTool } from './handlers/filesystem.js';
 
 async function notImplemented(args, tool) {
   throw new Error(`Handler ${tool.handler} is not implemented yet`);
@@ -14,6 +15,7 @@ async function notImplemented(args, tool) {
 const HANDLERS = {
   'finbook': handleFinbookTool,
   'finbook.api': handleFinbookTool,
+  'filesystem': handleFilesystemTool,
   'kusto': handleKustoTool,
   'lore': handleLoreTool,
   'copilot': handleCopilotTool,

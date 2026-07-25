@@ -1,0 +1,59 @@
+{
+  "server": {
+    "name": "demo-boards-filesystem",
+    "version": "0.1.0",
+    "description": "Root-confined durable filesystem storage tools."
+  },
+  "tools": [
+    {
+      "name": "filesystem.create_ref",
+      "handler": "filesystem",
+      "title": "Create filesystem storage reference",
+      "description": "Creates a root-confined fs-path reference for a logical namespace.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "namespace": { "type": "string", "minLength": 1 }
+        },
+        "required": ["namespace"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "filesystem.storage_batch",
+      "handler": "filesystem",
+      "title": "Run filesystem storage operations",
+      "description": "Runs an ordered batch against filesystem KV, JSON, Blob, Journal, Queue, Lock, Scratch, or Archive storage.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "ref": { "type": "string", "minLength": 1 },
+                "capability": { "type": "string", "enum": ["kv", "json", "blob", "journal", "queue", "lock", "scratch", "archive"] },
+                "operation": { "type": "string", "minLength": 1 },
+                "args": { "type": "array" },
+                "lane": { "type": "string" },
+                "resource": {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "type": "string", "enum": ["stream", "blob"] },
+                    "name": { "type": "string", "minLength": 1 }
+                  },
+                  "required": ["kind", "name"]
+                }
+              },
+              "required": ["ref", "capability", "operation"]
+            }
+          }
+        },
+        "required": ["operations"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

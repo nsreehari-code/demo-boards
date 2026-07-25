@@ -1,5 +1,13 @@
 {
   "servers": {
+    "filesystem": {
+      "manifest": "demo-boards.filesystem.json",
+      "connection": {
+        "transport": "streamable-http",
+        "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+        "urlDefault": "http://127.0.0.1:7801/mcp"
+      }
+    },
     "finbook": {
       "manifest": "../mcp-server-managed-truthsets/finbook/mcp-executable-manifest.json"
     },

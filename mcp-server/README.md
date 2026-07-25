@@ -2,6 +2,37 @@
 
 Manifest-driven MCP server scaffold for `demo-boards` and adjacent repo-backed tool surfaces.
 
+## Filesystem Storage
+
+The built-in filesystem service exposes root-confined durable storage through two MCP tools:
+
+- `filesystem.create_ref` creates an `fs-path` reference for a logical namespace.
+- `filesystem.storage_batch` executes ordered KV, JSON, Blob, Journal, Queue, Lock, Scratch, and Archive operations.
+
+Set `DEMO_BOARDS_FILESYSTEM_STORAGE_ROOT` to choose the storage root. The default is
+`mcp-server/.data/filesystem-storage`; `.data` is ignored by Git. Namespaces and keys are resolved
+under that root and traversal outside it is rejected.
+
+Run only the filesystem service over stdio:
+
+```bash
+node src/index.js --transport stdio --manifest manifests/demo-boards.filesystem.json
+```
+
+Example operation sequence:
+
+1. Call `filesystem.create_ref` with `{ "namespace": "board-one" }`.
+2. Pass the returned `ref` to `filesystem.storage_batch`.
+3. Each batch item uses `{ ref, capability, operation, args?, lane?, resource? }`.
+
+The batch is ordered and non-atomic across operations. Each item returns either
+`{ "ok": true, "result": ... }` or `{ "ok": false, "error": ... }`; a failed item does not stop
+later operations.
+
+```bash
+npm run test:filesystem
+```
+
 ## Why this shape
 
 Use one shared MCP server codebase with multiple manifests, not one custom server per feature.
