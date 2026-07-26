@@ -36,3 +36,4 @@ demo-board/workspaces/
 demo-board/server/hosted-board-runtime/copilot-sessions/**
 package.local.json
 mcp-server-managed-truthsets/lore/boards/
+mcp-server-managed-truthsets/feeds/DB/feeds.db*

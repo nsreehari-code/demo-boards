@@ -1,0 +1,12 @@
+{
+  "name": "demo-boards-feeds",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test test/feeds.test.cjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.9.0"
+  }
+}

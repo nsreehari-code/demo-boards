@@ -12,6 +12,7 @@ test('buildCopilotCommand includes agent, files, and named session options', () 
     agent: 'reviewer',
     sessionName: 'review report',
     reasoningEffort: 'high',
+    availableTools: ['read', 'search'],
     model: 'gpt-test',
   });
 
@@ -24,6 +25,7 @@ test('buildCopilotCommand includes agent, files, and named session options', () 
   ]);
   assert.ok(args.includes('--add-dir'));
   assert.ok(args.includes('--attachment'));
+  assert.ok(args.includes('--available-tools=read,search'));
   assert.ok(args.includes('gpt-test'));
 });
 

@@ -1,0 +1,185 @@
+{
+  "server": {
+    "name": "demo-boards-mcp",
+    "version": "0.1.0",
+    "description": "Managed RSS and Atom feed retrieval tools"
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+    "urlDefault": "http://127.0.0.1:7801/mcp"
+  },
+  "tools": [
+    {
+      "name": "feeds.list_sources",
+      "title": "Feeds List Sources",
+      "description": "List configured feed sources and their health, revision, and freshness metadata.",
+      "handler": "feeds",
+      "config": { "rootPath": "." },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "include_archived": { "type": "boolean", "description": "Include archived sources. Default false." }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "feeds.read_items",
+      "title": "Feeds Read Items",
+      "description": "Read recent normalized feed items, optionally filtered by source and publication time.",
+      "handler": "feeds",
+      "config": { "rootPath": "." },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source_ids": { "type": "array", "items": { "type": "string" }, "maxItems": 50 },
+          "published_after": { "type": "string", "description": "ISO-8601 lower publication-time bound." },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "feeds.search_items",
+      "title": "Feeds Search Items",
+      "description": "Search the normalized feed corpus using full-text ranking and optional source/time filters.",
+      "handler": "feeds",
+      "config": { "rootPath": "." },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "source_ids": { "type": "array", "items": { "type": "string" }, "maxItems": 50 },
+          "published_after": { "type": "string", "description": "ISO-8601 lower publication-time bound." },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "feeds.get_item",
+      "title": "Feeds Get Item",
+      "description": "Get one normalized feed item and its source and provenance metadata by stable item ID.",
+      "handler": "feeds",
+      "config": { "rootPath": "." },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "item_id": { "type": "string", "minLength": 1 }
+        },
+        "required": ["item_id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "threat_intel.generate_brief",
+      "title": "Generate Threat Intelligence Brief",
+      "description": "Generate a bounded executive threat-intelligence snapshot from managed feed evidence and supplied company context using the local Copilot CLI. Citations are validated against canonical feed item IDs.",
+      "handler": "threat-intel",
+      "config": { "rootPath": "." },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "company_context": {
+            "type": "object",
+            "description": "Bounded enterprise context used only to assess relevance.",
+            "additionalProperties": true
+          },
+          "source_ids": { "type": "array", "items": { "type": "string" }, "maxItems": 50 },
+          "published_after": { "type": "string", "description": "ISO-8601 lower publication-time bound." },
+          "max_items": { "type": "integer", "minimum": 1, "maximum": 80, "default": 40 },
+          "reasoning_effort": {
+            "type": "string",
+            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+            "default": "medium"
+          },
+          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 900000, "default": 300000 }
+        },
+        "required": ["company_context"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean" },
+          "operation": { "type": "string" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "revision": { "type": "string" },
+              "generatedAt": { "type": "string" },
+              "sourceMode": { "type": "string", "enum": ["cached"] },
+              "pulse": { "type": "object" },
+              "prominentDevelopment": { "type": ["object", "null"] },
+              "evidence": { "type": "array", "items": { "type": "object" } },
+              "actions": { "type": "array", "items": { "type": "object" } },
+              "uncertainty": { "type": "string" }
+            },
+            "required": ["revision", "generatedAt", "sourceMode", "pulse", "prominentDevelopment", "evidence", "actions", "uncertainty"],
+            "additionalProperties": false
+          },
+          "error": { "type": "object" }
+        },
+        "required": ["ok", "operation"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "feeds_control.refresh_sources",
+      "title": "Feeds Control Refresh Sources",
+      "description": "Refresh enabled sources now using conditional HTTP retrieval and transactionally update normalized items.",
+      "handler": "feeds",
+      "config": { "rootPath": "." },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source_ids": { "type": "array", "items": { "type": "string" }, "maxItems": 50 }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "feeds_control.add_source",
+      "title": "Feeds Control Add Source",
+      "description": "Validate and add a managed HTTPS RSS or Atom source, optionally replacing an existing source revision.",
+      "handler": "feeds",
+      "config": { "rootPath": "." },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 2, "maxLength": 80 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "url": { "type": "string", "minLength": 1, "maxLength": 2048 },
+          "category": { "type": "string", "maxLength": 100 },
+          "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 30 },
+          "replace": { "type": "boolean" },
+          "expected_revision": { "type": "integer", "minimum": 1 },
+          "refresh": { "type": "boolean" },
+          "actor": { "type": "string", "maxLength": 200 }
+        },
+        "required": ["id", "title", "url"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "feeds_control.delete_source",
+      "title": "Feeds Control Delete Source",
+      "description": "Disable, archive, or purge a feed source. Disable retains items and is the default.",
+      "handler": "feeds",
+      "config": { "rootPath": "." },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source_id": { "type": "string", "minLength": 1 },
+          "mode": { "type": "string", "enum": ["disable", "archive", "purge"] },
+          "expected_revision": { "type": "integer", "minimum": 1 },
+          "actor": { "type": "string", "maxLength": 200 }
+        },
+        "required": ["source_id"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

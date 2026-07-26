@@ -1,0 +1,16 @@
+[
+  {
+    "id": "cisa-cybersecurity-advisories",
+    "title": "CISA cybersecurity advisories",
+    "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+    "category": "government-advisories",
+    "tags": ["cisa", "advisory", "vulnerability"]
+  },
+  {
+    "id": "microsoft-security-blog",
+    "title": "Microsoft Security Blog",
+    "url": "https://www.microsoft.com/en-us/security/blog/feed/",
+    "category": "vendor-research",
+    "tags": ["microsoft", "research", "threat-intelligence"]
+  }
+]
