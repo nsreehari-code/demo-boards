@@ -160,7 +160,6 @@ export function createFsKvStorage(rootDir) {
 }
 
 export function createFsJournalStorage(journalPath) {
-  const journalLock = createFsAtomicRelayLock(`${journalPath}.lock-target`);
   async function readLines() {
     try {
       const content = (await fs.readFile(journalPath, 'utf8')).trim();
@@ -172,27 +171,59 @@ export function createFsJournalStorage(journalPath) {
   }
   return {
     async append(payload) {
-      return withLock(journalLock, async () => {
-        const entry = { id: randomUUID(), payload: payload ?? null };
-        await fs.mkdir(path.dirname(journalPath), { recursive: true });
-        await fs.appendFile(journalPath, `${JSON.stringify(entry)}\n`, 'utf8');
-        return entry;
-      });
+      const entry = { id: randomUUID(), payload: payload ?? null };
+      await fs.mkdir(path.dirname(journalPath), { recursive: true });
+      await fs.appendFile(journalPath, `${JSON.stringify(entry)}\n`, 'utf8');
+      return entry;
     },
-    readAll: () => withLock(journalLock, readLines),
+    readAll: readLines,
     async readAfter(cursor) {
-      return withLock(journalLock, async () => {
-        const all = await readLines();
-        const index = cursor ? all.findIndex((entry) => entry.id === cursor) : -1;
-        const entries = cursor && index >= 0 ? all.slice(index + 1) : all;
-        return { entries, newCursor: entries.at(-1)?.id ?? cursor };
-      });
+      const all = await readLines();
+      const index = cursor ? all.findIndex((entry) => entry.id === cursor) : -1;
+      const entries = cursor && index >= 0 ? all.slice(index + 1) : all;
+      return { entries, newCursor: entries.at(-1)?.id ?? cursor };
     },
     async clear() {
-      await withLock(journalLock, async () => {
-        await fs.mkdir(path.dirname(journalPath), { recursive: true });
-        await fs.writeFile(journalPath, '', 'utf8');
-      });
+      await fs.mkdir(path.dirname(journalPath), { recursive: true });
+      await fs.writeFile(journalPath, '', 'utf8');
+    },
+  };
+}
+
+export function createFsEngineWakeStorage(directory) {
+  const requestedPath = path.join(directory, 'engine-wake-requested.file');
+  const processedPath = path.join(directory, 'engine-wake-processed.file');
+
+  async function modifiedAt(filePath) {
+    try { return (await fs.stat(filePath)).mtime.toISOString(); }
+    catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
+  }
+
+  async function touch(filePath, timestamp = new Date()) {
+    await fs.mkdir(directory, { recursive: true });
+    const handle = await fs.open(filePath, 'a');
+    await handle.close();
+    await fs.utimes(filePath, timestamp, timestamp);
+  }
+
+  return {
+    async request() {
+      await touch(requestedPath);
+      return modifiedAt(requestedPath);
+    },
+    async read() {
+      const [requestedAt, processedAt] = await Promise.all([
+        modifiedAt(requestedPath),
+        modifiedAt(processedPath),
+      ]);
+      return { requestedAt, processedAt };
+    },
+    async markProcessed(processedAt) {
+      const timestamp = new Date(processedAt);
+      if (Number.isNaN(timestamp.valueOf())) throw new Error('processedAt must be a valid timestamp.');
+      const current = await modifiedAt(processedPath);
+      if (current && current >= processedAt) return;
+      await touch(processedPath, timestamp);
     },
   };
 }
@@ -434,6 +465,7 @@ export function createFilesystemStorageLibrary(options) {
   const blob = (directory) => createFsBlobStorage(path.join(directory, 'blob'));
   const kv = (directory) => createFsKvStorage(path.join(directory, 'kv'));
   const journal = (directory) => createFsJournalStorage(path.join(directory, 'journal.jsonl'));
+  const engineWake = (directory) => createFsEngineWakeStorage(directory);
   const queue = (directory, lane = 'default') => createFsQueueStorage(resolveKey(path.join(directory, 'queue'), lane));
 
   function scratch(directory) {
@@ -491,6 +523,7 @@ export function createFilesystemStorageLibrary(options) {
     kvStorageForRef: (ref) => kv(namespace(ref)),
     jsonStorageForRef: (ref) => createJsonStorage(kv(namespace(ref))),
     journalStorageForRef: (ref) => journal(namespace(ref)),
+    engineWakeStorageForRef: (ref) => engineWake(namespace(ref)),
     queueStorageForRef: (ref, lane) => queue(namespace(ref), lane),
     lockForRef: (ref) => createFsAtomicRelayLock(path.join(namespace(ref), '.relay-lock')),
     scratchStorageForRef: (ref) => scratch(namespace(ref)),

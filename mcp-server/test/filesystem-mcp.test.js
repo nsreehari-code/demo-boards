@@ -24,6 +24,12 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'filesystem.create_ref',
+    'filesystem.effect_ack',
+    'filesystem.effect_lease',
+    'filesystem.effect_nack',
+    'filesystem.engine_wake_processed',
+    'filesystem.engine_wake_read',
+    'filesystem.journal_append_and_wake',
     'filesystem.runtime_initialize',
     'filesystem.storage_batch',
     'filesystem.transition_abort',
@@ -51,11 +57,17 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
   ]);
 
   await client.callTool({
-    name: 'filesystem.storage_batch',
-    arguments: { operations: [
-      { ref, capability: 'journal', operation: 'append', args: [{ type: 'increment' }] },
-    ] },
+    name: 'filesystem.journal_append_and_wake',
+    arguments: {
+      stateRef: ref, journalRef: ref, effectsQueueRef: ref,
+      entry: { type: 'increment' },
+    },
   });
+  const wake = await client.callTool({
+    name: 'filesystem.engine_wake_read',
+    arguments: { stateRef: ref, effectsQueueRef: ref },
+  });
+  assert.equal(typeof wake.structuredContent.wake.requestedAt, 'string');
   const initialized = await client.callTool({
     name: 'filesystem.runtime_initialize',
     arguments: {
@@ -83,6 +95,13 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     },
   });
   assert.equal(committed.structuredContent.ok, true);
+  await client.callTool({
+    name: 'filesystem.engine_wake_processed',
+    arguments: {
+      stateRef: ref, effectsQueueRef: ref,
+      processedAt: wake.structuredContent.wake.requestedAt,
+    },
+  });
   const next = await client.callTool({
     name: 'filesystem.transition_acquire',
     arguments: {

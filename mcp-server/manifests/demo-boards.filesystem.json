@@ -56,6 +56,57 @@
       }
     },
     {
+      "name": "filesystem.journal_append_and_wake",
+      "handler": "filesystem",
+      "title": "Append journal entry and request engine work",
+      "description": "Appends one journal entry and advances the runtime engine wake timestamp.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stateRef": { "type": "string", "minLength": 1 },
+          "journalRef": { "type": "string", "minLength": 1 },
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "entry": {}
+        },
+        "required": ["stateRef", "journalRef", "effectsQueueRef", "entry"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "filesystem.engine_wake_read",
+      "handler": "filesystem",
+      "title": "Read engine wake state",
+      "description": "Reads requestedAt and processedAt for the runtime engine.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stateRef": { "type": "string", "minLength": 1 },
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" }
+        },
+        "required": ["stateRef", "effectsQueueRef"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "filesystem.engine_wake_processed",
+      "handler": "filesystem",
+      "title": "Mark engine wake processed",
+      "description": "Advances the processed engine wake timestamp monotonically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stateRef": { "type": "string", "minLength": 1 },
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "processedAt": { "type": "string", "minLength": 1 }
+        },
+        "required": ["stateRef", "effectsQueueRef", "processedAt"],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "filesystem.runtime_initialize",
       "handler": "filesystem",
       "title": "Initialize filesystem runtime",
@@ -132,6 +183,58 @@
           "leaseToken": { "type": "string", "minLength": 1 }
         },
         "required": ["stateRef", "journalRef", "effectsQueueRef", "kernelId", "leaseToken"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "filesystem.effect_lease",
+      "handler": "filesystem",
+      "title": "Lease a durable runtime effect",
+      "description": "Leases one effect from the same durable queue used by transition commit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "visibilityMs": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["effectsQueueRef"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "filesystem.effect_ack",
+      "handler": "filesystem",
+      "title": "Acknowledge a durable runtime effect",
+      "description": "Acknowledges a leased durable runtime effect.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "messageId": { "type": "string", "minLength": 1 },
+          "leaseToken": { "type": "string", "minLength": 1 }
+        },
+        "required": ["effectsQueueRef", "messageId", "leaseToken"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "filesystem.effect_nack",
+      "handler": "filesystem",
+      "title": "Release a durable runtime effect",
+      "description": "Returns a leased effect to its queue or moves it to dead-letter storage.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "messageId": { "type": "string", "minLength": 1 },
+          "leaseToken": { "type": "string", "minLength": 1 },
+          "dead": { "type": "boolean" },
+          "reason": { "type": "string" }
+        },
+        "required": ["effectsQueueRef", "messageId", "leaseToken"],
         "additionalProperties": false
       }
     }
