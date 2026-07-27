@@ -2,11 +2,14 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { runCopilot } from '../../../demo-board/server/lib/copilot-cli.js';
+import { createThreatBriefCache } from '../lib/threat-brief-cache.js';
 
 const require = createRequire(import.meta.url);
 const DEFAULT_MAX_ITEMS = 40;
-const DEFAULT_TIMEOUT_MS = 300_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
+const GENERATION_TIMEOUT_MS = 600_000;
 const NO_TOOLS_ALLOWLIST = ['threat_intel_no_tools'];
+const inFlightBriefs = new Map();
 
 function toMcpResult(envelope) {
   return {
@@ -26,7 +29,32 @@ function resolveFeedsApp(tool) {
       seedPath: path.join(rootDir, 'DB', 'seed-sources.json'),
     }),
     cwd: rootDir,
+    cache: createThreatBriefCache(path.join(rootDir, 'DB', 'threat-intel-brief-cache.json')),
   };
+}
+
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
+}
+
+function cacheKey(args) {
+  const request = {
+    company_context: normalizeCompanyContext(args?.company_context),
+    source_ids: [...(args?.source_ids || [])].sort(),
+    published_after: args?.published_after || null,
+    max_items: Number.isInteger(args?.max_items) ? args.max_items : DEFAULT_MAX_ITEMS,
+    reasoning_effort: args?.reasoning_effort || 'medium',
+  };
+  return createHash('sha256').update(JSON.stringify(canonicalize(request))).digest('hex');
+}
+
+function foregroundTimeout(timeoutMs) {
+  return new Promise((_, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Threat intelligence refresh exceeded ${timeoutMs}ms`)), timeoutMs);
+    timer.unref?.();
+  });
 }
 
 function extractJsonObject(text) {
@@ -186,7 +214,7 @@ export async function generateThreatBrief(args, dependencies) {
   const { code, stdout, stderr } = await dependencies.runCopilotImpl({
     prompt: buildPrompt(items, companyContext),
     workingDir: dependencies.cwd,
-    timeoutMs: args?.timeout_ms || DEFAULT_TIMEOUT_MS,
+    timeoutMs: dependencies.generationTimeoutMs || args?.timeout_ms || DEFAULT_TIMEOUT_MS,
     reasoningEffort: args?.reasoning_effort || 'medium',
     availableTools: NO_TOOLS_ALLOWLIST,
   });
@@ -199,17 +227,42 @@ export async function generateThreatBrief(args, dependencies) {
   return {
     revision,
     generatedAt,
-    sourceMode: 'cached',
+    sourceMode: 'live',
     ...validated,
   };
 }
 
+export async function generateThreatBriefWithCache(args, dependencies) {
+  const key = cacheKey(args);
+  const cached = await dependencies.cache.get(key);
+  let refresh = inFlightBriefs.get(key);
+  if (!refresh) {
+    refresh = generateThreatBrief(args, {
+      ...dependencies,
+      generationTimeoutMs: dependencies.generationTimeoutMs || GENERATION_TIMEOUT_MS,
+    }).then(async (brief) => {
+      await dependencies.cache.set(key, brief);
+      return brief;
+    });
+    inFlightBriefs.set(key, refresh);
+    void refresh.finally(() => {
+      if (inFlightBriefs.get(key) === refresh) inFlightBriefs.delete(key);
+    }).catch(() => undefined);
+  }
+
+  if (cached) return { ...cached, sourceMode: 'cached' };
+
+  const timeoutMs = args?.timeout_ms || DEFAULT_TIMEOUT_MS;
+  return await Promise.race([refresh, foregroundTimeout(timeoutMs)]);
+}
+
 export async function handleThreatIntelTool(args, tool) {
   try {
-    const { app, cwd } = resolveFeedsApp(tool);
-    const data = await generateThreatBrief(args, {
+    const { app, cwd, cache } = resolveFeedsApp(tool);
+    const data = await generateThreatBriefWithCache(args, {
       app,
       cwd,
+      cache,
       runCopilotImpl: runCopilot,
       now: () => new Date(),
     });

@@ -95,7 +95,7 @@
             "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
             "default": "medium"
           },
-          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 900000, "default": 300000 }
+          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 900000, "default": 120000, "description": "Foreground wait budget. A validated previous brief is returned when this budget expires while refresh continues in the background." }
         },
         "required": ["company_context"],
         "additionalProperties": false
@@ -110,7 +110,7 @@
             "properties": {
               "revision": { "type": "string" },
               "generatedAt": { "type": "string" },
-              "sourceMode": { "type": "string", "enum": ["cached"] },
+              "sourceMode": { "type": "string", "enum": ["live", "cached"] },
               "pulse": { "type": "object" },
               "prominentDevelopment": { "type": ["object", "null"] },
               "evidence": { "type": "array", "items": { "type": "object" } },

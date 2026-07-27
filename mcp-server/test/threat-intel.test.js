@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
-import { generateThreatBrief } from '../src/handlers/threat-intel.js';
+import { generateThreatBrief, generateThreatBriefWithCache } from '../src/handlers/threat-intel.js';
+import { createThreatBriefCache } from '../src/lib/threat-brief-cache.js';
 
 const ITEM = {
   id: 'item-1',
@@ -58,7 +62,7 @@ test('generates a bounded snapshot and hydrates canonical citation fields', asyn
 
   assert.match(result.revision, /^[a-f0-9]{64}$/);
   assert.equal(result.generatedAt, '2026-07-23T12:00:00.000Z');
-  assert.equal(result.sourceMode, 'cached');
+  assert.equal(result.sourceMode, 'live');
   assert.equal(result.pulse.reportsReviewed, 1);
   assert.equal(result.pulse.actionsRecommended, 1);
   assert.deepEqual(result.evidence, [{
@@ -132,4 +136,65 @@ test('rejects confirmed compromise because feeds contain no internal evidence', 
     ),
     /Invalid compromiseStatus: confirmed/,
   );
+});
+
+test('returns the previous brief immediately while refresh continues', async () => {
+  const previous = {
+    revision: 'previous-revision',
+    generatedAt: '2026-07-22T12:00:00.000Z',
+    sourceMode: 'live',
+    marker: 'previous',
+  };
+  let stored = previous;
+  let releaseRefresh;
+  const refreshGate = new Promise((resolve) => { releaseRefresh = resolve; });
+  let cacheUpdated;
+  const cacheUpdatedPromise = new Promise((resolve) => { cacheUpdated = resolve; });
+  const deps = dependencies(modelBrief());
+  deps.runCopilotImpl = async (options) => {
+    assert.equal(options.timeoutMs, 600_000);
+    await refreshGate;
+    return { code: 0, stdout: JSON.stringify(modelBrief()), stderr: '' };
+  };
+  deps.cache = {
+    get: async () => stored,
+    set: async (_key, value) => {
+      stored = value;
+      cacheUpdated();
+    },
+  };
+
+  const resultPromise = generateThreatBriefWithCache({
+    company_context: { criticalServices: ['Timeout test'] },
+    timeout_ms: 60_000,
+  }, deps);
+  const result = await Promise.race([
+    resultPromise,
+    new Promise((resolve) => setImmediate(() => resolve('not-settled'))),
+  ]);
+
+  assert.notEqual(result, 'not-settled');
+  assert.equal(result.marker, 'previous');
+  assert.equal(result.sourceMode, 'cached');
+  releaseRefresh();
+  await cacheUpdatedPromise;
+  assert.equal(stored.sourceMode, 'live');
+  assert.notEqual(stored.revision, previous.revision);
+});
+
+test('loads and atomically updates a persisted threat brief', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'threat-brief-cache-'));
+  const cachePath = path.join(directory, 'briefs.json');
+  try {
+    await fs.writeFile(cachePath, JSON.stringify({ context: { revision: 'previous' } }), 'utf8');
+    const cache = createThreatBriefCache(cachePath);
+    assert.deepEqual(await cache.get('context'), { revision: 'previous' });
+
+    await cache.set('context', { revision: 'current' });
+    assert.deepEqual(JSON.parse(await fs.readFile(cachePath, 'utf8')), {
+      context: { revision: 'current' },
+    });
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
