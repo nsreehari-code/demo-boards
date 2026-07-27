@@ -385,7 +385,7 @@ async function postMcp(url, tool, args = {}) {
   return payload;
 }
 
-function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, serverUrl, notifyServerUrl, notifyUrl, watchpartyPublishNotifications, mcpServerUrl, apiBasePrefix, watchpartyFileRegistry }) {
+function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logger, taskExecutor, controlplaneUrl, webhooksUrl, serverUrl, notifyServerUrl, notifyUrl, watchpartyPublishNotifications, mcpServerUrl, apiBasePrefix, watchpartyFileRegistry }) {
   const boardRuntimeNeeds = buildHostedBoardRuntimeNeeds(boardId, boardConfig, {
     serverUrl,
     boardToolInvoker: typeof runtime?.boardToolInvoker === 'function'
@@ -449,7 +449,32 @@ function createExplicitQueueLanes({ boardId, boardConfig, bundle, runtime, logge
           const projectedQuoteUrls = Array.isArray(quoteUrls) ? quoteUrls : null;
           trace(`task-executor-handle-start board=${boardId} hasSourceDef=${Boolean(executorRequest?.source_def)} callback=${Boolean(executorRequest?.callback)} output=${Boolean(executorRequest?.output)}`);
           trace(`source projections board=${boardId} bindTo=${typeof executorRequest?.source_def?.bindTo === 'string' ? executorRequest.source_def.bindTo : ''} quoteUrlsType=${projectedQuoteUrls ? 'array' : quoteUrls === undefined ? 'missing' : typeof quoteUrls} quoteUrlsCount=${projectedQuoteUrls ? projectedQuoteUrls.length : 0} firstQuoteUrl=${projectedQuoteUrls?.[0] || ''}`);
-          await taskExecutor(executorRequest);
+          const callbackToken = normalizeText(executorRequest?.callback?.token);
+          const outputRef = normalizeText(executorRequest?.output?.ref);
+          const deliverEmbeddedCallback = isEmbeddedHost() && callbackToken;
+          const taskRequest = deliverEmbeddedCallback
+            ? { ...executorRequest, callback: undefined }
+            : executorRequest;
+          try {
+            await taskExecutor(taskRequest);
+          } catch (error) {
+            if (deliverEmbeddedCallback) {
+              await postMcp(webhooksUrl, 'webhook.source-fetch-failed', {
+                token: callbackToken,
+                reason: error instanceof Error ? error.message : String(error),
+              });
+            }
+            throw error;
+          }
+          if (deliverEmbeddedCallback) {
+            if (!outputRef) {
+              throw new Error(`Embedded source fetch for ${boardId} completed without output.ref`);
+            }
+            await postMcp(webhooksUrl, 'webhook.source-fetch-done', {
+              token: callbackToken,
+              ref: outputRef,
+            });
+          }
           trace(`task-executor-handle-complete board=${boardId} hasSourceDef=${Boolean(executorRequest?.source_def)}`);
         }
       : undefined,
@@ -625,6 +650,7 @@ export async function startQueueRunner(options = {}) {
       logger,
       taskExecutor,
       controlplaneUrl,
+      webhooksUrl,
       serverUrl: callbackServerOrigin,
       notifyServerUrl: callbackServerOrigin,
       notifyUrl: `${apiBaseUrl}/notify-q`,

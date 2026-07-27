@@ -431,8 +431,9 @@ async function executeLogicalSourceFetchRequest(request) {
   } catch (err) {
     const detail = (err && (err.stderr || err.stdout)) ? `\n${err.stderr || err.stdout}`.trimEnd() : '';
     logSourceInvocationFailure(invocationContext, err);
-    reportHostedFailure(`source invocation failed: ${String(err && err.message || err)}${detail}`);
-    return;
+    const message = `source invocation failed: ${String(err && err.message || err)}${detail}`;
+    reportHostedFailure(message);
+    throw new Error(message);
   }
 
   if (!flowResult?.wroteOutputDirectly) {
