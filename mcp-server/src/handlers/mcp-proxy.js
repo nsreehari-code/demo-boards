@@ -48,7 +48,7 @@ function resolveAuthConfig(connection) {
   return auth;
 }
 
-function runAzureCliLogin(auth) {
+function runAzureCliLogin(auth, inherit = true) {
   const tenantFromEnv = typeof auth?.tenantEnvVar === 'string' && auth.tenantEnvVar
     ? process.env[auth.tenantEnvVar]
     : '';
@@ -61,7 +61,7 @@ function runAzureCliLogin(auth) {
     args.push('--tenant', tenant);
   }
 
-  runAzureCli(args, { inherit: true });
+  runAzureCli(args, { inherit });
 }
 
 function mintAzureCliBearerToken(auth) {
@@ -159,6 +159,52 @@ async function createTransport(connection) {
   }
 
   throw new Error(`Unsupported mcp.proxy transport: ${connection.transport}`);
+}
+
+export async function connectRemoteMcp(connectionConfig) {
+  const connection = resolveConnection(connectionConfig);
+  const { Client } = await importClientModules();
+  const client = new Client(
+    { name: 'demo-boards-mcp-proxy', version: '0.1.0' },
+    { capabilities: {} },
+  );
+  const transport = await createTransport(connection);
+  await client.connect(transport);
+
+  return {
+    client,
+    async close() {
+      await client.close();
+    },
+  };
+}
+
+export async function listRemoteMcpTools(connectionConfig) {
+  const remote = await connectRemoteMcp(connectionConfig);
+  try {
+    const tools = [];
+    let cursor;
+    do {
+      const page = await remote.client.listTools(cursor ? { cursor } : undefined);
+      tools.push(...(Array.isArray(page?.tools) ? page.tools : []));
+      cursor = typeof page?.nextCursor === 'string' && page.nextCursor ? page.nextCursor : undefined;
+    } while (cursor);
+    return { tools };
+  } finally {
+    await remote.close();
+  }
+}
+
+export async function callRemoteMcpTool(connectionConfig, name, args) {
+  const remote = await connectRemoteMcp(connectionConfig);
+  try {
+    return await remote.client.callTool({
+      name,
+      arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {},
+    });
+  } finally {
+    await remote.close();
+  }
 }
 
 // Many MCP tools (including Sentinel's query_lake) return structured JSON
@@ -285,34 +331,38 @@ export async function handleRemoteMcpTool(args, tool) {
   }
   const remoteCall = resolveRemoteCall(args, remoteTool);
 
-  const { Client } = await importClientModules();
-  const client = new Client(
-    { name: 'demo-boards-mcp-proxy', version: '0.1.0' },
-    { capabilities: {} },
-  );
-  const transport = await createTransport(connection);
-
-  try {
-    await client.connect(transport);
-    const response = await client.callTool({
-      name: remoteCall.remoteTool,
-      arguments: remoteCall.remoteArguments,
-    });
-    const result = normalizeToolResult(response);
-    return {
-      content: [
-        {
-          type: 'text',
-          text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
-        },
-      ],
-      structuredContent: {
-        result,
+  const response = await callRemoteMcpTool(connection, remoteCall.remoteTool, remoteCall.remoteArguments);
+  const result = normalizeToolResult(response);
+  return {
+    content: [
+      {
+        type: 'text',
+        text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
       },
-    };
-  } finally {
-    if (typeof transport.close === 'function') {
-      await transport.close();
-    }
+    ],
+    structuredContent: {
+      result,
+    },
+  };
+}
+
+export async function authenticateRemoteMcp(connectionConfig, { forceLogin = false } = {}) {
+  const connection = resolveConnection(connectionConfig);
+  const auth = resolveAuthConfig(connection);
+  if (!auth) {
+    return { authenticated: true, authType: 'none', promptedLogin: false };
   }
+  if (auth.type !== 'azure-cli-bearer') {
+    throw new Error(`Unsupported mcp.proxy auth type: ${String(auth.type || 'unknown')}`);
+  }
+
+  if (forceLogin) {
+    runAzureCliLogin(auth, false);
+  }
+  mintAzureCliBearerToken({ ...auth, loginOnDemand: false });
+  return {
+    authenticated: true,
+    authType: auth.type,
+    promptedLogin: forceLogin,
+  };
 }

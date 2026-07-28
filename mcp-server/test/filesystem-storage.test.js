@@ -9,7 +9,7 @@ import {
   createFilesystemStorageLibrary,
   createFsAtomicRelayLock,
   parseRef,
-} from '../src/filesystem/storage.js';
+} from '@gik/durable-runtime/storage/filesystem/library';
 
 async function fixture(t) {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-fs-storage-'));

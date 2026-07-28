@@ -5,12 +5,17 @@
   "type": "module",
   "description": "Manifest-driven MCP server scaffold for demo-boards and related data repos.",
   "scripts": {
+    "verify:durable-runtime": "node scripts/vendor-gik-durable-runtime.mjs --verify",
+    "vendor:durable-runtime": "node scripts/vendor-gik-durable-runtime.mjs",
     "start": "node src/index.js",
     "start:http": "node src/index.js --transport streamable-http",
     "start:stdio": "node src/index.js --transport stdio",
     "dry-run": "node src/index.js --dry-run --transport streamable-http",
+    "pretest:smoke": "npm run verify:durable-runtime",
     "test:smoke": "node scripts/smoke-registered-services.js",
+    "pretest:filesystem": "npm run verify:durable-runtime",
     "test:filesystem": "node --test test/filesystem-storage.test.js test/filesystem-handler.test.js test/filesystem-mcp.test.js",
+    "test:proxy": "node --test test/mcp-proxy.test.js",
     "test:copilot": "node --test test/copilot-cli.test.js",
     "test:threat-intel": "node --test test/threat-intel.test.js",
     "smoke:sentinel:tenant": "node scripts/smoke-sentinel-tenant.js",
@@ -18,7 +23,7 @@
     "probe:finbook-workflows": "node scripts/probe-finbook-workflow-tools.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "latest",
-    "proper-lockfile": "^4.1.2"
+    "@gik/durable-runtime": "file:vendor/gik-durable-runtime-0.4.1.tgz",
+    "@modelcontextprotocol/sdk": "latest"
   }
 }

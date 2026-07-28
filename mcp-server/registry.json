@@ -15,27 +15,69 @@
       "manifest": "../mcp-server-managed-truthsets/feeds/mcp-executable-manifest.json"
     },
     "sentinel-data-exploration": {
-      "manifest": "sentinel-data-exploration.json",
+      "kind": "mcp-proxy",
       "connection": {
         "transport": "streamable-http",
         "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
         "urlDefault": "http://127.0.0.1:7801/mcp"
+      },
+      "proxy": {
+        "optional": true,
+        "connection": {
+          "transport": "streamable-http",
+          "urlDefault": "https://sentinel.microsoft.com/mcp/data-exploration",
+          "auth": {
+            "type": "azure-cli-bearer",
+            "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
+            "resourceEnvVar": "SENTINEL_RESOURCE",
+            "tenantEnvVar": "SENTINEL_TENANT_ID",
+            "loginOnDemand": false
+          }
+        }
       }
     },
     "sentinel-triage": {
-      "manifest": "sentinel-triage.json",
+      "kind": "mcp-proxy",
       "connection": {
         "transport": "streamable-http",
         "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
         "urlDefault": "http://127.0.0.1:7801/mcp"
+      },
+      "proxy": {
+        "optional": true,
+        "connection": {
+          "transport": "streamable-http",
+          "urlDefault": "https://sentinel.microsoft.com/mcp/triage",
+          "auth": {
+            "type": "azure-cli-bearer",
+            "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
+            "resourceEnvVar": "SENTINEL_RESOURCE",
+            "tenantEnvVar": "SENTINEL_TENANT_ID",
+            "loginOnDemand": false
+          }
+        }
       }
     },
     "sentinel-agent-creation": {
-      "manifest": "sentinel-agent-creation.json",
+      "kind": "mcp-proxy",
       "connection": {
         "transport": "streamable-http",
         "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
         "urlDefault": "http://127.0.0.1:7801/mcp"
+      },
+      "proxy": {
+        "optional": true,
+        "connection": {
+          "transport": "streamable-http",
+          "urlDefault": "https://sentinel.microsoft.com/mcp/security-copilot-agent-creation",
+          "auth": {
+            "type": "azure-cli-bearer",
+            "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
+            "resourceEnvVar": "SENTINEL_RESOURCE",
+            "tenantEnvVar": "SENTINEL_TENANT_ID",
+            "loginOnDemand": false
+          }
+        }
       }
     },
     "workiq": {

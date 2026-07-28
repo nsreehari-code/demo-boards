@@ -24,6 +24,12 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'filesystem.create_ref',
+    'filesystem.effect_ack',
+    'filesystem.effect_lease',
+    'filesystem.effect_nack',
+    'filesystem.engine_wake_processed',
+    'filesystem.engine_wake_read',
+    'filesystem.journal_append_and_wake',
     'filesystem.runtime_initialize',
     'filesystem.storage_batch',
     'filesystem.transition_abort',
@@ -51,16 +57,22 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
   ]);
 
   await client.callTool({
-    name: 'filesystem.storage_batch',
-    arguments: { operations: [
-      { ref, capability: 'journal', operation: 'append', args: [{ type: 'increment' }] },
-    ] },
+    name: 'filesystem.journal_append_and_wake',
+    arguments: {
+      stateRef: ref, journalRef: ref, effectsQueueRef: ref,
+      entry: { type: 'increment' },
+    },
   });
+  const wake = await client.callTool({
+    name: 'filesystem.engine_wake_read',
+    arguments: { stateRef: ref, effectsQueueRef: ref },
+  });
+  assert.equal(typeof wake.structuredContent.wake.requestedAt, 'string');
   const initialized = await client.callTool({
     name: 'filesystem.runtime_initialize',
     arguments: {
       stateRef: ref, effectsQueueRef: ref,
-      kernelId: 'stdio-kernel', initialState: { count: 0 },
+      runtimeId: 'stdio-runtime', initialState: { count: 0 }, initialSpec: { multiplier: 1 },
     },
   });
   assert.equal(initialized.structuredContent.initialization.created, true);
@@ -68,7 +80,7 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     name: 'filesystem.transition_acquire',
     arguments: {
       stateRef: ref, journalRef: ref, effectsQueueRef: ref,
-      kernelId: 'stdio-kernel',
+      runtimeId: 'stdio-runtime',
     },
   });
   assert.equal(acquired.structuredContent.transition.entries.length, 1);
@@ -76,25 +88,33 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     name: 'filesystem.transition_commit',
     arguments: {
       stateRef: ref, journalRef: ref, effectsQueueRef: ref,
-      kernelId: 'stdio-kernel', leaseToken: acquired.structuredContent.transition.leaseToken,
+      runtimeId: 'stdio-runtime', leaseToken: acquired.structuredContent.transition.leaseToken,
       expectedRevision: acquired.structuredContent.transition.revision, previousCursor: null,
       nextCursor: acquired.structuredContent.transition.entries[0].id,
-      state: { count: 1 }, effects: [],
+      state: { count: 1 }, spec: { multiplier: 2 },
+      specUpdates: [{ multiplier: 2 }], effects: [],
     },
   });
   assert.equal(committed.structuredContent.ok, true);
+  await client.callTool({
+    name: 'filesystem.engine_wake_processed',
+    arguments: {
+      stateRef: ref, effectsQueueRef: ref,
+      processedAt: wake.structuredContent.wake.requestedAt,
+    },
+  });
   const next = await client.callTool({
     name: 'filesystem.transition_acquire',
     arguments: {
       stateRef: ref, journalRef: ref, effectsQueueRef: ref,
-      kernelId: 'stdio-kernel',
+      runtimeId: 'stdio-runtime',
     },
   });
   const aborted = await client.callTool({
     name: 'filesystem.transition_abort',
     arguments: {
       stateRef: ref, journalRef: ref, effectsQueueRef: ref,
-      kernelId: 'stdio-kernel', leaseToken: next.structuredContent.transition.leaseToken,
+      runtimeId: 'stdio-runtime', leaseToken: next.structuredContent.transition.leaseToken,
     },
   });
   assert.equal(aborted.structuredContent.aborted, true);

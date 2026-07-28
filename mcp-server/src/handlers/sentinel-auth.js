@@ -67,10 +67,14 @@ export async function handleSentinelLogin(args, tool) {
   let token = '';
   try {
     token = tryGetToken(resource, tenant);
-  } catch {
-    runAzureLogin(tenant);
-    promptedLogin = true;
-    token = tryGetToken(resource, tenant);
+  } catch (error) {
+    if (!forceLogin) {
+      throw new Error(
+        `Cached Azure CLI authentication is unavailable for Sentinel. `
+        + `Call this tool with forceLogin=true to sign in interactively. ${String(error?.message || error)}`
+      );
+    }
+    throw error;
   }
 
   if (!token) {
