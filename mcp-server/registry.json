@@ -19,6 +19,7 @@
         "urlDefault": "http://127.0.0.1:7801/mcp"
       },
       "proxy": {
+        "optional": true,
         "connection": {
           "transport": "streamable-http",
           "urlDefault": "https://sentinel.microsoft.com/mcp/data-exploration",
@@ -27,7 +28,7 @@
             "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
             "resourceEnvVar": "SENTINEL_RESOURCE",
             "tenantEnvVar": "SENTINEL_TENANT_ID",
-            "loginOnDemand": true
+            "loginOnDemand": false
           }
         }
       }
@@ -49,7 +50,7 @@
             "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
             "resourceEnvVar": "SENTINEL_RESOURCE",
             "tenantEnvVar": "SENTINEL_TENANT_ID",
-            "loginOnDemand": true
+            "loginOnDemand": false
           }
         }
       }
@@ -62,6 +63,7 @@
         "urlDefault": "http://127.0.0.1:7801/mcp"
       },
       "proxy": {
+        "optional": true,
         "connection": {
           "transport": "streamable-http",
           "urlDefault": "https://sentinel.microsoft.com/mcp/security-copilot-agent-creation",
@@ -70,7 +72,7 @@
             "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
             "resourceEnvVar": "SENTINEL_RESOURCE",
             "tenantEnvVar": "SENTINEL_TENANT_ID",
-            "loginOnDemand": true
+            "loginOnDemand": false
           }
         }
       }

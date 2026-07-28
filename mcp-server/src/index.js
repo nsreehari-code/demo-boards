@@ -12,7 +12,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as z from 'zod/v4';
 import { loadManifests } from './manifest-loader.js';
 import { resolveHandler } from './handler-registry.js';
-import { callRemoteMcpTool, listRemoteMcpTools } from './handlers/mcp-proxy.js';
+import { ProxyCatalog } from './proxy-catalog.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -87,18 +87,12 @@ function validateTransportCompatibility(tools, transport) {
 
 function registerManifestTools(server, tools) {
   for (const tool of tools) {
-    const handler = tool.handler === 'mcp.proxy.dynamic'
-      ? (args) => callRemoteMcpTool(tool.proxyConnection, tool.remoteToolName, args)
-      : resolveHandler(tool.handler);
+    const handler = resolveHandler(tool.handler);
     const inputSchema = tool.inputSchema
-      ? (tool.handler === 'mcp.proxy.dynamic'
-        ? z.fromJSONSchema(tool.inputSchema)
-        : convertJsonSchemaToZodShape(tool.inputSchema))
+      ? convertJsonSchemaToZodShape(tool.inputSchema)
       : undefined;
     const outputSchema = tool.outputSchema
-      ? (tool.handler === 'mcp.proxy.dynamic'
-        ? z.fromJSONSchema(tool.outputSchema)
-        : convertJsonSchemaToZodShape(tool.outputSchema))
+      ? convertJsonSchemaToZodShape(tool.outputSchema)
       : undefined;
     server.registerTool(
       tool.name,
@@ -196,12 +190,13 @@ function convertJsonSchemaToZodShape(schema) {
   );
 }
 
-function createMcpServer(loaded) {
+function createMcpServer(loaded, proxyCatalog) {
   const server = new McpServer({
     name: loaded.server.name,
     version: loaded.server.version,
   });
   registerManifestTools(server, loaded.tools);
+  proxyCatalog?.attach(server);
   return server;
 }
 
@@ -320,7 +315,7 @@ async function closeAllSessions(sessionServers, sessionTransports) {
   sessionTransports.clear();
 }
 
-async function startStreamableHttpServer(loaded) {
+async function startStreamableHttpServer(loaded, proxyCatalog) {
   const host = getArgValue('--host', '127.0.0.1');
   const port = Number(getArgValue('--port', '7801'));
   const endpoint = getArgValue('--endpoint', '/mcp');
@@ -362,7 +357,7 @@ async function startStreamableHttpServer(loaded) {
 
         if (!sessionId && isInitializeRequest(parsedBody)) {
           let transport;
-          const mcpServer = createMcpServer(loaded);
+          const mcpServer = createMcpServer(loaded, proxyCatalog);
           transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (initializedSessionId) => {
@@ -376,6 +371,7 @@ async function startStreamableHttpServer(loaded) {
               sessionTransports.delete(activeSessionId);
               sessionServers.delete(activeSessionId);
             }
+            proxyCatalog?.detach(mcpServer);
           };
           await mcpServer.connect(transport);
           await transport.handleRequest(req, res, parsedBody);
@@ -449,12 +445,12 @@ async function loadRegistryDefaults() {
     registry = JSON.parse(readFileSync(registryPath, 'utf8'));
   } catch {
     process.stderr.write('[mcp-server] No registry.json found, starting with no manifests\n');
-    return { manifestPaths: [], proxyTools: [] };
+    return { manifestPaths: [], proxyEntries: [] };
   }
   const servers = registry?.servers || {};
   const disabledHandlers = parseDisabledHandlers();
   const manifestPaths = [];
-  const proxyTools = [];
+  const proxyEntries = [];
 
   for (const [serverName, entry] of Object.entries(servers)) {
     if (!entry || typeof entry !== 'object') continue;
@@ -475,36 +471,12 @@ async function loadRegistryDefaults() {
         throw new Error(`Registry MCP proxy "${serverName}" requires proxy.connection`);
       }
 
-      try {
-        const discovered = await listRemoteMcpTools(proxy.connection);
-        const prefix = typeof proxy.toolNamePrefix === 'string' ? proxy.toolNamePrefix : '';
-        for (const remoteTool of discovered.tools) {
-          proxyTools.push({
-            ...remoteTool,
-            name: `${prefix}${remoteTool.name}`,
-            handler: 'mcp.proxy.dynamic',
-            inputSchema: remoteTool.inputSchema || {
-              type: 'object',
-              properties: {},
-              additionalProperties: true,
-            },
-            remoteToolName: remoteTool.name,
-            proxyConnection: proxy.connection,
-            proxyServerName: serverName,
-          });
-        }
-        process.stderr.write(
-          `[mcp-server] Discovered ${discovered.tools.length} tools from proxy "${serverName}"\n`
-        );
-      } catch (err) {
-        if (proxy.optional === true) {
-          process.stderr.write(
-            `[mcp-server] Skipping unavailable optional proxy "${serverName}": ${String(err?.message || err)}\n`
-          );
-          continue;
-        }
-        throw new Error(`Unable to discover MCP proxy "${serverName}": ${String(err?.message || err)}`);
-      }
+      proxyEntries.push({
+        serverName,
+        connection: proxy.connection,
+        optional: proxy.optional === true,
+        toolNamePrefix: proxy.toolNamePrefix,
+      });
       continue;
     }
 
@@ -527,22 +499,7 @@ async function loadRegistryDefaults() {
     manifestPaths.push(manifestPath);
   }
 
-  return { manifestPaths, proxyTools };
-}
-
-function appendProxyTools(loaded, proxyTools) {
-  const toolNames = new Set(loaded.tools.map((tool) => tool.name));
-  for (const tool of proxyTools) {
-    if (toolNames.has(tool.name)) {
-      throw new Error(
-        `Duplicate MCP tool name from proxy "${tool.proxyServerName}": ${tool.name}. `
-        + 'Set proxy.toolNamePrefix to disambiguate it.'
-      );
-    }
-    toolNames.add(tool.name);
-    loaded.tools.push(tool);
-  }
-  return loaded;
+  return { manifestPaths, proxyEntries };
 }
 
 async function main() {
@@ -550,20 +507,23 @@ async function main() {
   const transportName = getArgValue('--transport', 'stdio');
   const dryRun = hasFlag('--dry-run');
   const useRegistryDefaults = manifestPaths.length === 0;
-  let proxyTools = [];
+  let proxyEntries = [];
 
   if (useRegistryDefaults) {
     const registryDefaults = await loadRegistryDefaults();
     manifestPaths = registryDefaults.manifestPaths;
-    proxyTools = registryDefaults.proxyTools;
+    proxyEntries = registryDefaults.proxyEntries;
   }
 
-  let loaded = manifestPaths.length > 0
+  const loaded = manifestPaths.length > 0
     ? loadManifests(manifestPaths)
     : createEmptyLoadedManifests();
-  loaded = appendProxyTools(loaded, proxyTools);
+  const proxyCatalog = proxyEntries.length > 0
+    ? new ProxyCatalog(proxyEntries, loaded.tools.map((tool) => tool.name))
+    : null;
+  await proxyCatalog?.initialize();
 
-  if (useRegistryDefaults && manifestPaths.length === 0 && proxyTools.length === 0) {
+  if (useRegistryDefaults && manifestPaths.length === 0 && (!proxyCatalog || proxyCatalog.getTools().length === 0)) {
     process.stderr.write('[mcp-server] No reachable registry manifests found, starting with no tools\n');
   }
 
@@ -576,8 +536,19 @@ async function main() {
           ok: true,
           server: loaded.server,
           transport: transportName,
-          toolCount: loaded.tools.length,
-          tools: loaded.tools.map(tool => ({
+          toolCount: loaded.tools.length + (proxyCatalog ? proxyCatalog.getTools().length + 3 : 0),
+          tools: [
+            ...loaded.tools,
+            ...(proxyCatalog
+              ? [
+                  ...proxyCatalog.getTools(),
+                  ...['proxy.auth_status', 'proxy.sign_in', 'proxy.refresh_tools'].map((name) => ({
+                    name,
+                    handler: 'mcp.proxy.management',
+                  })),
+                ]
+              : []),
+          ].map(tool => ({
             name: tool.name,
             handler: tool.handler,
             manifestPath: tool.manifestPath,
@@ -591,14 +562,14 @@ async function main() {
   }
 
   if (transportName === 'stdio') {
-    const server = createMcpServer(loaded);
+    const server = createMcpServer(loaded, proxyCatalog);
     const transport = new StdioServerTransport();
     await server.connect(transport);
     return;
   }
 
   if (transportName === 'streamable-http') {
-    await startStreamableHttpServer(loaded);
+    await startStreamableHttpServer(loaded, proxyCatalog);
     return;
   }
 

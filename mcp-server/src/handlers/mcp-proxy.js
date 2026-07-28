@@ -48,7 +48,7 @@ function resolveAuthConfig(connection) {
   return auth;
 }
 
-function runAzureCliLogin(auth) {
+function runAzureCliLogin(auth, inherit = true) {
   const tenantFromEnv = typeof auth?.tenantEnvVar === 'string' && auth.tenantEnvVar
     ? process.env[auth.tenantEnvVar]
     : '';
@@ -61,7 +61,7 @@ function runAzureCliLogin(auth) {
     args.push('--tenant', tenant);
   }
 
-  runAzureCli(args, { inherit: true });
+  runAzureCli(args, { inherit });
 }
 
 function mintAzureCliBearerToken(auth) {
@@ -343,5 +343,26 @@ export async function handleRemoteMcpTool(args, tool) {
     structuredContent: {
       result,
     },
+  };
+}
+
+export async function authenticateRemoteMcp(connectionConfig, { forceLogin = false } = {}) {
+  const connection = resolveConnection(connectionConfig);
+  const auth = resolveAuthConfig(connection);
+  if (!auth) {
+    return { authenticated: true, authType: 'none', promptedLogin: false };
+  }
+  if (auth.type !== 'azure-cli-bearer') {
+    throw new Error(`Unsupported mcp.proxy auth type: ${String(auth.type || 'unknown')}`);
+  }
+
+  if (forceLogin) {
+    runAzureCliLogin(auth, false);
+  }
+  mintAzureCliBearerToken({ ...auth, loginOnDemand: false });
+  return {
+    authenticated: true,
+    authType: auth.type,
+    promptedLogin: forceLogin,
   };
 }
