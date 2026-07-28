@@ -72,7 +72,7 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     name: 'filesystem.runtime_initialize',
     arguments: {
       stateRef: ref, effectsQueueRef: ref,
-      kernelId: 'stdio-kernel', initialState: { count: 0 },
+      runtimeId: 'stdio-runtime', initialState: { count: 0 }, initialSpec: { multiplier: 1 },
     },
   });
   assert.equal(initialized.structuredContent.initialization.created, true);
@@ -80,7 +80,7 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     name: 'filesystem.transition_acquire',
     arguments: {
       stateRef: ref, journalRef: ref, effectsQueueRef: ref,
-      kernelId: 'stdio-kernel',
+      runtimeId: 'stdio-runtime',
     },
   });
   assert.equal(acquired.structuredContent.transition.entries.length, 1);
@@ -88,10 +88,11 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     name: 'filesystem.transition_commit',
     arguments: {
       stateRef: ref, journalRef: ref, effectsQueueRef: ref,
-      kernelId: 'stdio-kernel', leaseToken: acquired.structuredContent.transition.leaseToken,
+      runtimeId: 'stdio-runtime', leaseToken: acquired.structuredContent.transition.leaseToken,
       expectedRevision: acquired.structuredContent.transition.revision, previousCursor: null,
       nextCursor: acquired.structuredContent.transition.entries[0].id,
-      state: { count: 1 }, effects: [],
+      state: { count: 1 }, spec: { multiplier: 2 },
+      specUpdates: [{ multiplier: 2 }], effects: [],
     },
   });
   assert.equal(committed.structuredContent.ok, true);
@@ -106,14 +107,14 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     name: 'filesystem.transition_acquire',
     arguments: {
       stateRef: ref, journalRef: ref, effectsQueueRef: ref,
-      kernelId: 'stdio-kernel',
+      runtimeId: 'stdio-runtime',
     },
   });
   const aborted = await client.callTool({
     name: 'filesystem.transition_abort',
     arguments: {
       stateRef: ref, journalRef: ref, effectsQueueRef: ref,
-      kernelId: 'stdio-kernel', leaseToken: next.structuredContent.transition.leaseToken,
+      runtimeId: 'stdio-runtime', leaseToken: next.structuredContent.transition.leaseToken,
     },
   });
   assert.equal(aborted.structuredContent.aborted, true);
