@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createFilesystemDurableStorage } from '@gik/durable-runtime/storage/filesystem';
-import { createFilesystemStorageDispatcher } from '../filesystem/protocol.js';
-import { createFilesystemStorageLibrary } from '../filesystem/storage.js';
+import { createFilesystemStorageDispatcher } from '@gik/durable-runtime/storage/filesystem/api';
+import { createFilesystemStorageLibrary } from '@gik/durable-runtime/storage/filesystem/library';
 
 const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
