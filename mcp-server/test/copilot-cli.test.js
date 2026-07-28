@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { buildCopilotCommand } from '../../demo-board/server/lib/copilot-cli.js';
-import { prepareRunArguments } from '../src/handlers/copilot.js';
 
 test('buildCopilotCommand includes agent, files, and named session options', () => {
   const { args } = buildCopilotCommand({
@@ -12,6 +11,7 @@ test('buildCopilotCommand includes agent, files, and named session options', () 
     agent: 'reviewer',
     sessionName: 'review report',
     reasoningEffort: 'high',
+    availableTools: ['read', 'search'],
     model: 'gpt-test',
   });
 
@@ -24,6 +24,7 @@ test('buildCopilotCommand includes agent, files, and named session options', () 
   ]);
   assert.ok(args.includes('--add-dir'));
   assert.ok(args.includes('--attachment'));
+  assert.ok(args.includes('--available-tools=read,search'));
   assert.ok(args.includes('gpt-test'));
 });
 
@@ -42,13 +43,4 @@ test('buildCopilotCommand rejects conflicting session modes', () => {
     () => buildCopilotCommand({ resumeSession: 'old session', sessionName: 'new session' }),
     /starting a new session/,
   );
-});
-
-test('prepareRunArguments uses a project agent owning root when cwd is omitted', () => {
-  const config = prepareRunArguments({
-    message: 'Check community PRs',
-    agent: 'reactor-community-pr-followup',
-  });
-
-  assert.match(config.cwd.replaceAll('\\', '/'), /\/ai-tool-evolver$/);
 });

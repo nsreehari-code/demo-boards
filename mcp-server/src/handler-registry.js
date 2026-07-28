@@ -7,6 +7,8 @@ import { handleSentinelLogin } from './handlers/sentinel-auth.js';
 import { handleKustoTool } from './handlers/kusto.js';
 import { handleCopilotTool } from './handlers/copilot.js';
 import { handleFilesystemTool } from './handlers/filesystem.js';
+import { handleFeedsTool } from './handlers/feeds.js';
+import { handleThreatIntelTool } from './handlers/threat-intel.js';
 
 async function notImplemented(args, tool) {
   throw new Error(`Handler ${tool.handler} is not implemented yet`);
@@ -16,6 +18,8 @@ const HANDLERS = {
   'finbook': handleFinbookTool,
   'finbook.api': handleFinbookTool,
   'filesystem': handleFilesystemTool,
+  'feeds': handleFeedsTool,
+  'threat-intel': handleThreatIntelTool,
   'kusto': handleKustoTool,
   'lore': handleLoreTool,
   'copilot': handleCopilotTool,

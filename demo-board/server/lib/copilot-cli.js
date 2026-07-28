@@ -31,6 +31,7 @@ export function buildCopilotCommand(opts = {}) {
     resumeSession,
     sessionName,
     reasoningEffort,
+    availableTools,
   } = opts;
 
   const sessionModes = [continueSession, Boolean(sessionId), Boolean(resumeSession)]
@@ -52,6 +53,9 @@ export function buildCopilotCommand(opts = {}) {
   if (sessionName) args.push('--name', sessionName);
   if (reasoningEffort) args.push('--effort', reasoningEffort);
   args.push('-s', '--no-ask-user', '--allow-all-tools', '--model', model);
+  if (Array.isArray(availableTools) && availableTools.length > 0) {
+    args.push(`--available-tools=${availableTools.join(',')}`);
+  }
   if (onWindows) args.push('--deny-tool', 'shell');
   for (const dir of addDirs) args.push('--add-dir', dir);
   for (const attachment of attachments) args.push('--attachment', attachment);
@@ -110,6 +114,7 @@ export function runCopilot(opts = {}) {
     resumeSession,
     sessionName,
     reasoningEffort,
+    availableTools = [],
     timeoutMs = COPILOT_TIMEOUT_MS,
     onData,
   } = opts;
@@ -127,6 +132,7 @@ export function runCopilot(opts = {}) {
       resumeSession,
       sessionName,
       reasoningEffort,
+      availableTools,
     });
 
     let stdout = '';

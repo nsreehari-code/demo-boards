@@ -11,6 +11,9 @@
     "finbook": {
       "manifest": "../mcp-server-managed-truthsets/finbook/mcp-executable-manifest.json"
     },
+    "feeds": {
+      "manifest": "../mcp-server-managed-truthsets/feeds/mcp-executable-manifest.json"
+    },
     "sentinel-data-exploration": {
       "kind": "mcp-proxy",
       "connection": {
