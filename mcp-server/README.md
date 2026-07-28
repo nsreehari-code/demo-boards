@@ -1,6 +1,6 @@
 # demo-boards/mcp-server
 
-Manifest-driven MCP server scaffold for `demo-boards` and adjacent repo-backed tool surfaces.
+Manifest-driven MCP server and transparent MCP proxy for `demo-boards` and adjacent tool surfaces.
 
 ## Filesystem Storage
 
@@ -42,6 +42,44 @@ That gives you:
 - one manifest format for `demo-boards` tools and other repo-owned tool surfaces
 - the option to run a combined local server or separate instances per trust boundary
 
+## Transparent MCP proxies
+
+A registry server with `"kind": "mcp-proxy"` is discovered from its upstream MCP server at startup.
+The local server mirrors the upstream tool names, descriptions, schemas, and annotations, forwards tool
+arguments unchanged, and returns the upstream MCP result unchanged. No local tool manifest is required.
+
+The local server can add connection headers or authentication between the caller and the upstream server.
+Sentinel uses `azure-cli-bearer`, which obtains a token with the local Azure CLI and performs interactive
+login on demand. Other upstream servers can use an unauthenticated connection or static `headers`.
+
+```json
+{
+  "servers": {
+    "example-upstream": {
+      "kind": "mcp-proxy",
+      "proxy": {
+        "connection": {
+          "transport": "streamable-http",
+          "urlDefault": "https://example.com/mcp",
+          "auth": {
+            "type": "azure-cli-bearer",
+            "resourceEnvVar": "EXAMPLE_MCP_RESOURCE",
+            "tenantEnvVar": "EXAMPLE_MCP_TENANT_ID",
+            "loginOnDemand": true
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Set `proxy.optional` to `true` when server startup should continue without that upstream's tools if
+discovery or authentication fails. Set
+`proxy.toolNamePrefix` when an upstream tool name would collide with another registered tool; otherwise
+duplicates fail startup with an explicit error. Registry entries remain independently disableable through
+`disabled` or `DISABLE_HANDLERS`.
+
 ## Recommendation
 
 Use the same server code with separate manifests.
@@ -59,6 +97,7 @@ Why:
 Recommended split:
 - `demo-boards/mcp-server/src/` holds the reusable runtime and handler registry
 - `demo-boards/mcp-server/manifests/` holds manifest files for each tool set
+- `demo-boards/mcp-server/registry.json` configures local manifests and transparent upstream proxies
 - each data repo can either:
   - keep its own manifest inside the repo and point this server at it, or
   - contribute a manifest file into this directory during local development

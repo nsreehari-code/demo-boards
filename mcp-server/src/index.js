@@ -12,6 +12,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as z from 'zod/v4';
 import { loadManifests } from './manifest-loader.js';
 import { resolveHandler } from './handler-registry.js';
+import { callRemoteMcpTool, listRemoteMcpTools } from './handlers/mcp-proxy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -86,14 +87,27 @@ function validateTransportCompatibility(tools, transport) {
 
 function registerManifestTools(server, tools) {
   for (const tool of tools) {
-    const handler = resolveHandler(tool.handler);
+    const handler = tool.handler === 'mcp.proxy.dynamic'
+      ? (args) => callRemoteMcpTool(tool.proxyConnection, tool.remoteToolName, args)
+      : resolveHandler(tool.handler);
+    const inputSchema = tool.inputSchema
+      ? (tool.handler === 'mcp.proxy.dynamic'
+        ? z.fromJSONSchema(tool.inputSchema)
+        : convertJsonSchemaToZodShape(tool.inputSchema))
+      : undefined;
+    const outputSchema = tool.outputSchema
+      ? (tool.handler === 'mcp.proxy.dynamic'
+        ? z.fromJSONSchema(tool.outputSchema)
+        : convertJsonSchemaToZodShape(tool.outputSchema))
+      : undefined;
     server.registerTool(
       tool.name,
       {
         title: tool.title || tool.name,
         description: tool.description || '',
-        ...(tool.inputSchema ? { inputSchema: convertJsonSchemaToZodShape(tool.inputSchema) } : {}),
-        ...(tool.outputSchema ? { outputSchema: convertJsonSchemaToZodShape(tool.outputSchema) } : {}),
+        ...(inputSchema ? { inputSchema } : {}),
+        ...(outputSchema ? { outputSchema } : {}),
+        ...(tool.annotations ? { annotations: tool.annotations } : {}),
       },
       async (args) => handler(args, tool)
     );
@@ -424,9 +438,9 @@ async function startStreamableHttpServer(loaded) {
   process.stdout.write(`[mcp-server] streamable-http listening on http://${host}:${port}${endpoint}\n`);
 }
 
-function loadManifestPathsFromRegistry() {
+async function loadRegistryDefaults() {
   const mcpServerDir = MCP_SERVER_DIR;
-  const registryPath = path.resolve(mcpServerDir, 'registry.json');
+  const registryPath = path.resolve(getArgValue('--registry', path.join(mcpServerDir, 'registry.json')));
   const manifestsDir = path.resolve(mcpServerDir, 'manifests');
   // Registry manifests are auto-loaded into the local server process, so every
   // registry-backed manifest must declare tools that have a working local handler.
@@ -435,40 +449,100 @@ function loadManifestPathsFromRegistry() {
     registry = JSON.parse(readFileSync(registryPath, 'utf8'));
   } catch {
     process.stderr.write('[mcp-server] No registry.json found, starting with no manifests\n');
-    return [];
+    return { manifestPaths: [], proxyTools: [] };
   }
   const servers = registry?.servers || {};
   const disabledHandlers = parseDisabledHandlers();
-  return Object.entries(servers)
-    .flatMap(([serverName, entry]) => {
-      if (!entry?.manifest) return [];
+  const manifestPaths = [];
+  const proxyTools = [];
 
-      if (entry.disabled === true) {
-        process.stderr.write(`[mcp-server] Skipping disabled registry server "${serverName}"\n`);
-        return [];
+  for (const [serverName, entry] of Object.entries(servers)) {
+    if (!entry || typeof entry !== 'object') continue;
+
+    if (entry.disabled === true) {
+      process.stderr.write(`[mcp-server] Skipping disabled registry server "${serverName}"\n`);
+      continue;
+    }
+
+    if (disabledHandlers.has(serverName.toLowerCase())) {
+      process.stderr.write(`[mcp-server] Skipping registry server "${serverName}" (DISABLE_HANDLERS)\n`);
+      continue;
+    }
+
+    if (entry.kind === 'mcp-proxy') {
+      const proxy = entry.proxy;
+      if (!proxy || typeof proxy !== 'object' || !proxy.connection) {
+        throw new Error(`Registry MCP proxy "${serverName}" requires proxy.connection`);
       }
 
-      if (disabledHandlers.has(serverName.toLowerCase())) {
-        process.stderr.write(`[mcp-server] Skipping registry server "${serverName}" (DISABLE_HANDLERS)\n`);
-        return [];
-      }
-
-      const ref = entry.manifest;
-      const manifestPath = path.isAbsolute(ref)
-        ? ref
-        : (ref.startsWith('.') || ref.includes('/') || ref.includes('\\'))
-          ? path.resolve(mcpServerDir, ref)
-          : path.resolve(manifestsDir, ref);
-
-      if (!existsSync(manifestPath)) {
+      try {
+        const discovered = await listRemoteMcpTools(proxy.connection);
+        const prefix = typeof proxy.toolNamePrefix === 'string' ? proxy.toolNamePrefix : '';
+        for (const remoteTool of discovered.tools) {
+          proxyTools.push({
+            ...remoteTool,
+            name: `${prefix}${remoteTool.name}`,
+            handler: 'mcp.proxy.dynamic',
+            inputSchema: remoteTool.inputSchema || {
+              type: 'object',
+              properties: {},
+              additionalProperties: true,
+            },
+            remoteToolName: remoteTool.name,
+            proxyConnection: proxy.connection,
+            proxyServerName: serverName,
+          });
+        }
         process.stderr.write(
-          `[mcp-server] Skipping registry server "${serverName}": manifest not reachable at ${manifestPath}\n`
+          `[mcp-server] Discovered ${discovered.tools.length} tools from proxy "${serverName}"\n`
         );
-        return [];
+      } catch (err) {
+        if (proxy.optional === true) {
+          process.stderr.write(
+            `[mcp-server] Skipping unavailable optional proxy "${serverName}": ${String(err?.message || err)}\n`
+          );
+          continue;
+        }
+        throw new Error(`Unable to discover MCP proxy "${serverName}": ${String(err?.message || err)}`);
       }
+      continue;
+    }
 
-      return [manifestPath];
-    });
+    if (!entry.manifest) continue;
+
+    const ref = entry.manifest;
+    const manifestPath = path.isAbsolute(ref)
+      ? ref
+      : (ref.startsWith('.') || ref.includes('/') || ref.includes('\\'))
+        ? path.resolve(mcpServerDir, ref)
+        : path.resolve(manifestsDir, ref);
+
+    if (!existsSync(manifestPath)) {
+      process.stderr.write(
+        `[mcp-server] Skipping registry server "${serverName}": manifest not reachable at ${manifestPath}\n`
+      );
+      continue;
+    }
+
+    manifestPaths.push(manifestPath);
+  }
+
+  return { manifestPaths, proxyTools };
+}
+
+function appendProxyTools(loaded, proxyTools) {
+  const toolNames = new Set(loaded.tools.map((tool) => tool.name));
+  for (const tool of proxyTools) {
+    if (toolNames.has(tool.name)) {
+      throw new Error(
+        `Duplicate MCP tool name from proxy "${tool.proxyServerName}": ${tool.name}. `
+        + 'Set proxy.toolNamePrefix to disambiguate it.'
+      );
+    }
+    toolNames.add(tool.name);
+    loaded.tools.push(tool);
+  }
+  return loaded;
 }
 
 async function main() {
@@ -476,16 +550,20 @@ async function main() {
   const transportName = getArgValue('--transport', 'stdio');
   const dryRun = hasFlag('--dry-run');
   const useRegistryDefaults = manifestPaths.length === 0;
+  let proxyTools = [];
 
   if (useRegistryDefaults) {
-    manifestPaths = loadManifestPathsFromRegistry();
+    const registryDefaults = await loadRegistryDefaults();
+    manifestPaths = registryDefaults.manifestPaths;
+    proxyTools = registryDefaults.proxyTools;
   }
 
-  const loaded = manifestPaths.length > 0
+  let loaded = manifestPaths.length > 0
     ? loadManifests(manifestPaths)
     : createEmptyLoadedManifests();
+  loaded = appendProxyTools(loaded, proxyTools);
 
-  if (useRegistryDefaults && manifestPaths.length === 0) {
+  if (useRegistryDefaults && manifestPaths.length === 0 && proxyTools.length === 0) {
     process.stderr.write('[mcp-server] No reachable registry manifests found, starting with no tools\n');
   }
 

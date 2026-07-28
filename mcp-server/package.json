@@ -15,6 +15,7 @@
     "test:smoke": "node scripts/smoke-registered-services.js",
     "pretest:filesystem": "npm run verify:durable-runtime",
     "test:filesystem": "node --test test/filesystem-storage.test.js test/filesystem-handler.test.js test/filesystem-mcp.test.js",
+    "test:proxy": "node --test test/mcp-proxy.test.js",
     "test:copilot": "node --test test/copilot-cli.test.js",
     "smoke:sentinel:tenant": "node scripts/smoke-sentinel-tenant.js",
     "smoke:kusto": "node scripts/smoke-kusto.js",
