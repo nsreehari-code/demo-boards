@@ -186,7 +186,7 @@ export class ProxyCatalog {
       'proxy.sign_in',
       {
         title: 'Sign In To MCP Proxy',
-        description: 'Authenticate an upstream MCP proxy and refresh its advertised tools.',
+        description: 'Check cached authentication and refresh an upstream MCP proxy. Interactive sign-in occurs only when forceLogin is true.',
         inputSchema: {
           serverName: z.string().optional(),
           forceLogin: z.boolean().optional().describe('Open the configured interactive login even if a cached token exists.'),

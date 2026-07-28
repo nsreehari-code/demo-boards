@@ -12,14 +12,14 @@
       "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
       "resourceEnvVar": "SENTINEL_RESOURCE",
       "tenantEnvVar": "SENTINEL_TENANT_ID",
-      "loginOnDemand": true
+      "loginOnDemand": false
     }
   },
   "tools": [
     {
       "name": "sentinel.login",
       "title": "Sentinel Login",
-      "description": "Open browser-based Azure login when needed and validate that a Sentinel access token can be acquired locally.",
+      "description": "Check cached Azure CLI authentication for Sentinel. Interactive Azure sign-in occurs only when forceLogin is true. Registry proxy clients should use proxy.sign_in, which also rediscovers upstream tools.",
       "handler": "sentinel.login",
       "config": {
         "resource": "4500ebfb-89b6-4b14-a480-7f749797bfcd",
@@ -31,11 +31,11 @@
         "properties": {
           "tenant": {
             "type": "string",
-            "description": "Optional Azure tenant ID override for the login flow."
+            "description": "Optional Azure tenant ID override for cached-token validation or interactive sign-in."
           },
           "forceLogin": {
             "type": "boolean",
-            "description": "When true, always open browser-based Azure login before checking the Sentinel token."
+            "description": "Defaults to false. When true, open interactive Azure CLI sign-in before validating Sentinel access."
           }
         },
         "additionalProperties": false
