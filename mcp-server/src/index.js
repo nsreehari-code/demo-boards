@@ -13,6 +13,10 @@ import * as z from 'zod/v4';
 import { loadManifests } from './manifest-loader.js';
 import { resolveHandler } from './handler-registry.js';
 import { ProxyCatalog } from './proxy-catalog.js';
+import {
+  createFilesystemSnapshotInvalidationWatcher,
+  FILESYSTEM_SNAPSHOT_INVALIDATION_NOTIFICATION,
+} from './filesystem-snapshot-invalidations.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,6 +34,10 @@ if (typeof process.loadEnvFile === 'function' && existsSync(MCP_SERVER_ENV_PATH)
 }
 
 const MCP_SERVER_LOG_PATH = path.join(MCP_SERVER_DIR, 'logs', 'mcp-server.log');
+const FILESYSTEM_STORAGE_ROOT = path.resolve(
+  process.env.DEMO_BOARDS_FILESYSTEM_STORAGE_ROOT
+    ?? path.join(MCP_SERVER_DIR, '.data', 'filesystem-storage'),
+);
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function pad2(value) {
@@ -321,6 +329,19 @@ async function startStreamableHttpServer(loaded, proxyCatalog) {
   const endpoint = getArgValue('--endpoint', '/mcp');
   const sessionTransports = new Map();
   const sessionServers = new Map();
+  const snapshotWatcher = createFilesystemSnapshotInvalidationWatcher({
+    rootDir: FILESYSTEM_STORAGE_ROOT,
+    async publish(invalidation) {
+      await Promise.allSettled([...sessionServers.values()].map((server) =>
+        server.server.notification({
+          method: FILESYSTEM_SNAPSHOT_INVALIDATION_NOTIFICATION,
+          params: invalidation,
+        })));
+    },
+    onError(error) {
+      appendMcpServerLogLine(`[filesystem-invalidations] ${String(error?.message || error)}`);
+    },
+  });
 
   const httpServer = createServer(async (req, res) => {
     const requestUrl = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
@@ -414,6 +435,7 @@ async function startStreamableHttpServer(loaded, proxyCatalog) {
   });
 
   const shutdown = async () => {
+    await snapshotWatcher.close();
     await closeAllSessions(sessionServers, sessionTransports);
     await new Promise((resolve) => httpServer.close(resolve));
     process.exit(0);
@@ -564,6 +586,19 @@ async function main() {
   if (transportName === 'stdio') {
     const server = createMcpServer(loaded, proxyCatalog);
     const transport = new StdioServerTransport();
+    const snapshotWatcher = createFilesystemSnapshotInvalidationWatcher({
+      rootDir: FILESYSTEM_STORAGE_ROOT,
+      publish: (invalidation) => server.server.notification({
+        method: FILESYSTEM_SNAPSHOT_INVALIDATION_NOTIFICATION,
+        params: invalidation,
+      }),
+      onError(error) {
+        process.stderr.write(`[filesystem-invalidations] ${String(error?.message || error)}\n`);
+      },
+    });
+    const closeWatcher = () => void snapshotWatcher.close();
+    process.once('SIGINT', closeWatcher);
+    process.once('SIGTERM', closeWatcher);
     await server.connect(transport);
     return;
   }

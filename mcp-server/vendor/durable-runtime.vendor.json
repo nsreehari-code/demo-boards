@@ -1,6 +1,6 @@
 {
   "package": "@gik/durable-runtime",
-  "version": "0.6.2",
-  "file": "gik-durable-runtime-0.6.2.tgz",
-  "sha256": "25a08be3ab9d77566424923461023a7ba6b0724a9ba55f6002f655709ceedae5"
+  "version": "0.7.0",
+  "file": "gik-durable-runtime-0.7.0.tgz",
+  "sha256": "59931724f9a5eb7a8421d39ab40482f30f9d9d5b3345a18e681f20da2677428f"
 }
