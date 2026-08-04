@@ -143,6 +143,24 @@
       }
     },
     {
+      "name": "filesystem.runtime_snapshot_changes",
+      "handler": "filesystem",
+      "title": "Read filesystem runtime snapshot changes",
+      "description": "Returns unchanged for the current revision or an authoritative committed reset snapshot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stateRef": { "type": "string", "minLength": 1 },
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "runtimeId": { "type": "string", "minLength": 1 },
+          "afterRevision": { "type": ["string", "null"] }
+        },
+        "required": ["stateRef", "effectsQueueRef", "runtimeId", "afterRevision"],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "filesystem.transition_acquire",
       "handler": "filesystem",
       "title": "Acquire filesystem transition",

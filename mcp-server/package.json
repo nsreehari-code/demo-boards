@@ -23,7 +23,7 @@
     "probe:finbook-workflows": "node scripts/probe-finbook-workflow-tools.js"
   },
   "dependencies": {
-    "@gik/durable-runtime": "file:vendor/gik-durable-runtime-0.5.0.tgz",
+    "@gik/durable-runtime": "file:vendor/gik-durable-runtime-0.6.2.tgz",
     "@modelcontextprotocol/sdk": "latest"
   }
 }

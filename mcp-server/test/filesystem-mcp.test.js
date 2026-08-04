@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { applyRuntimeSnapshotChanges } from '@gik/durable-runtime';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
@@ -32,6 +33,7 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     'filesystem.journal_append_and_wake',
     'filesystem.runtime_initialize',
     'filesystem.runtime_snapshot',
+    'filesystem.runtime_snapshot_changes',
     'filesystem.storage_batch',
     'filesystem.transition_abort',
     'filesystem.transition_acquire',
@@ -97,6 +99,16 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     spec: { multiplier: 1 },
     revision: acquired.structuredContent.transition.revision,
   });
+  const changes = await client.callTool({
+    name: 'filesystem.runtime_snapshot_changes',
+    arguments: {
+      stateRef: ref, effectsQueueRef: ref,
+      runtimeId: 'stdio-runtime', afterRevision: acquired.structuredContent.transition.revision,
+    },
+  });
+  assert.deepEqual(changes.structuredContent.changes, {
+    kind: 'unchanged', revision: acquired.structuredContent.transition.revision,
+  });
   const committed = await client.callTool({
     name: 'filesystem.transition_commit',
     arguments: {
@@ -109,6 +121,23 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     },
   });
   assert.equal(committed.structuredContent.ok, true);
+  const committedChanges = await client.callTool({
+    name: 'filesystem.runtime_snapshot_changes',
+    arguments: {
+      stateRef: ref, effectsQueueRef: ref,
+      runtimeId: 'stdio-runtime', afterRevision: acquired.structuredContent.transition.revision,
+    },
+  });
+  assert.equal(committedChanges.structuredContent.changes.kind, 'changes');
+  assert.deepEqual(applyRuntimeSnapshotChanges({
+    state: { count: 0 },
+    spec: { multiplier: 1 },
+    revision: acquired.structuredContent.transition.revision,
+  }, committedChanges.structuredContent.changes), {
+    state: { count: 1 },
+    spec: { multiplier: 2 },
+    revision: committed.structuredContent.revision,
+  });
   await client.callTool({
     name: 'filesystem.engine_wake_processed',
     arguments: {

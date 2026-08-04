@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { applyRuntimeSnapshotChanges } from '@gik/durable-runtime';
 
 import { createFilesystemToolHandler } from '../src/handlers/filesystem.js';
 
@@ -131,6 +132,11 @@ test('filesystem transition tools hold the lock through commit and release it', 
   }, { name: 'filesystem.runtime_snapshot' })).structuredContent.snapshot, {
     state: { count: 0 }, spec: { multiplier: 1 }, revision: acquired.revision,
   });
+  assert.deepEqual((await handler({
+    stateRef: ref, effectsQueueRef: ref, runtimeId: 'counter-v1', afterRevision: acquired.revision,
+  }, { name: 'filesystem.runtime_snapshot_changes' })).structuredContent.changes, {
+    kind: 'unchanged', revision: acquired.revision,
+  });
   assert.equal((await handler(request, { name: 'filesystem.transition_acquire' })).structuredContent.transition, null);
   const committed = (await handler({
     ...request,
@@ -144,6 +150,15 @@ test('filesystem transition tools hold the lock through commit and release it', 
     effects: [{ type: 'count-changed', count: 2 }],
   }, { name: 'filesystem.transition_commit' })).structuredContent;
   assert.equal(committed.ok, true);
+  const changes = (await handler({
+    stateRef: ref, effectsQueueRef: ref, runtimeId: 'counter-v1', afterRevision: acquired.revision,
+  }, { name: 'filesystem.runtime_snapshot_changes' })).structuredContent.changes;
+  assert.equal(changes.kind, 'changes');
+  assert.deepEqual(applyRuntimeSnapshotChanges({
+    state: { count: 0 }, spec: { multiplier: 1 }, revision: acquired.revision,
+  }, changes), {
+    state: { count: 2 }, spec: { multiplier: 2 }, revision: committed.revision,
+  });
   const leasedEffect = (await handler({
     effectsQueueRef: ref,
   }, { name: 'filesystem.effect_lease' })).structuredContent.message;
