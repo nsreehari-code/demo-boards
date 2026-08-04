@@ -126,6 +126,23 @@
       }
     },
     {
+      "name": "filesystem.runtime_snapshot",
+      "handler": "filesystem",
+      "title": "Read filesystem runtime snapshot",
+      "description": "Reads committed runtime state and opaque spec without acquiring a transition lock.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stateRef": { "type": "string", "minLength": 1 },
+          "effectsQueueRef": { "type": "string", "minLength": 1 },
+          "effectsLane": { "type": "string" },
+          "runtimeId": { "type": "string", "minLength": 1 }
+        },
+        "required": ["stateRef", "effectsQueueRef", "runtimeId"],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "filesystem.transition_acquire",
       "handler": "filesystem",
       "title": "Acquire filesystem transition",

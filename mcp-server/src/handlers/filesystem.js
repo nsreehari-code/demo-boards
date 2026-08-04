@@ -29,6 +29,8 @@ export function createFilesystemToolHandler(options = {}) {
         return result({ results: await dispatcher.dispatchBatch(args.operations) });
       case 'filesystem.runtime_initialize':
         return result({ initialization: await durableStorage.initializeRuntime(args) });
+      case 'filesystem.runtime_snapshot':
+        return result({ snapshot: await durableStorage.readSnapshot(args) });
       case 'filesystem.journal_append_and_wake':
         return result({ entry: await durableStorage.appendJournalAndWake(args) });
       case 'filesystem.engine_wake_read':

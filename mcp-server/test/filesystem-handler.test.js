@@ -126,6 +126,11 @@ test('filesystem transition tools hold the lock through commit and release it', 
   const acquired = (await handler(request, { name: 'filesystem.transition_acquire' })).structuredContent.transition;
   assert.equal(acquired.entries.length, 1);
   assert.deepEqual(acquired.spec, { multiplier: 1 });
+  assert.deepEqual((await handler({
+    stateRef: ref, effectsQueueRef: ref, runtimeId: 'counter-v1',
+  }, { name: 'filesystem.runtime_snapshot' })).structuredContent.snapshot, {
+    state: { count: 0 }, spec: { multiplier: 1 }, revision: acquired.revision,
+  });
   assert.equal((await handler(request, { name: 'filesystem.transition_acquire' })).structuredContent.transition, null);
   const committed = (await handler({
     ...request,

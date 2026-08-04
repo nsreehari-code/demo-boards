@@ -31,6 +31,7 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     'filesystem.engine_wake_read',
     'filesystem.journal_append_and_wake',
     'filesystem.runtime_initialize',
+    'filesystem.runtime_snapshot',
     'filesystem.storage_batch',
     'filesystem.transition_abort',
     'filesystem.transition_acquire',
@@ -84,6 +85,18 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     },
   });
   assert.equal(acquired.structuredContent.transition.entries.length, 1);
+  const snapshot = await client.callTool({
+    name: 'filesystem.runtime_snapshot',
+    arguments: {
+      stateRef: ref, effectsQueueRef: ref,
+      runtimeId: 'stdio-runtime',
+    },
+  });
+  assert.deepEqual(snapshot.structuredContent.snapshot, {
+    state: { count: 0 },
+    spec: { multiplier: 1 },
+    revision: acquired.structuredContent.transition.revision,
+  });
   const committed = await client.callTool({
     name: 'filesystem.transition_commit',
     arguments: {
