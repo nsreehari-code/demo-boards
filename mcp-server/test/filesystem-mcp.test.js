@@ -6,8 +6,31 @@ import test from 'node:test';
 import { applyRuntimeSnapshotChanges } from '@gik/durable-runtime';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { NotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+import * as z from 'zod/v4';
 
 const serverRoot = path.resolve(import.meta.dirname, '..');
+const snapshotInvalidationNotificationSchema = NotificationSchema.extend({
+  method: z.literal('notifications/gik/runtime_snapshot_invalidated'),
+  params: z.object({
+    runtimeId: z.string(),
+    stateRef: z.string(),
+    observedRevision: z.string().optional(),
+  }),
+});
+
+async function eventually(assertion, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      assertion();
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  assertion();
+}
 
 test('filesystem tools persist storage through the MCP stdio transport', async (t) => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-fs-e2e-'));
@@ -19,6 +42,10 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     env: { ...process.env, DEMO_BOARDS_FILESYSTEM_STORAGE_ROOT: rootDir },
   });
   const client = new Client({ name: 'filesystem-test-client', version: '0.1.0' });
+  const invalidations = [];
+  client.setNotificationHandler(snapshotInvalidationNotificationSchema, (notification) => {
+    invalidations.push(notification.params);
+  });
   t.after(async () => client.close());
   await client.connect(transport);
 
@@ -121,6 +148,10 @@ test('filesystem tools persist storage through the MCP stdio transport', async (
     },
   });
   assert.equal(committed.structuredContent.ok, true);
+  await eventually(() => assert.ok(invalidations.some((invalidation) =>
+    invalidation.runtimeId === 'stdio-runtime'
+      && invalidation.stateRef === ref
+      && invalidation.observedRevision === committed.structuredContent.revision)));
   const committedChanges = await client.callTool({
     name: 'filesystem.runtime_snapshot_changes',
     arguments: {
