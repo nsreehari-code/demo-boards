@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { toCopilotAgentMarkdown } from '../../../generative-interaction-kernel/packages/agent-lifecycle-exp/dist/index.js';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const defaultTargetDir = path.resolve(scriptDirectory, '..', '.copilot-workspace');
@@ -113,34 +114,43 @@ It must:
 `;
 }
 
-function createSimpleAgentManifest(repoName) {
-  return `---
-name: ${repoName}-simple-chat
-description: Local chat agent for the ${repoName} workspace using the MCP-backed toolchain.
-model: gpt-5.4
-tools:
-  - read_file
-  - search
-  - list_dir
-  - run_in_terminal
-  - edit_file
----
-
-You are a local repository assistant for ${repoName}.
-
-Your job is to help with grounded repository work, not to invent undocumented behavior.
-
-Always:
-- read the relevant repo files before making changes
-- prefer the smallest safe action
-- keep changes consistent with the existing architecture
-- distinguish between model-proposed tool calls and host-owned execution
-
-When you need to act:
-- inspect the relevant files or tool manifests first
-- validate the change with the narrowest possible command
-- report only what was verified
-`;
+function createSimpleAgentTemplate(repoName) {
+  const tool = (name, description) => ({
+    type: 'function',
+    name,
+    description,
+    parameters: { type: 'object', additionalProperties: true },
+    strict: true,
+  });
+  return {
+    id: `${repoName}-simple-chat`,
+    description: `Local chat agent for the ${repoName} workspace using the MCP-backed toolchain.`,
+    executionAuthority: 'host',
+    instructions: [
+      `You are a local repository assistant for ${repoName}.`,
+      'Your job is to help with grounded repository work, not to invent undocumented behavior.',
+      [
+        'Always:',
+        '- read the relevant repo files before making changes',
+        '- prefer the smallest safe action',
+        '- keep changes consistent with the existing architecture',
+        '- distinguish between model-proposed tool calls and host-owned execution',
+      ].join('\n'),
+      [
+        'When you need to act:',
+        '- inspect the relevant files or tool manifests first',
+        '- validate the change with the narrowest possible command',
+        '- report only what was verified',
+      ].join('\n'),
+    ],
+    tools: [
+      tool('read_file', 'Read a repository file.'),
+      tool('search', 'Search the repository.'),
+      tool('list_dir', 'List a repository directory.'),
+      tool('run_in_terminal', 'Run a host-approved terminal command.'),
+      tool('edit_file', 'Apply a host-approved file edit.'),
+    ],
+  };
 }
 
 function createSessionHook() {
@@ -227,7 +237,7 @@ function buildWorkspaceFiles(targetDir, repoName) {
     },
     {
       path: path.join(targetDir, '.github', 'agents', 'simple-chat.agent.md'),
-      content: createSimpleAgentManifest(repoName),
+      content: toCopilotAgentMarkdown(createSimpleAgentTemplate(repoName), { model: 'gpt-5.4' }),
     },
     {
       path: path.join(targetDir, '.github', 'hooks', 'session-logging.json'),

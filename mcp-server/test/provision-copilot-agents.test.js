@@ -22,7 +22,9 @@ test('Copilot provisioner creates an MCP-discoverable custom agent workspace', (
 
     const agentPath = path.join(workspace, '.github', 'agents', 'simple-chat.agent.md');
     assert.equal(fs.existsSync(agentPath), true);
-    assert.match(fs.readFileSync(agentPath, 'utf8'), /^---\r?\nname: provision-test-simple-chat/m);
+    const agent = fs.readFileSync(agentPath, 'utf8');
+    assert.match(agent, /^---\r?\nname: provision-test-simple-chat/m);
+    assert.match(agent, /host runtime validates and executes every tool call/);
     assert.equal(fs.existsSync(path.join(workspace, '.git')), true);
     assert.equal(fs.existsSync(path.join(workspace, '.github', 'copilot-instructions.md')), true);
     assert.equal(fs.existsSync(path.join(workspace, '.github', 'hooks', 'session-logging.json')), true);
