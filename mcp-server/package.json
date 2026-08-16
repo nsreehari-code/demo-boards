@@ -7,6 +7,7 @@
   "scripts": {
     "verify:durable-runtime": "node scripts/vendor-gik-durable-runtime.mjs --verify",
     "vendor:durable-runtime": "node scripts/vendor-gik-durable-runtime.mjs",
+    "provision:copilot": "node scripts/provision-copilot-agents.mjs",
     "start": "node src/index.js",
     "start:http": "node src/index.js --transport streamable-http",
     "start:stdio": "node src/index.js --transport stdio",
@@ -16,7 +17,7 @@
     "pretest:filesystem": "npm run verify:durable-runtime",
     "test:filesystem": "node --test test/filesystem-storage.test.js test/filesystem-handler.test.js test/filesystem-mcp.test.js test/filesystem-snapshot-invalidations.test.js",
     "test:proxy": "node --test test/mcp-proxy.test.js",
-    "test:copilot": "node --test test/copilot-cli.test.js",
+    "test:copilot": "node --test test/copilot-cli.test.js test/provision-copilot-agents.test.js",
     "test:threat-intel": "node --test test/threat-intel.test.js",
     "smoke:sentinel:tenant": "node scripts/smoke-sentinel-tenant.js",
     "smoke:kusto": "node scripts/smoke-kusto.js",

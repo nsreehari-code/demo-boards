@@ -162,6 +162,16 @@ Example tool entry:
 The server can also expose local GitHub Copilot CLI tools for custom agents defined in project or
 user agent directories.
 
+Provision the local workspace used by the GIK `ai-agent` sample with:
+
+```bash
+npm run provision:copilot
+```
+
+This creates `mcp-server/.copilot-workspace` as a Git repository and writes its custom agent to
+`.github/agents/simple-chat.agent.md`. The MCP server discovers that file through
+`copilot.list_agents`; `copilot.run_agent` uses the same workspace as its `cwd`.
+
 Current first-pass tools:
 - `copilot.check_environment` — verify that `copilot` is installed and report discovered local agents
 - `copilot.list_agents` — enumerate local custom agents from `.github/agents` and `~/.copilot/agents`
