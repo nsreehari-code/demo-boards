@@ -171,6 +171,8 @@ npm run provision:copilot
 This creates `mcp-server/.copilot-workspace` as a Git repository and writes its custom agent to
 `.github/agents/simple-chat.agent.md`. The MCP server discovers that file through
 `copilot.list_agents`; `copilot.run_agent` uses the same workspace as its `cwd`.
+Rerun with `npm run provision:copilot -- --force` to upsert managed content at the same paths;
+repeated runs never create a second `simple-chat` agent file.
 The agent file is lowered from GIK's provider-neutral `AgentProvisioningTemplate`, which is also
 used by the Foundry provisioner so instructions, tool metadata, response contracts, and host-owned
 execution follow one contract across providers.

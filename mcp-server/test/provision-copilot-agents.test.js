@@ -23,12 +23,24 @@ test('Copilot provisioner creates an MCP-discoverable custom agent workspace', (
     const agentPath = path.join(workspace, '.github', 'agents', 'simple-chat.agent.md');
     assert.equal(fs.existsSync(agentPath), true);
     const agent = fs.readFileSync(agentPath, 'utf8');
-    assert.match(agent, /^---\r?\nname: provision-test-simple-chat/m);
+    assert.match(agent, /^---\r?\nname: simple-chat/m);
     assert.match(agent, /host runtime validates and executes every tool call/);
     assert.equal(fs.existsSync(path.join(workspace, '.git')), true);
     assert.equal(fs.existsSync(path.join(workspace, '.github', 'copilot-instructions.md')), true);
     assert.equal(fs.existsSync(path.join(workspace, '.github', 'hooks', 'session-logging.json')), true);
     assert.equal(fs.existsSync(path.join(workspace, '.github', 'skills', 'live-board-cards-soul', 'SKILL.md')), true);
+
+    const repeated = execFileSync(process.execPath, [
+      provisioner,
+      '--target-dir', workspace,
+      '--repo-name', 'provision-test',
+      '--force',
+    ], { encoding: 'utf8' });
+    assert.match(repeated, /Unchanged: .*simple-chat\.agent\.md/);
+    assert.deepEqual(
+      fs.readdirSync(path.join(workspace, '.github', 'agents')).filter((name) => name.endsWith('.agent.md')),
+      ['simple-chat.agent.md'],
+    );
   } finally {
     fs.rmSync(temporaryDirectory, { recursive: true, force: true });
   }
