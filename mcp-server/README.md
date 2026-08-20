@@ -162,20 +162,18 @@ Example tool entry:
 The server can also expose local GitHub Copilot CLI tools for custom agents defined in project or
 user agent directories.
 
-Provision the local workspace used by the GIK `ai-agent` sample with:
+Provision a local workspace from a product-owned plan with:
 
 ```bash
-npm run provision:copilot
+npm run provision:copilot -- --plan /path/to/copilot-plan.json
 ```
 
-This creates `mcp-server/.copilot-workspace` as a Git repository and writes its custom agent to
-`.github/agents/simple-chat.agent.md`. The MCP server discovers that file through
-`copilot.list_agents`; `copilot.run_agent` uses the same workspace as its `cwd`.
-Rerun with `npm run provision:copilot -- --force` to upsert managed content at the same paths;
-repeated runs never create a second `simple-chat` agent file.
-The agent file is lowered from GIK's provider-neutral `AgentProvisioningTemplate`, which is also
-used by the Foundry provisioner so instructions, tool metadata, response contracts, and host-owned
-execution follow one contract across providers.
+This creates `mcp-server/.copilot-workspace` as a Git repository and writes the relative files in
+the plan. The MCP server discovers generated agents through `copilot.list_agents`;
+`copilot.run_agent` uses the same workspace as its `cwd`. Rerun with `--force` to overwrite changed
+managed files; unchanged files are not rewritten. The consuming product owns agent templates,
+instructions, tools, skills, hooks, and lowering. This server owns safe workspace initialization
+and idempotent file provisioning.
 
 Current first-pass tools:
 - `copilot.check_environment` — verify that `copilot` is installed and report discovered local agents

@@ -228,6 +228,12 @@
             "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
             "description": "Optional native Copilot reasoning effort level."
           },
+          "additionalMcpConfigs": {
+            "type": "array",
+            "description": "Optional MCP configuration JSON strings or @file paths passed to Copilot for this run.",
+            "items": { "type": "string", "minLength": 1 },
+            "maxItems": 8
+          },
           "timeoutMs": {
             "type": "integer",
             "minimum": 1000,

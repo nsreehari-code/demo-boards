@@ -1,0 +1,37 @@
+{
+  "server": {
+    "name": "gik-agent-authoring",
+    "version": "0.1.0",
+    "description": "Package-owned capability discovery for governed Blueprint authoring."
+  },
+  "connection": {
+    "transport": "streamable-http",
+    "urlEnvVar": "DEMO_BOARDS_MCP_SERVER_URL",
+    "urlDefault": "http://127.0.0.1:7801/mcp"
+  },
+  "tools": [
+    {
+      "name": "describe",
+      "title": "Describe GIK Capabilities",
+      "description": "Discover projection capabilities or retrieve compact contracts for multiple shortlisted capabilities in one call.",
+      "handler": "gik.agent",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "capabilities"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["catalog-capabilities", "multiple-capabilities"]
+          },
+          "capabilities": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "maxItems": 32,
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  ]
+}

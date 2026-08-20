@@ -13,7 +13,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const COPILOT_MODEL = 'gpt-5.4';
@@ -32,6 +32,7 @@ export function buildCopilotCommand(opts = {}) {
     sessionName,
     reasoningEffort,
     availableTools,
+    additionalMcpConfigs = [],
   } = opts;
 
   const sessionModes = [continueSession, Boolean(sessionId), Boolean(resumeSession)]
@@ -55,6 +56,9 @@ export function buildCopilotCommand(opts = {}) {
   args.push('-s', '--no-ask-user', '--allow-all-tools', '--model', model);
   if (Array.isArray(availableTools) && availableTools.length > 0) {
     args.push(`--available-tools=${availableTools.join(',')}`);
+  }
+  for (const config of additionalMcpConfigs) {
+    args.push('--additional-mcp-config', config);
   }
   if (onWindows) args.push('--deny-tool', 'shell');
   for (const dir of addDirs) args.push('--add-dir', dir);
@@ -115,12 +119,15 @@ export function runCopilot(opts = {}) {
     sessionName,
     reasoningEffort,
     availableTools = [],
+    additionalMcpConfigs = [],
     timeoutMs = COPILOT_TIMEOUT_MS,
     onData,
   } = opts;
+  const spawnProcess = opts.spawnProcess ?? spawnCopilot;
+  const terminateProcess = opts.terminateProcess ?? terminateCopilotProcess;
 
   return new Promise((resolve, reject) => {
-    const child = spawnCopilot({
+    const child = spawnProcess({
       prompt,
       workingDir,
       addDirs,
@@ -133,6 +140,7 @@ export function runCopilot(opts = {}) {
       sessionName,
       reasoningEffort,
       availableTools,
+      additionalMcpConfigs,
     });
 
     let stdout = '';
@@ -156,8 +164,36 @@ export function runCopilot(opts = {}) {
     child.on('error', (err) => finish(() => reject(err)));
     child.on('close', (code) => finish(() => resolve({ code, stdout, stderr })));
 
-    timer = setTimeout(() => { child.kill(); }, timeoutMs);
+    timer = setTimeout(() => {
+      const timeoutMessage = `Copilot CLI timed out after ${timeoutMs}ms`;
+      try {
+        terminateProcess(child);
+      } catch (error) {
+        stderr += `${stderr ? '\n' : ''}${timeoutMessage}; termination failed: ${error?.message || String(error)}`;
+        finish(() => resolve({ code: 124, stdout, stderr, timedOut: true }));
+        return;
+      }
+      stderr += `${stderr ? '\n' : ''}${timeoutMessage}`;
+      finish(() => resolve({ code: 124, stdout, stderr, timedOut: true }));
+    }, timeoutMs);
   });
+}
+
+export function terminateCopilotProcess(child) {
+  if (!child || typeof child.pid !== 'number') return false;
+  if (process.platform === 'win32') {
+    const result = spawnSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(String(result.stderr || result.stdout || `taskkill exited ${result.status}`).trim());
+    }
+    return true;
+  }
+  return child.kill('SIGKILL');
 }
 
 // ---------------------------------------------------------------------------

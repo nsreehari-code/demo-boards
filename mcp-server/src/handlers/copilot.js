@@ -411,6 +411,9 @@ export function prepareRunArguments(args) {
     resumeSession,
     sessionName,
     reasoningEffort: normalizeOptionalString(args?.reasoningEffort) || null,
+    additionalMcpConfigs: Array.isArray(args?.additionalMcpConfigs)
+      ? args.additionalMcpConfigs.map((entry) => normalizeOptionalString(entry)).filter(Boolean)
+      : [],
     timeoutMs: Number.isFinite(args?.timeoutMs) ? Number(args.timeoutMs) : COPILOT_TIMEOUT_MS,
   };
 }
@@ -429,6 +432,7 @@ function startAsyncRun(config) {
     ...(config.resumeSession ? { resumeSession: config.resumeSession } : {}),
     ...(config.sessionName ? { sessionName: config.sessionName } : {}),
     ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}),
+    ...(config.additionalMcpConfigs.length > 0 ? { additionalMcpConfigs: config.additionalMcpConfigs } : {}),
   });
 
   run.child = child;
@@ -591,6 +595,7 @@ async function handleRunAgent(args) {
     ...(config.resumeSession ? { resumeSession: config.resumeSession } : {}),
     ...(config.sessionName ? { sessionName: config.sessionName } : {}),
     ...(config.reasoningEffort ? { reasoningEffort: config.reasoningEffort } : {}),
+    ...(config.additionalMcpConfigs.length > 0 ? { additionalMcpConfigs: config.additionalMcpConfigs } : {}),
     ...(Number.isFinite(config.timeoutMs) ? { timeoutMs: config.timeoutMs } : {}),
   });
 
@@ -613,6 +618,7 @@ async function handleRunAgent(args) {
     resumeSession: config.resumeSession,
     sessionName: config.sessionName,
     reasoningEffort: config.reasoningEffort,
+    additionalMcpConfigs: config.additionalMcpConfigs,
     stdout,
     stderr,
   });

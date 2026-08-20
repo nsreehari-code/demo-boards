@@ -13,11 +13,20 @@ const provisioner = path.join(serverDirectory, 'scripts', 'provision-copilot-age
 test('Copilot provisioner creates an MCP-discoverable custom agent workspace', () => {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-provision-'));
   const workspace = path.join(temporaryDirectory, 'workspace');
+  const planPath = path.join(temporaryDirectory, 'plan.json');
+  fs.writeFileSync(planPath, JSON.stringify({
+    files: [
+      { path: '.github/agents/simple-chat.agent.md', content: '---\nname: simple-chat\n---\n\nThe host runtime validates and executes every tool call.\n' },
+      { path: '.github/copilot-instructions.md', content: '# Instructions\n' },
+      { path: '.github/hooks/session-logging.json', content: '{}\n' },
+      { path: '.github/skills/live-board-cards-soul/SKILL.md', content: '# Skill\n' },
+    ],
+  }), 'utf8');
   try {
     execFileSync(process.execPath, [
       provisioner,
+      '--plan', planPath,
       '--target-dir', workspace,
-      '--repo-name', 'provision-test',
     ], { stdio: 'pipe' });
 
     const agentPath = path.join(workspace, '.github', 'agents', 'simple-chat.agent.md');
@@ -32,8 +41,8 @@ test('Copilot provisioner creates an MCP-discoverable custom agent workspace', (
 
     const repeated = execFileSync(process.execPath, [
       provisioner,
+      '--plan', planPath,
       '--target-dir', workspace,
-      '--repo-name', 'provision-test',
       '--force',
     ], { encoding: 'utf8' });
     assert.match(repeated, /Unchanged: .*simple-chat\.agent\.md/);

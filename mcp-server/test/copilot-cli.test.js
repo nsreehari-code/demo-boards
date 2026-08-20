@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCopilotCommand } from '../../demo-board/server/lib/copilot-cli.js';
+import { PassThrough } from 'node:stream';
+import { EventEmitter } from 'node:events';
+
+import {
+  buildCopilotCommand,
+  runCopilot,
+} from '../../demo-board/server/lib/copilot-cli.js';
 
 test('buildCopilotCommand includes agent, files, and named session options', () => {
   const { args } = buildCopilotCommand({
@@ -12,6 +18,7 @@ test('buildCopilotCommand includes agent, files, and named session options', () 
     sessionName: 'review report',
     reasoningEffort: 'high',
     availableTools: ['read', 'search'],
+    additionalMcpConfigs: ['{"mcpServers":{"gik":{"url":"http://localhost:7801/mcp"}}}'],
     model: 'gpt-test',
   });
 
@@ -25,7 +32,32 @@ test('buildCopilotCommand includes agent, files, and named session options', () 
   assert.ok(args.includes('--add-dir'));
   assert.ok(args.includes('--attachment'));
   assert.ok(args.includes('--available-tools=read,search'));
+  assert.ok(args.includes('--additional-mcp-config'));
+  assert.ok(args.includes('{"mcpServers":{"gik":{"url":"http://localhost:7801/mcp"}}}'));
   assert.ok(args.includes('gpt-test'));
+});
+
+test('runCopilot terminates and settles when the CLI exceeds its timeout', async () => {
+  const child = new EventEmitter();
+  child.pid = 1234;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  let terminated = false;
+
+  const result = await runCopilot({
+    prompt: 'test',
+    timeoutMs: 5,
+    spawnProcess: () => child,
+    terminateProcess: () => {
+      terminated = true;
+      return true;
+    },
+  });
+
+  assert.equal(terminated, true);
+  assert.equal(result.code, 124);
+  assert.equal(result.timedOut, true);
+  assert.match(result.stderr, /timed out after 5ms/);
 });
 
 test('buildCopilotCommand supports native session resume selectors', () => {

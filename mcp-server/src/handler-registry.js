@@ -9,6 +9,7 @@ import { handleCopilotTool } from './handlers/copilot.js';
 import { handleFilesystemTool } from './handlers/filesystem.js';
 import { handleFeedsTool } from './handlers/feeds.js';
 import { handleThreatIntelTool } from './handlers/threat-intel.js';
+import { handleGikAgentTool } from './handlers/gik-agent.js';
 
 async function notImplemented(args, tool) {
   throw new Error(`Handler ${tool.handler} is not implemented yet`);
@@ -23,6 +24,7 @@ const HANDLERS = {
   'kusto': handleKustoTool,
   'lore': handleLoreTool,
   'copilot': handleCopilotTool,
+  'gik.agent': handleGikAgentTool,
   'mcp.proxy': handleRemoteMcpTool,
   'sentinel.login': handleSentinelLogin,
   'teams.graph': handleTeamsGraph,

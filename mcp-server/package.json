@@ -24,6 +24,7 @@
     "probe:finbook-workflows": "node scripts/probe-finbook-workflow-tools.js"
   },
   "dependencies": {
+    "@gik/agent-lifecycle-exp": "file:../../generative-interaction-kernel/packages/agent-lifecycle-exp",
     "@gik/durable-runtime": "file:vendor/gik-durable-runtime-0.7.0.tgz",
     "@modelcontextprotocol/sdk": "latest",
     "chokidar": "^4.0.3"

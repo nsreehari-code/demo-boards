@@ -4,291 +4,87 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import {
-  createSimpleChatAgentTemplate,
-  toCopilotAgentMarkdown,
-} from '../../../generative-interaction-kernel/packages/agent-lifecycle-exp/dist/index.js';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const defaultTargetDir = path.resolve(scriptDirectory, '..', '.copilot-workspace');
 
 function parseArgs(argv) {
-  const opts = {
+  const options = {
+    plan: process.env.COPILOT_PROVISIONING_PLAN,
     targetDir: defaultTargetDir,
-    repoName: 'demo-boards-copilot-workspace',
     dryRun: false,
     force: false,
   };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--plan') options.plan = argv[index += 1];
+    else if (argument === '--target-dir') options.targetDir = path.resolve(process.cwd(), argv[index += 1]);
+    else if (argument === '--dry-run') options.dryRun = true;
+    else if (argument === '--force') options.force = true;
+    else if (argument === '--help' || argument === '-h') {
+      console.log(`Usage: provision-copilot-agents.mjs --plan <plan.json> [options]\n\nOptions:\n  --target-dir <path>  Workspace directory\n  --dry-run            List planned files without writing\n  --force              Overwrite changed managed files\n`);
+      process.exit(0);
+    } else throw new Error(`Unknown argument: ${argument}`);
+  }
+  if (!options.plan) throw new Error('--plan or COPILOT_PROVISIONING_PLAN is required');
+  return options;
+}
 
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    const next = () => argv[i += 1];
-
-    switch (arg) {
-      case '--target-dir':
-        opts.targetDir = path.resolve(process.cwd(), next());
-        break;
-      case '--repo-name':
-        opts.repoName = next();
-        break;
-      case '--dry-run':
-        opts.dryRun = true;
-        break;
-      case '--force':
-        opts.force = true;
-        break;
-      case '--help':
-      case '-h':
-        printHelp();
-        process.exit(0);
-        break;
-      default:
-        throw new Error(`Unknown argument: ${arg}`);
+function readPlan(filePath) {
+  const plan = JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
+  if (!plan || !Array.isArray(plan.files) || plan.files.length === 0) {
+    throw new Error('Provisioning plan must contain a non-empty files array');
+  }
+  const paths = new Set();
+  for (const file of plan.files) {
+    if (!file || typeof file.path !== 'string' || !file.path.trim() || path.isAbsolute(file.path)) {
+      throw new Error('Each provisioning file requires a non-empty relative path');
     }
+    const normalized = path.normalize(file.path);
+    if (normalized === '..' || normalized.startsWith(`..${path.sep}`)) {
+      throw new Error(`Provisioning file escapes the workspace: '${file.path}'`);
+    }
+    if (typeof file.content !== 'string') throw new Error(`Provisioning file '${file.path}' requires string content`);
+    if (paths.has(normalized)) throw new Error(`Duplicate provisioning path '${file.path}'`);
+    paths.add(normalized);
   }
-
-  return opts;
+  return plan;
 }
 
-function printHelp() {
-  console.log(`Usage: node scripts/provision-copilot-agents.mjs [options]
-
-Creates a local GitHub Copilot workspace scaffold for MCP-backed agent execution.
-
-Options:
-  --target-dir <path>   Target directory (default: mcp-server/.copilot-workspace)
-  --repo-name <name>    Repository name metadata written into the generated files
-  --dry-run             Print the planned files without writing them
-  --force               Overwrite existing generated files
-  --help                Show this help
-`);
+function ensureDirectory(directory) {
+  fs.mkdirSync(directory, { recursive: true });
 }
 
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
+function initializeRepository(targetDir) {
+  if (fs.existsSync(path.join(targetDir, '.git'))) return;
+  execFileSync('git', ['init'], { cwd: targetDir, stdio: 'ignore' });
 }
 
 function writeIfChanged(filePath, content) {
-  ensureDir(path.dirname(filePath));
-  if (fs.existsSync(filePath)) {
-    const existing = fs.readFileSync(filePath, 'utf8');
-    if (existing === content) return false;
-  }
+  ensureDirectory(path.dirname(filePath));
+  if (fs.existsSync(filePath) && fs.readFileSync(filePath, 'utf8') === content) return false;
   fs.writeFileSync(filePath, content, 'utf8');
   return true;
 }
 
-function createCopilotInstructions(repoName) {
-  return `# ${repoName} — Copilot Workspace Instructions
+const options = parseArgs(process.argv.slice(2));
+const plan = readPlan(options.plan);
 
-This repository is configured to run a local Copilot-backed agent using the MCP service layer.
-
-## Operating model
-
-- The model proposes tool calls.
-- The host runtime owns validation and execution.
-- MCP transports are the bridge between the model and the runtime host, not the execution authority.
-- Keep tool calls narrow, explicit, and grounded in the repo state.
-
-## Local workspace rules
-
-- Prefer reading the current repo state before making assumptions.
-- Favor small, reviewable edits over broad rewrites.
-- Use the repo's existing tool contracts and source manifests instead of inventing new ones.
-- Keep generated artifacts in the repo and explain any agent-specific behaviors in this file.
-
-## Simple local chat agent
-
-The local Copilot agent should behave like a lightweight chat surface backed by the MCP tool chain.
-It must:
-
-- answer using the local repo state and the current request only
-- avoid making up facts, tool names, or schema fields
-- use available MCP tools for execution and validation
-- return a concise structured response with clear uncertainty when needed
-
-## Tooling conventions
-
-- Use repo-local skills from .github/skills before inventing new workflow patterns.
-- Use .github/hooks for session and tool logging when the agent lifecycle needs observability.
-- Keep hooks non-invasive and safe for local execution.
-`;
+if (options.dryRun) {
+  console.log(`Dry run: would provision ${plan.files.length} files under ${options.targetDir}`);
+  for (const file of plan.files) console.log(path.join(options.targetDir, file.path));
+  process.exit(0);
 }
 
-function createCopilotTools() {
-  const tool = (name, description) => ({
-    type: 'function',
-    name,
-    description,
-    parameters: { type: 'object', additionalProperties: true },
-    strict: true,
-  });
-  return [
-    tool('read_file', 'Read a repository file.'),
-    tool('search', 'Search the repository.'),
-    tool('list_dir', 'List a repository directory.'),
-    tool('run_in_terminal', 'Run a host-approved terminal command.'),
-    tool('edit_file', 'Apply a host-approved file edit.'),
-  ];
-}
-
-function createSessionHook() {
-  return `{
-  "version": 1,
-  "hooks": {
-    "sessionStart": [
-      {
-        "type": "command",
-        "bash": "mkdir -p logs && printf '%s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >> logs/copilot-session-start.log",
-        "powershell": "New-Item -ItemType Directory -Force -Path logs | Out-Null; Add-Content -Path logs/copilot-session-start.log -Value (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')",
-        "cwd": ".",
-        "timeoutSec": 10
-      }
-    ],
-    "sessionEnd": [
-      {
-        "type": "command",
-        "bash": "printf '%s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >> logs/copilot-session-end.log",
-        "powershell": "Add-Content -Path logs/copilot-session-end.log -Value (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')",
-        "cwd": ".",
-        "timeoutSec": 10
-      }
-    ]
+ensureDirectory(options.targetDir);
+initializeRepository(options.targetDir);
+for (const file of plan.files) {
+  const filePath = path.join(options.targetDir, file.path);
+  if (fs.existsSync(filePath) && !options.force) {
+    if (fs.readFileSync(filePath, 'utf8') === file.content) continue;
+    console.log(`Preserving existing file (use --force to overwrite): ${filePath}`);
+    continue;
   }
-}
-`;
-}
-
-function createToolHook() {
-  return `{
-  "version": 1,
-  "hooks": {
-    "preToolUse": [
-      {
-        "type": "command",
-        "bash": "echo \"tool-use-start\" >> logs/copilot-tool-events.log",
-        "powershell": "Add-Content -Path logs/copilot-tool-events.log -Value 'tool-use-start'",
-        "cwd": ".",
-        "timeoutSec": 10
-      }
-    ],
-    "postToolUse": [
-      {
-        "type": "command",
-        "bash": "echo \"tool-use-end\" >> logs/copilot-tool-events.log",
-        "powershell": "Add-Content -Path logs/copilot-tool-events.log -Value 'tool-use-end'",
-        "cwd": ".",
-        "timeoutSec": 10
-      }
-    ]
-  }
-}
-`;
-}
-
-function createSkillFile() {
-  return `# Live Board Cards Soul
-
-This skill captures the core operating model for live board and card work.
-
-## Principles
-
-- Treat cards as the first-class system object.
-- Read live board state before making a claim about the current situation.
-- Prefer repo-local and currently available state over assumptions.
-- Keep work scoped to the user's actual intent.
-- Separate observed facts from interpretation.
-
-## Execution guidance
-
-- Read the relevant card or board state before editing.
-- Validate changes with the smallest available proof.
-- Record assumptions clearly when the repo state is incomplete.
-- Use MCP-backed tools for operational execution, not ad hoc shell work when a repo tool exists.
-`;
-}
-
-function buildWorkspaceFiles(targetDir, repoName) {
-  return [
-    {
-      path: path.join(targetDir, '.github', 'copilot-instructions.md'),
-      content: createCopilotInstructions(repoName),
-    },
-    {
-      path: path.join(targetDir, '.github', 'agents', 'simple-chat.agent.md'),
-      content: toCopilotAgentMarkdown(createSimpleChatAgentTemplate({
-        workspaceName: repoName,
-        tools: createCopilotTools(),
-      }), { model: 'gpt-5.4' }),
-    },
-    {
-      path: path.join(targetDir, '.github', 'hooks', 'session-logging.json'),
-      content: createSessionHook(),
-    },
-    {
-      path: path.join(targetDir, '.github', 'hooks', 'tool-logging.json'),
-      content: createToolHook(),
-    },
-    {
-      path: path.join(targetDir, '.github', 'skills', 'live-board-cards-soul', 'SKILL.md'),
-      content: createSkillFile(),
-    },
-    {
-      path: path.join(targetDir, 'README.md'),
-      content: `# ${repoName}\n\nThis workspace is prepared for local Copilot CLI execution and repo-grounded chat tasks.\n\nGenerated by scripts/provision-copilot-agents.mjs.\n`,
-    },
-  ];
-}
-
-function initGitRepo(targetDir) {
-  if (!fs.existsSync(path.join(targetDir, '.git'))) {
-    try {
-      execFileSync('git', ['init'], { cwd: targetDir, stdio: 'inherit' });
-    } catch (error) {
-      console.warn(`git init failed for ${targetDir}: ${error.message}`);
-    }
-  }
-}
-
-function main() {
-  const opts = parseArgs(process.argv.slice(2));
-  const targetDir = opts.targetDir;
-
-  if (!opts.dryRun) {
-    ensureDir(targetDir);
-    initGitRepo(targetDir);
-  }
-
-  const files = buildWorkspaceFiles(targetDir, opts.repoName);
-
-  if (opts.dryRun) {
-    console.log(`Dry run: would create ${files.length} files under ${targetDir}`);
-    for (const file of files) {
-      console.log(file.path);
-    }
-    return;
-  }
-
-  for (const file of files) {
-    const existing = fs.existsSync(file.path);
-    if (existing && !opts.force) {
-      const current = fs.readFileSync(file.path, 'utf8');
-      if (current === file.content) {
-        continue;
-      }
-      console.log(`Preserving existing file (use --force to overwrite): ${file.path}`);
-      continue;
-    }
-    const changed = writeIfChanged(file.path, file.content);
-    console.log(`${changed ? 'Created/updated' : 'Unchanged'}: ${file.path}`);
-  }
-}
-
-try {
-  main();
-} catch (error) {
-  console.error(error.message);
-  process.exit(1);
+  const changed = writeIfChanged(filePath, file.content);
+  console.log(`${changed ? 'Created/updated' : 'Unchanged'}: ${filePath}`);
 }
