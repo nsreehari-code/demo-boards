@@ -6,6 +6,17 @@ import test from 'node:test';
 
 import { handleGikAgentTool } from '../src/handlers/gik-agent.js';
 
+test('describe manifest uses Foundry-compatible function parameters', () => {
+  const manifest = JSON.parse(fs.readFileSync(
+    new URL('../manifests/gik-agent-authoring.json', import.meta.url),
+    'utf8',
+  ));
+  assert.equal(
+    Object.hasOwn(manifest.tools[0].inputSchema.properties.capabilities, 'uniqueItems'),
+    false,
+  );
+});
+
 test('describe returns multiple capability contracts from the provisioned catalog', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'gik-capabilities-'));
   const catalogPath = path.join(directory, 'catalog.json');

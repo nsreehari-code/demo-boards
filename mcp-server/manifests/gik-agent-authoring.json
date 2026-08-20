@@ -27,8 +27,7 @@
           "capabilities": {
             "type": "array",
             "items": { "type": "string", "minLength": 1 },
-            "maxItems": 32,
-            "uniqueItems": true
+            "maxItems": 32
           }
         }
       }
